@@ -1,6 +1,6 @@
 import type { ModelMappingProvider } from '@ungate/shared/frontend';
 
-export type DashboardPage = 'analytics' | 'settings' | 'logs';
+export type DashboardPage = 'usage' | 'settings' | 'logs';
 
 interface WebviewState {
 	currentPage?: DashboardPage;
@@ -22,7 +22,7 @@ const vscodeApi = (
 	}
 ).acquireVsCodeApi?.();
 
-const dashboardPages: DashboardPage[] = ['analytics', 'settings', 'logs'];
+const dashboardPages: DashboardPage[] = ['usage', 'settings', 'logs'];
 const modelMappingProviders: ModelMappingProvider[] = ['claude', 'minimax', 'openai'];
 
 function readWebviewState(): WebviewState {
@@ -39,14 +39,17 @@ function updateWebviewState(update: Partial<WebviewState>): void {
 	vscodeApi?.setState({ ...readWebviewState(), ...update });
 }
 
-export function postExtensionMessage(message: { type: string; [key: string]: unknown }): void {
-	vscodeApi?.postMessage(message);
+export function postExtensionMessage(message: { type: string; [key: string]: unknown }): boolean {
+	if (!vscodeApi) return false;
+	vscodeApi.postMessage(message);
+
+	return true;
 }
 
 export function getSavedPage(): DashboardPage {
 	const page = readWebviewState().currentPage;
 
-	return page && dashboardPages.includes(page) ? page : 'analytics';
+	return page && dashboardPages.includes(page) ? page : 'settings';
 }
 
 export function savePage(currentPage: DashboardPage): void {

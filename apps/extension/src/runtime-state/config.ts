@@ -12,7 +12,7 @@ export const config = {
 	},
 	runtimeState: {
 		// Max age for a client heartbeat before the window is considered stale.
-		staleClientMs: 5000,
+		staleClientMs: 30000,
 		// Max time to wait for lock acquisition before forcing lock recovery.
 		lockTimeoutMs: 1500,
 		// Minimum interval between heartbeat writes for the same window.
@@ -43,13 +43,5 @@ export const config = {
 		tunnelWaitTimeoutMs: 30000,
 		// Poll interval while waiting for tunnel URL readiness.
 		tunnelWaitPollIntervalMs: 250
-	},
-	openAiKeyFix: {
-		// Delay before first key-fix check after monitor startup.
-		initialCheckMs: 3000,
-		// Debounce delay for filesystem-triggered key-fix checks.
-		debounceMs: 1000,
-		// Periodic polling interval for key-fix consistency checks.
-		pollMs: 5000
 	}
 };

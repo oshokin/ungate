@@ -29,16 +29,17 @@
 		"lib"
 	],
 	"scripts": {
-		"build": "pnpm run clean && tsup",
+		"build": "node -e \"require('node:fs').rmSync('lib',{recursive:true,force:true})\" && tsup",
 		"build:watch": "pnpm run clean && tsup --watch",
-		"clean": "rm -rf lib",
+		"clean": "node -e \"require('node:fs').rmSync('lib',{recursive:true,force:true})\"",
 		"lint": "eslint .",
 		"lint:fix": "eslint . --fix"
 	},
 	"devDependencies": {
 		"@ungate/dev-kit": "workspace:*",
 		"tsup": "~8.5.1",
-		"typescript": "~5.7.0"
+		"typescript": "~5.7.0",
+		"@types/node": "~22.15.35"
 	},
 	"dependencies": {
 		"zod": "~4.3.6"

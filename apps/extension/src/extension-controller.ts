@@ -1,25 +1,30 @@
 import * as path from 'node:path';
 
+import { getAdminToken } from '@ungate/shared';
 import {
-	DEFAULT_KEY_FIX_ENABLED,
-	sleep,
+	dashboardActions,
+	describeService,
+	UNGATE_VERSION,
+	type DashboardAction,
+	type ServiceState,
 	type ApiStatus as ApiLifecycleStatus,
-	type RuntimeCommandAction,
 	type RuntimeState,
+	type LogEntry,
 	type TunnelState
 } from '@ungate/shared/frontend';
 import * as vscode from 'vscode';
 
 import { ApiServer } from './api-server';
+import { openCursorModels } from './cursor-settings';
 import { Dashboard, type Msg } from './dashboard';
 import { extensionCommands } from './extension-commands';
-import { ExtensionStatusBar } from './extension-status-bar';
-import { OpenAiKeyFix } from './openai-key-fix';
+import { ExtensionStatusBar, type UngateConnectionStatus } from './extension-status-bar';
+import { readApiHealth } from './local-api';
 import { RuntimeStateStore } from './runtime-state';
 import { config } from './runtime-state/config';
+import { SharedServiceController } from './shared-service-controller';
 import { TunnelManager } from './tunnel-manager';
-
-import type { LogEntry } from './utils/log-ring-buffer';
+import { CrossProcessLock } from './utils/cross-process-lock';
 
 export class ExtensionController {
 	private outputChannel!: vscode.OutputChannel;
@@ -27,16 +32,28 @@ export class ExtensionController {
 	private dashboard!: Dashboard;
 	private tunnelManager!: TunnelManager;
 	private apiServer!: ApiServer;
-	private keyFix!: OpenAiKeyFix;
+	private services!: SharedServiceController;
+	private actionInProgress = false;
+	private serviceState: ServiceState = {
+		status: 'checking',
+		version: null,
+		expectedVersion: UNGATE_VERSION,
+		canUpdate: false,
+		message: null
+	};
+
 	private currentPort: number | null = null;
 	private lastApiStatus: ApiLifecycleStatus | null = null;
+	private lastApiError: string | null = null;
 	private currentTunnelState: TunnelState = { status: 'stopped', url: null, error: null };
+	private lastConnectionStatus: UngateConnectionStatus | null = null;
+	private statusBarWarningTimer: NodeJS.Timeout | null = null;
 	private readonly windowId = `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 	private heartbeatTimer: NodeJS.Timeout | null = null;
 	private syncTimer: NodeJS.Timeout | null = null;
 	private runtimeStateWatcher: vscode.FileSystemWatcher | null = null;
 	private runtimeStateSyncDebounce: NodeJS.Timeout | null = null;
-	private lastCommandId: string | null = null;
+	private syncing = false;
 	private extensionHostActive = false;
 
 	constructor(private readonly context: vscode.ExtensionContext) {}
@@ -53,19 +70,6 @@ export class ExtensionController {
 		this.dashboard = new Dashboard(this.context, (message) => {
 			this.handleDashboardMessage(message);
 		});
-		this.keyFix = new OpenAiKeyFix(
-			this.context,
-			(enabled) => {
-				this.dashboard.sendKeyFixState(enabled);
-				this.updateStatusBar();
-			},
-			(message) => {
-				this.log(message);
-			},
-			() => {
-				return this.isLeaderWindow();
-			}
-		);
 
 		this.tunnelManager = new TunnelManager(
 			this.windowId,
@@ -107,27 +111,27 @@ export class ExtensionController {
 			this.dashboard.show();
 		});
 
-		const copyTunnelUrl = vscode.commands.registerCommand(extensionCommands.copyTunnelUrl, () => {
-			void this.copyTunnelUrlFromCommand();
-		});
-
-		const restartTunnel = vscode.commands.registerCommand(extensionCommands.restartTunnel, () => {
-			void this.restartTunnelFromStatusBar();
-		});
-		const toggleKeyFix = vscode.commands.registerCommand(extensionCommands.toggleKeyFix, () => {
-			void this.setKeyFixByUser(!this.keyFix.isEnabled());
-		});
-
-		this.context.subscriptions.push(openDashboard, copyTunnelUrl, restartTunnel, toggleKeyFix);
+		this.services = new SharedServiceController(
+			this.apiServer,
+			this.tunnelManager,
+			this.windowId,
+			() => this.extensionHostActive
+		);
+		this.context.subscriptions.push(openDashboard);
+		for (const [action, definition] of Object.entries(dashboardActions)) {
+			this.context.subscriptions.push(
+				vscode.commands.registerCommand(definition.command, () =>
+					this.runAction(action as DashboardAction).catch((error: unknown) => {
+						void vscode.window.showErrorMessage(`Ungate: ${this.formatError(error)}`);
+					})
+				)
+			);
+		}
 
 		this.startHeartbeat();
 		this.startRuntimeSync();
 		this.startRuntimeStateWatch();
-		void this.bootstrapRuntime()
-			.then(() => this.keyFix.activate())
-			.catch((error: unknown) => {
-				this.log(`[openai-key-fix] activation failed: ${this.formatError(error)}`);
-			});
+		void this.bootstrapRuntime().catch((error: unknown) => this.log(`[startup] ${this.formatError(error)}`));
 
 		this.context.subscriptions.push({
 			dispose: () => {
@@ -140,10 +144,10 @@ export class ExtensionController {
 		this.extensionHostActive = false;
 		void RuntimeStateStore.removeClient(this.windowId).catch(() => {});
 
-		const disposeState = RuntimeStateStore.read();
-		if (this.isLeaderWindow(disposeState)) {
-			void this.apiServer.stop().catch(() => {});
-		}
+		// Detached services survive an extension-host reload and a window closing.
+		// The next live window attaches to them instead of interrupting other chats.
+		this.apiServer?.detach();
+		this.tunnelManager?.syncMonitor(false);
 
 		if (this.heartbeatTimer) {
 			clearInterval(this.heartbeatTimer);
@@ -160,17 +164,14 @@ export class ExtensionController {
 			this.runtimeStateSyncDebounce = null;
 		}
 
+		if (this.statusBarWarningTimer) {
+			clearTimeout(this.statusBarWarningTimer);
+			this.statusBarWarningTimer = null;
+		}
+
 		if (this.runtimeStateWatcher) {
 			this.runtimeStateWatcher.dispose();
 			this.runtimeStateWatcher = null;
-		}
-
-		this.keyFix?.stop();
-		const stateAfterStop = RuntimeStateStore.read();
-		const hasLiveClients = RuntimeStateStore.hasLiveClients(stateAfterStop);
-
-		if (!hasLiveClients) {
-			this.tunnelManager?.stop();
 		}
 	}
 
@@ -200,25 +201,54 @@ export class ExtensionController {
 		return `${baseUrl}/v1`;
 	}
 
+	private getLocalApiUrl(): string | null {
+		return this.currentPort ? `http://127.0.0.1:${this.currentPort}` : null;
+	}
+
 	private updateStatusBar(): void {
 		const apiState = this.lastApiStatus ?? 'stopped';
 		const tunnel = this.currentTunnelState;
 		const tunnelApiUrl = this.getTunnelApiUrl();
-		const keyFixEnabled = this.keyFix?.isEnabled() ?? DEFAULT_KEY_FIX_ENABLED;
+		const status = ExtensionStatusBar.connectionStatus(apiState, tunnel);
+		const becameOffline = this.lastConnectionStatus === 'ready' && status === 'offline' && !this.actionInProgress;
 
-		this.statusBar.text = ExtensionStatusBar.barText(apiState, tunnel);
-		this.statusBar.tooltip = ExtensionStatusBar.createTooltip(apiState, tunnel, tunnelApiUrl, keyFixEnabled);
+		if (becameOffline) this.scheduleWarningBackgroundReset();
+
+		this.statusBar.text = ExtensionStatusBar.statusText(status);
+		this.statusBar.accessibilityInformation = {
+			label: ExtensionStatusBar.accessibilityLabel(status)
+		};
+		this.statusBar.tooltip = ExtensionStatusBar.createTooltip(
+			status,
+			apiState,
+			this.getLocalApiUrl(),
+			this.lastApiError,
+			tunnel,
+			tunnelApiUrl
+		);
+		this.statusBar.backgroundColor =
+			status === 'offline' && this.statusBarWarningTimer ? new vscode.ThemeColor('statusBarItem.warningBackground') : undefined;
 		this.statusBar.show();
+
+		if (becameOffline) {
+			void vscode.window.showWarningMessage('Ungate tunnel is unavailable. Custom Ungate models may fail.');
+		}
+
+		if (status !== 'connecting') this.lastConnectionStatus = status;
 	}
 
 	private applyApiServerStatus(state: ApiLifecycleStatus): void {
 		this.lastApiStatus = state;
+		if (state === 'running') this.lastApiError = null;
 		this.updateStatusBar();
 	}
 
-	private reportTunnelError(logLine: string, dashboardMessage: string): void {
-		this.log(logLine);
-		this.dashboard.pushLog('tunnel', { timestamp: Date.now(), level: 'error', message: dashboardMessage });
+	private scheduleWarningBackgroundReset(): void {
+		if (this.statusBarWarningTimer) clearTimeout(this.statusBarWarningTimer);
+		this.statusBarWarningTimer = setTimeout(() => {
+			this.statusBarWarningTimer = null;
+			this.statusBar.backgroundColor = undefined;
+		}, 8000);
 	}
 
 	private handleApiServerPortDetected(port: number): void {
@@ -228,17 +258,6 @@ export class ExtensionController {
 		if (isNew) {
 			this.log(`[port] detected: ${port}`);
 			this.dashboard.setPort(port);
-		}
-
-		if (this.lastApiStatus === 'running') {
-			const tunnelState = this.tunnelManager.getState();
-
-			if (tunnelState.status === 'running') {
-				void this.tunnelManager.restart(port).catch((err: unknown) => {
-					const message = this.formatError(err);
-					this.reportTunnelError(`[tunnel] restart failed after port update: ${message}`, `Restart failed: ${message}`);
-				});
-			}
 		}
 	}
 
@@ -250,155 +269,123 @@ export class ExtensionController {
 		this.applyApiServerStatus(status);
 	}
 
-	private restartTunnelFromStatusBar(): void {
-		const runtimeState = RuntimeStateStore.read();
-		const runtimePort = runtimeState.api.port ?? this.currentPort;
+	private async runAction(action: DashboardAction): Promise<void> {
+		if (this.actionInProgress) throw new Error('Another Ungate action is still running.');
+		this.actionInProgress = true;
+		try {
+			if (action === 'open-cursor-models') return await openCursorModels();
+			if (action === 'reload-window') {
+				await vscode.commands.executeCommand('workbench.action.reloadWindow');
 
-		if (!runtimePort) {
-			void vscode.window.showWarningMessage('Cannot start tunnel: API is not running yet.');
-
-			return;
-		}
-
-		const port = runtimePort;
-
-		this.log(`[tunnel] restart requested from status bar (port ${port})`);
-		this.enqueueCommand('restart-tunnel');
-	}
-
-	private async waitForTunnelUrl(timeoutMs = config.extensionController.tunnelWaitTimeoutMs): Promise<string> {
-		const startedAt = Date.now();
-
-		while (Date.now() - startedAt < timeoutMs) {
-			const state = this.tunnelManager.getState();
-
-			if (state.status === 'running' && state.url) {
-				return state.url;
+				return;
 			}
+			if (action === 'copy-tunnel-url') {
+				const url = this.getTunnelApiUrl();
+				if (!url) throw new Error('Start the tunnel before copying its URL.');
+				await vscode.env.clipboard.writeText(url);
 
-			if (state.status === 'error') {
-				throw new Error(state.error ?? 'Tunnel failed to start.');
+				return;
 			}
+			if (action === 'copy-api-key') {
+				const port = RuntimeStateStore.read().api.port;
+				if (!port) throw new Error('Start the API before copying its key.');
+				const response = await fetch(`http://127.0.0.1:${port}/settings`, {
+					headers: { Authorization: `Bearer ${getAdminToken()}` },
+					redirect: 'error',
+					signal: AbortSignal.timeout(3000)
+				});
+				if (!response.ok) throw new Error(`Cannot read the saved API key: HTTP ${response.status}`);
+				const raw: unknown = await response.json();
+				const settings = raw as { apiKey?: unknown };
+				if (typeof settings.apiKey !== 'string' || !settings.apiKey.trim()) throw new Error('Save an API key first.');
+				await vscode.env.clipboard.writeText(settings.apiKey);
 
-			await sleep(config.extensionController.tunnelWaitPollIntervalMs);
+				return;
+			}
+			if (
+				action === 'stop-services' ||
+				action === 'restart-services' ||
+				action === 'restart-tunnel' ||
+				action === 'stop-tunnel'
+			) {
+				const choice = await vscode.window.showWarningMessage(
+					`${dashboardActions[action].title}? Active Ungate chats in every window may be interrupted.`,
+					{ modal: true },
+					'Continue'
+				);
+				if (choice !== 'Continue') throw new Error('Action cancelled.');
+			}
+			await this.services.run(action);
+			await this.syncFromRuntimeState();
+		} finally {
+			this.actionInProgress = false;
 		}
-
-		throw new Error('Timed out while waiting for tunnel URL.');
-	}
-
-	private async copyTunnelUrlFromCommand(): Promise<void> {
-		const url = this.getTunnelApiUrl();
-
-		if (!url) {
-			void vscode.window.showWarningMessage('No tunnel URL yet. Start the tunnel from the menu or dashboard.');
-
-			return;
-		}
-
-		await vscode.env.clipboard.writeText(url);
-		void vscode.window.showInformationMessage('Tunnel URL copied to clipboard.');
 	}
 
 	private handleDashboardMessage(message: Msg): void {
+		if (message.type === 'dashboard-action') {
+			void this.runAction(message.action).then(
+				() => this.dashboard.sendActionResult(message.id),
+				(error: unknown) => this.dashboard.sendActionResult(message.id, this.formatError(error))
+			);
+
+			return;
+		}
 		if (message.type === 'open-external-url') {
-			void vscode.env.openExternal(vscode.Uri.parse(message.url));
+			const uri = vscode.Uri.parse(message.url);
+			if (uri.scheme === 'https' || uri.scheme === 'http') void vscode.env.openExternal(uri);
 
 			return;
 		}
-
 		if (message.type === 'webview-ready') {
-			this.dashboard.sendInitialState(this.tunnelManager.getState());
-			this.dashboard.sendKeyFixState(this.keyFix.isEnabled());
+			this.dashboard.sendInitialState(this.currentTunnelState);
+			this.dashboard.sendServiceState(this.serviceState);
 
 			return;
 		}
-
-		if (message.type === 'restart-server') {
-			this.enqueueCommand('restart-api');
-
-			return;
-		}
-
-		if (message.type === 'start-tunnel') {
-			this.enqueueCommand('start-tunnel');
-
-			return;
-		}
-
-		if (message.type === 'stop-tunnel') {
-			this.enqueueCommand('stop-tunnel');
-
-			return;
-		}
-
-		if (message.type === 'restart-tunnel') {
-			this.enqueueCommand('restart-tunnel');
-
-			return;
-		}
-
-		if (message.type === 'set-key-fix-enabled') {
-			void this.setKeyFixByUser(message.enabled);
-
-			return;
-		}
-
-		if (message.type === 'clear-logs') {
-			this.dashboard.clearLogs(message.source);
-			this.enqueueCommand('clear-logs', { logSource: message.source });
-		}
-	}
-
-	private async setKeyFixByUser(enabled: boolean): Promise<void> {
-		try {
-			await this.keyFix.setEnabledByUser(enabled);
-		} catch (error: unknown) {
-			void vscode.window.showErrorMessage(`OpenAI API Key auto-fix unavailable: ${this.formatError(error)}`);
-			this.dashboard.sendKeyFixState(false);
-			this.updateStatusBar();
-
-			return;
-		}
-
-		this.dashboard.sendKeyFixState(enabled);
-		this.updateStatusBar();
-		let message = 'OpenAI API Key auto-fix disabled.';
-
-		if (enabled) {
-			message = 'OpenAI API Key auto-fix enabled.';
-		}
-
-		void vscode.window.showInformationMessage(message);
-	}
-
-	private handleDashboardStartTunnel(): void {
-		if (this.currentPort) {
-			this.log(`[tunnel] start requested on port ${this.currentPort}`);
-			void this.tunnelManager.start(this.currentPort).catch((err: unknown) => {
-				const message = this.formatError(err);
-				this.reportTunnelError(`[tunnel] start failed: ${message}`, `Start failed: ${message}`);
+		// Older dashboards can still finish their save/restart flow during transition.
+		const legacyActions = {
+			'restart-server': 'restart-services',
+			'start-tunnel': 'start-tunnel',
+			'stop-tunnel': 'stop-tunnel',
+			'restart-tunnel': 'restart-tunnel'
+		} as const;
+		if (message.type in legacyActions) {
+			void this.runAction(legacyActions[message.type as keyof typeof legacyActions]).catch((error: unknown) => {
+				void vscode.window.showErrorMessage(`Ungate: ${this.formatError(error)}`);
 			});
 
 			return;
 		}
-
-		this.log('[tunnel] start requested but no port available');
-		this.dashboard.pushLog('tunnel', {
-			timestamp: Date.now(),
-			level: 'error',
-			message: 'Cannot start tunnel: API not running'
-		});
+		if (message.type === 'clear-logs') this.dashboard.clearLogs(message.source);
 	}
 
-	private handleDashboardRestartTunnel(): void {
-		if (!this.currentPort) {
-			return;
+	private async updateServiceState(state: RuntimeState): Promise<void> {
+		let service: ServiceState;
+		if (!state.api.port) {
+			service = {
+				status: state.api.status === 'starting' ? 'checking' : state.api.status === 'error' ? 'error' : 'stopped',
+				version: null,
+				expectedVersion: UNGATE_VERSION,
+				canUpdate: false,
+				message: state.api.lastError
+			};
+		} else {
+			try {
+				const health = await readApiHealth(state.api.port);
+				service = describeService(health);
+			} catch {
+				service = {
+					status: 'error',
+					version: null,
+					expectedVersion: UNGATE_VERSION,
+					canUpdate: false,
+					message: state.api.lastError ?? 'The shared API is not responding. Restart it or open Logs.'
+				};
+			}
 		}
-
-		void this.tunnelManager.restart(this.currentPort).catch((err: unknown) => {
-			const message = this.formatError(err);
-			this.reportTunnelError(`[tunnel] restart failed: ${message}`, `Restart failed: ${message}`);
-		});
+		this.serviceState = service;
+		this.dashboard.sendServiceState(service);
 	}
 
 	private startHeartbeat(): void {
@@ -438,140 +425,105 @@ export class ExtensionController {
 
 	private async bootstrapRuntime(): Promise<void> {
 		await RuntimeStateStore.touchClient(this.windowId);
-		const runtimeState = await RuntimeStateStore.prepareApiForBootstrap();
-		this.startApiAsLeaderIfNeeded(runtimeState);
+		await RuntimeStateStore.prepareApiForBootstrap();
 		await this.syncFromRuntimeState();
 	}
 
 	private async syncFromRuntimeState(): Promise<void> {
-		let runtimeState = RuntimeStateStore.read();
-		const liveClientIds = RuntimeStateStore.getLiveClientIds(runtimeState);
+		if (this.syncing || !this.extensionHostActive) return;
+		this.syncing = true;
+		try {
+			let runtimeState = RuntimeStateStore.read();
+			const liveClientIds = RuntimeStateStore.getLiveClientIds(runtimeState);
 
-		if (!liveClientIds.includes(this.windowId)) {
-			runtimeState = await RuntimeStateStore.touchClient(this.windowId);
+			if (!liveClientIds.includes(this.windowId)) {
+				runtimeState = await RuntimeStateStore.touchClient(this.windowId);
+			}
+
+			await this.tunnelManager.reconcile();
+			runtimeState = RuntimeStateStore.read();
+			runtimeState = await RuntimeStateStore.reconcileOrphanedTunnel(runtimeState);
+
+			this.applyRuntimeState(runtimeState);
+			this.apiServer.syncLeaderHealthMonitor(this.isLeaderWindow(runtimeState));
+			this.tunnelManager.syncMonitor(this.isLeaderWindow(runtimeState));
+			this.startApiAsLeaderIfNeeded(runtimeState);
+			await this.updateServiceState(runtimeState);
+			await this.tryHandleCommand();
+		} finally {
+			this.syncing = false;
 		}
-
-		runtimeState = await RuntimeStateStore.reconcileOrphanedTunnel(runtimeState);
-
-		await this.keyFix.applySharedState(runtimeState.keyFix.enabled);
-		this.applyRuntimeState(runtimeState);
-		this.apiServer.syncLeaderHealthMonitor(this.isLeaderWindow(runtimeState));
-		this.tryHandleCommand(runtimeState);
 	}
 
 	private applyRuntimeState(runtimeState: RuntimeState): void {
-		const resolvedPort = runtimeState.api.port ?? this.apiServer.getPort() ?? this.currentPort;
+		const resolvedPort =
+			runtimeState.api.startSuppressed && runtimeState.api.status === 'stopped'
+				? null
+				: (runtimeState.api.port ?? this.apiServer.getPort() ?? this.currentPort);
 
 		this.currentPort = resolvedPort;
 		this.lastApiStatus = runtimeState.api.status;
+		this.lastApiError = runtimeState.api.lastError;
 		this.currentTunnelState = {
 			status: runtimeState.tunnel.status,
 			url: runtimeState.tunnel.url,
-			error: runtimeState.tunnel.lastError
+			error: runtimeState.tunnel.lastError,
+			publicStatus: runtimeState.tunnel.publicStatus ?? 'unchecked',
+			publicCheckedAt: runtimeState.tunnel.publicCheckedAt ?? null,
+			publicError: runtimeState.tunnel.publicError ?? null,
+			startedAt: runtimeState.tunnel.startedAt ?? null
 		};
 		this.dashboard.setPort(this.currentPort);
 		this.dashboard.sendTunnelState(this.currentTunnelState);
-		this.dashboard.sendKeyFixState(this.keyFix.isEnabled());
 		this.updateStatusBar();
 	}
 
-	private enqueueCommand(action: RuntimeCommandAction, payload: { port?: number; logSource?: 'api' | 'tunnel' } = {}): void {
-		void RuntimeStateStore.enqueueCommand({
-			id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-			action,
-			createdAt: Date.now(),
-			originWindowId: this.windowId,
-			payload: {
-				port: this.currentPort ?? undefined,
-				...payload
+	private async tryHandleCommand(): Promise<void> {
+		if (!this.isLeaderWindow() || !RuntimeStateStore.peekCommand()) return;
+		const release = await CrossProcessLock.acquire('commands.lock', 120000);
+		try {
+			if (!this.extensionHostActive || !this.isLeaderWindow()) return;
+			const command = RuntimeStateStore.peekCommand();
+			if (!command) return;
+			try {
+				const port = RuntimeStateStore.read().api.port;
+				switch (command.action) {
+					case 'stop-services':
+						await RuntimeStateStore.mutate((current) => {
+							current.api.startSuppressed = true;
+
+							return current;
+						});
+						await this.tunnelManager.stop();
+						await this.apiServer.stop();
+						break;
+					case 'restart-api':
+						await this.apiServer.restart();
+						break;
+					case 'start-tunnel':
+						if (!port) throw new Error('API is not ready. Wait for API: running.');
+						await this.tunnelManager.start(port);
+						break;
+					case 'restart-tunnel':
+						if (!port) throw new Error('API is not ready. Wait for API: running.');
+						await this.tunnelManager.restart(port);
+						break;
+					case 'stop-tunnel':
+						await this.tunnelManager.stop();
+						break;
+					case 'clear-logs':
+						if (command.payload?.logSource) this.dashboard.clearLogs(command.payload.logSource);
+				}
+			} catch (error) {
+				const message = `${command.action} failed: ${this.formatError(error)}`;
+				this.log(message);
+				this.dashboard.pushLog('api', { timestamp: Date.now(), level: 'error', message });
+				void vscode.window.showErrorMessage(`Ungate: ${message}`);
 			}
-		}).catch(() => {});
-	}
-
-	private tryHandleCommand(runtimeState: RuntimeState): void {
-		const command = RuntimeStateStore.peekCommand();
-
-		if (!command) {
-			return;
+			await RuntimeStateStore.removeCommand(command.id);
+		} finally {
+			release();
 		}
-
-		if (command.id === this.lastCommandId) {
-			return;
-		}
-
-		if (command.originWindowId === this.windowId) {
-			this.lastCommandId = command.id;
-		}
-
-		const tunnelOwner = runtimeState.tunnel.ownerWindowId;
-		const ownerIsLive = tunnelOwner !== null && RuntimeStateStore.getLiveClientIds(runtimeState).includes(tunnelOwner);
-		const shouldHandleTunnelCommand = ownerIsLive ? tunnelOwner === this.windowId : this.isLeaderWindow(runtimeState);
-
-		if (command.action === 'restart-api') {
-			if (!this.isLeaderWindow(runtimeState)) {
-				return;
-			}
-
-			void this.apiServer.restart().catch((err: unknown) => {
-				this.log(`[process] restart-api failed: ${this.formatError(err)}`);
-			});
-			this.ackCommand(command.id);
-
-			return;
-		}
-
-		if (command.action === 'clear-logs') {
-			const logSource = command.payload?.logSource;
-
-			if (logSource === 'api' || logSource === 'tunnel') {
-				this.dashboard.clearLogs(logSource);
-			}
-
-			this.ackCommand(command.id);
-
-			return;
-		}
-
-		if (!shouldHandleTunnelCommand) {
-			return;
-		}
-
-		if (command.action === 'start-tunnel') {
-			if (this.currentPort) {
-				void this.tunnelManager.start(this.currentPort).catch((err: unknown) => {
-					const message = this.formatError(err);
-					this.reportTunnelError(`[tunnel] start failed: ${message}`, `Start failed: ${message}`);
-				});
-			}
-
-			this.ackCommand(command.id);
-
-			return;
-		}
-
-		if (command.action === 'stop-tunnel') {
-			this.tunnelManager.stop();
-			this.ackCommand(command.id);
-
-			return;
-		}
-
-		if (command.action === 'restart-tunnel') {
-			const commandPort = command.payload?.port ?? this.currentPort;
-			if (commandPort) {
-				void this.tunnelManager.restart(commandPort).catch((err: unknown) => {
-					const message = this.formatError(err);
-					this.reportTunnelError(`[tunnel] restart failed: ${message}`, `Restart failed: ${message}`);
-				});
-			}
-
-			this.ackCommand(command.id);
-		}
-	}
-
-	private ackCommand(commandId: string): void {
-		this.lastCommandId = commandId;
-		void RuntimeStateStore.removeCommand(commandId).catch(() => {});
 	}
 
 	private isLeaderWindow(runtimeState?: RuntimeState): boolean {
@@ -582,11 +534,11 @@ export class ExtensionController {
 	}
 
 	private startApiAsLeaderIfNeeded(runtimeState: RuntimeState): void {
-		if (!this.isLeaderWindow(runtimeState)) {
+		if (this.actionInProgress || !this.isLeaderWindow(runtimeState)) {
 			return;
 		}
 
-		if (this.apiServer.getPort() || this.apiServer.isStartupInProgress()) {
+		if ((this.apiServer.getPort() && runtimeState.api.status === 'running') || this.apiServer.isStartupInProgress()) {
 			return;
 		}
 
@@ -598,6 +550,7 @@ export class ExtensionController {
 			const message = this.formatError(err);
 			this.log(`[process] leader start failed: ${message}`);
 			this.dashboard.pushLog('api', { timestamp: Date.now(), level: 'error', message });
+			this.lastApiError = message;
 			this.applyApiServerStatus('error');
 		});
 	}

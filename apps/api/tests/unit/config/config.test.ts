@@ -17,6 +17,7 @@ describe('config', () => {
 			extraInstruction: '',
 			claudeCliVersionMode: 'stable',
 			claudeCliVersionCustom: null,
+			tunnelProtocol: 'http2',
 			models: []
 		});
 
@@ -33,6 +34,7 @@ describe('config', () => {
 			extraInstruction: null,
 			claudeCliVersionMode: 'stable',
 			claudeCliVersionCustom: null,
+			tunnelProtocol: 'http2',
 			models: []
 		});
 
@@ -49,6 +51,7 @@ describe('config', () => {
 			extraInstruction: null,
 			claudeCliVersionMode: 'stable',
 			claudeCliVersionCustom: null,
+			tunnelProtocol: 'http2',
 			models: []
 		});
 

@@ -7,6 +7,7 @@ export default mergeConfig(baseConfig, {
 	test: {
 		dir: 'tests/integration',
 		fileParallelism: false,
+		silent: 'passed-only',
 		include: ['tests/integration/**/*.test.ts'],
 		setupFiles: ['tests/integration/vitest.setup.ts'],
 		globalSetup: ['tests/integration/global-setup.ts'],

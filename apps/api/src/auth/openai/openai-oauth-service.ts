@@ -13,6 +13,7 @@ import type { OAuthCredentials } from '../base-provider';
 import type { ServerResponse } from 'node:http';
 
 export class OpenAIOAuthService {
+	private static readonly refreshFlights = new Map<string, Promise<OAuthCredentials | null>>();
 	static {
 		OpenAIPkceSessionStore.startCleanup();
 	}
@@ -105,7 +106,19 @@ export class OpenAIOAuthService {
 		return this.refreshToken(credentials.refreshToken ?? '');
 	}
 
-	public static async refreshToken(refreshTokenValue: string): Promise<OAuthCredentials | null> {
+	static refreshToken(refreshTokenValue: string): Promise<OAuthCredentials | null> {
+		const active = this.refreshFlights.get(refreshTokenValue);
+		if (active) return active;
+		const flight = this.performRefresh(refreshTokenValue).finally(() => {
+			this.refreshFlights.delete(refreshTokenValue);
+		});
+		this.refreshFlights.set(refreshTokenValue, flight);
+
+		return flight;
+	}
+
+	private static async performRefresh(refreshTokenValue: string): Promise<OAuthCredentials | null> {
+		const owner = ProviderSettings.get('openai');
 		logger.log('Refreshing OpenAI token...');
 		const tokens = await OpenAIOAuthClient.refreshToken(refreshTokenValue);
 
@@ -114,9 +127,16 @@ export class OpenAIOAuthService {
 		}
 
 		const existingCredentials = ProviderSettings.get('openai');
+		if (
+			!existingCredentials ||
+			existingCredentials.accessToken !== owner?.accessToken ||
+			existingCredentials.refreshToken !== refreshTokenValue
+		)
+			return null;
+		if (typeof tokens.access_token !== 'string' || !tokens.access_token.trim()) return null;
 		const expiresIn = typeof tokens.expires_in === 'number' ? tokens.expires_in : 3600;
 		const credentials: OAuthCredentials = {
-			accessToken: tokens.access_token as string,
+			accessToken: tokens.access_token,
 			refreshToken: (tokens.refresh_token as string | null) ?? refreshTokenValue,
 			expiresAt: Date.now() + expiresIn * 1000,
 			email: existingCredentials?.email ?? undefined,

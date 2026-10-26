@@ -1,8 +1,20 @@
 # Changelog
 
-## 1.7.14 - 2026-10-11
+## 1.7.14 - 2026-10-25 (oshokin fork)
 
-- Add Claude Code version selector for Claude models that require a newer version
+- Incorporate upstream 1.7.14, Remote SSH dashboard port mapping, and preservation of parallel Claude tool calls.
+- Protect model traffic with API keys and management routes with a separate local capability; bind administration to IPv4 loopback.
+- Move dashboard requests through a validated extension-host bridge so the webview never receives the administrative token.
+- Coordinate API and tunnel processes across Cursor windows with lifecycle locks, leader recovery, explicit replacement, and reliable Stop all behavior.
+- Add release and protocol compatibility checks with recovery actions for an outdated shared API.
+- Remove the Cursor database reader, downloaded sqlite3 CLI, OpenAI key-toggle loop, billing guard, and their compatibility migrations.
+- Replace routing toggles with explicit Models navigation and concise `Ready`, `Connecting`, and `Offline` connection status.
+- Remove request analytics, history, cost estimates, and charts; add memory-only subscription usage with explicit unavailable and error states.
+- Add provider model discovery and reconciliation while preserving user-defined model mappings.
+- Harden OAuth refresh, Codex usage and reasoning handling, and interrupted Claude, MiniMax, and Codex streams.
+- Redesign the dashboard around Connection, Usage, Logs, responsive settings, and editor theme tokens.
+- Verify downloaded native artifacts against pinned SHA-256 allowlists before installation or execution.
+- Add portable Node 24 build and CI pipelines, isolated VSIX staging and verification, packaged API smoke tests, process coordination tests, and browser regressions.
 
 ## 1.7.13 - 2026-10-07
 

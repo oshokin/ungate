@@ -2,16 +2,19 @@ import * as cp from 'node:child_process';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-import { sleep, type ApiStatus as ServerStatus, type LogEntry } from '@ungate/shared';
+import { getAdminToken, sleep, type ApiStatus as ServerStatus, type LogEntry } from '@ungate/shared';
+import { describeService } from '@ungate/shared/frontend';
 import * as vscode from 'vscode';
 
+import { readApiHealth, assertCompatibleApi } from './local-api';
 import { RuntimeStateStore } from './runtime-state';
 import { config } from './runtime-state/config';
 import { BetterSqlite3Installer } from './utils/better-sqlite3-installer';
+import { CrossProcessLock } from './utils/cross-process-lock';
+import { ManagedProcess } from './utils/managed-process';
 import { NodeResolver } from './utils/node-resolver';
 
-const HEALTH_CHECK_URL = (port: number) => `http://localhost:${port}/health`;
-const STARTING_STATE_TIMEOUT_MS = 10000;
+const HEALTH_CHECK_URL = (port: number) => `http://127.0.0.1:${port}/health`;
 
 interface ApiServerCallbacks {
 	onLog(level: LogEntry['level'], message: string): void;
@@ -35,6 +38,8 @@ export class ApiServer {
 	private addressInUsePort: number | null = null;
 	private startPromise: Promise<void> | null = null;
 	private restartInProgress = false;
+	private healthFailures = 0;
+	private attachedPid: number | null = null;
 
 	constructor(
 		private readonly context: vscode.ExtensionContext,
@@ -64,46 +69,77 @@ export class ApiServer {
 	}
 
 	isStartupInProgress(): boolean {
-		return this.startPromise !== null;
+		return this.startPromise !== null || this.restartInProgress;
 	}
 
 	async restart(): Promise<void> {
+		if (this.restartInProgress) return;
+		if (this.startPromise) await this.startPromise.catch(() => {});
 		this.restartInProgress = true;
-		this.port = null;
-		await RuntimeStateStore.resetApiForRestart();
-		this.restartRequested = true;
-		await this.setStatus('stopped');
-
-		if (!this.process) {
-			try {
-				await this.start();
-			} finally {
-				this.restartInProgress = false;
-				this.restartRequested = false;
+		let release: (() => void) | undefined;
+		try {
+			release = await CrossProcessLock.acquire('api-start.lock', 120000);
+			const existingPort = this.port ?? RuntimeStateStore.read().api.port;
+			if (existingPort) {
+				const health = await readApiHealth(existingPort).catch(() => null);
+				if (health) {
+					const state = describeService(health);
+					if (state.status === 'incompatible' && !state.canUpdate) throw new Error(state.message!);
+				}
 			}
-
-			return;
+			await this.stopLocked();
+			this.port = null;
+			await RuntimeStateStore.resetApiForRestart();
+			await this.startLocked();
+		} finally {
+			release?.();
+			this.restartInProgress = false;
 		}
+	}
 
-		this.process.kill();
+	/** Release window resources; keep the shared service alive for reloads and other windows. */
+	detach(): void {
+		this.stopHealthCheck();
 	}
 
 	async stop(): Promise<void> {
+		const release = await CrossProcessLock.acquire('api-start.lock', 120000);
+		try {
+			await this.stopLocked();
+		} finally {
+			release();
+		}
+	}
+
+	private async stopLocked(): Promise<void> {
 		this.stopHealthCheck();
-		if (this.process) {
-			this.shutDownDeliberately = true;
+		this.shutDownDeliberately = true;
+		const port = this.port ?? RuntimeStateStore.read().api.port;
+		const healthy = port ? await this.checkPortHealth(port) : false;
+		if (port && healthy) {
+			const response = await fetch(`http://127.0.0.1:${port}/admin/shutdown`, {
+				method: 'POST',
+				headers: { Authorization: `Bearer ${getAdminToken()}` },
+				signal: AbortSignal.timeout(5000)
+			});
+			if (!response.ok) throw new Error(`Cannot stop shared API: HTTP ${response.status}`);
+			const deadline = Date.now() + 10000;
+			while (true) {
+				const alive = await this.checkPortHealth(port);
+				if (!alive) break;
+				if (Date.now() > deadline) throw new Error('API shutdown timed out; no replacement started.');
+				await sleep(100);
+			}
+		} else {
+			const savedPid = RuntimeStateStore.read().api.pid;
+			if (!this.process && savedPid && ManagedProcess.isAlive(savedPid))
+				throw new Error('API process is alive but cannot be authenticated. Check its PID before stopping it.');
+			this.process?.kill();
 		}
-		this.process?.kill();
 		this.process = null;
-		this.noClientsSince = null;
-
-		if (RuntimeStateStore.isApiStartSuppressed()) {
-			this.lastStatus = 'error';
-
-			return;
-		}
-
+		this.port = null;
 		this.lastStatus = 'stopped';
+		this.attachedPid = null;
 		await this.writeRuntimeState('stopped', null);
 	}
 
@@ -126,6 +162,15 @@ export class ApiServer {
 	}
 
 	private async doStart(): Promise<void> {
+		const release = await CrossProcessLock.acquire('api-start.lock', 120000);
+		try {
+			await this.startLocked();
+		} finally {
+			release();
+		}
+	}
+
+	private async startLocked(): Promise<void> {
 		if (this.isAutoStartBlocked()) {
 			return;
 		}
@@ -139,6 +184,13 @@ export class ApiServer {
 			if (isAlive) {
 				this.port = existingPort;
 				this.callbacks.onPortDetected(existingPort);
+				try {
+					await assertCompatibleApi(existingPort);
+				} catch (error) {
+					const message = error instanceof Error ? error.message : String(error);
+					await this.recordApiFailure(message);
+					throw error;
+				}
 				await this.setStatus('running');
 				this.startHealthCheck();
 
@@ -146,19 +198,27 @@ export class ApiServer {
 			}
 		}
 
-		if (runtimeState.api.status === 'starting' && runtimeState.api.ownerWindowId !== this.callbacks.getWindowId()) {
-			const startingStateAge = Date.now() - runtimeState.api.lastSeenAt;
-
-			if (startingStateAge < STARTING_STATE_TIMEOUT_MS) {
-				return;
-			}
+		if (runtimeState.api.pid && ManagedProcess.isAlive(runtimeState.api.pid)) {
+			const message =
+				'Saved Ungate API process is alive but unhealthy. Use Restart API after checking its PID; no duplicate was started.';
+			await this.recordApiFailure(message);
+			throw new Error(message);
 		}
-
 		await this.setStatus('starting');
 
 		try {
 			await this.ensureNativeDeps();
+			this.shutDownDeliberately = false;
 			this.spawn();
+			const deadline = Date.now() + 30000;
+			while (true) {
+				const healthy = this.port ? await this.checkPortHealth(this.port) : false;
+				if (healthy) break;
+				if (!this.process || Date.now() > deadline) throw new Error('Ungate API did not become ready within 30 seconds.');
+				await sleep(100);
+			}
+			if (this.port) await assertCompatibleApi(this.port);
+			await this.setStatus('running');
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
 
@@ -195,6 +255,7 @@ export class ApiServer {
 
 		const env: NodeJS.ProcessEnv = {
 			...process.env,
+			UNGATE_ADMIN_TOKEN: getAdminToken(),
 			UNGATE_BETTER_SQLITE3_NATIVE_BINDING: BetterSqlite3Installer.resolveBindingPath(cwd),
 			...(isDev ? { DB_PATH: path.join(os.homedir(), '.ungate', 'data-dev.db') } : { DRIZZLE_PATH: path.join(cwd, 'drizzle') })
 		};
@@ -207,9 +268,16 @@ export class ApiServer {
 		this.process.unref();
 		void this.writeRuntimeState('starting', null).catch(() => {});
 
-		this.process.stdout?.on('data', (data: Buffer) => this.onStdout(data));
-		this.process.stderr?.on('data', (data: Buffer) => this.onStderr(data));
-		this.process.on('exit', (code, signal) => this.onExit(code, signal));
+		const child = this.process;
+		this.process.stdout?.on('data', (data: Buffer) => {
+			if (this.process === child) this.onStdout(data);
+		});
+		this.process.stderr?.on('data', (data: Buffer) => {
+			if (this.process === child) this.onStderr(data);
+		});
+		this.process.on('exit', (code, signal) => {
+			if (this.process === child) this.onExit(code, signal);
+		});
 		this.process.on('error', (err) => {
 			void this.onSpawnProcessError(err).catch(() => {});
 		});
@@ -219,7 +287,7 @@ export class ApiServer {
 
 	private onStdout(data: Buffer): void {
 		const text = data.toString();
-		this.stdoutBuffer += text;
+		this.stdoutBuffer = (this.stdoutBuffer + text).slice(-8192);
 
 		for (const line of text.split('\n').filter((l) => l.trim())) {
 			this.callbacks.onLog(this.parseLogLevel(line), line);
@@ -297,12 +365,12 @@ export class ApiServer {
 
 		if (code === 0) {
 			this.lastStatus = 'stopped';
-			void sleep(config.apiServer.restartDelayMs).then(() => {
+			void sleep(config.apiServer.restartDelayMs).then(async () => {
 				if (!this.shouldRespawn()) {
 					return;
 				}
 
-				this.spawn();
+				await this.start();
 			});
 
 			return;
@@ -340,6 +408,7 @@ export class ApiServer {
 
 		this.port = port;
 		this.callbacks.onPortDetected(port);
+		await assertCompatibleApi(port);
 		await this.setStatus('running');
 		this.startHealthCheck();
 	}
@@ -395,6 +464,12 @@ export class ApiServer {
 			});
 
 			if (res.ok) {
+				try {
+					await assertCompatibleApi(this.port);
+				} catch {
+					return;
+				}
+				this.healthFailures = 0;
 				const wasDown = this.lastStatus !== 'running';
 
 				await this.setStatus('running');
@@ -403,11 +478,25 @@ export class ApiServer {
 					this.callbacks.onPortDetected(this.port);
 				}
 			} else {
-				await this.recordApiFailure(`[process] health check failed with status ${res.status}`);
+				await this.handleHealthFailure(`[process] health check failed with status ${res.status}`);
 			}
 		} catch {
-			await this.recordApiFailure('[process] health check failed');
+			await this.handleHealthFailure('[process] health check failed');
 		}
+	}
+
+	private async handleHealthFailure(message: string): Promise<void> {
+		if (++this.healthFailures < 3) return;
+		const pid = RuntimeStateStore.read().api.pid;
+		if (pid && !ManagedProcess.isAlive(pid)) {
+			this.port = null;
+			this.process = null;
+			this.lastStatus = 'stopped';
+			await RuntimeStateStore.resetApiForRestart();
+
+			return;
+		}
+		await this.recordApiFailure(message);
 	}
 
 	private stopHealthCheck(): void {
@@ -425,24 +514,29 @@ export class ApiServer {
 
 	private async writeRuntimeState(status: ServerStatus, errorMessage: string | null): Promise<void> {
 		await RuntimeStateStore.mutate((current) => {
-			if (current.api.status === 'error' && status !== 'error' && status !== 'stopped') {
+			if (
+				current.api.ownerWindowId &&
+				current.api.ownerWindowId !== this.callbacks.getWindowId() &&
+				RuntimeStateStore.getLiveClientIds(current).includes(current.api.ownerWindowId)
+			) {
 				return current;
 			}
 
 			const now = Date.now();
-			let pid: number | null = null;
+			let pid: number | null = this.attachedPid ?? current.api.pid;
 
 			if (this.process?.pid) {
 				pid = this.process.pid;
 			}
 
-			current.api.pid = pid;
+			current.api.pid = status === 'stopped' ? null : pid;
 			current.api.port = this.port;
 			current.api.status = status;
 			current.api.lastSeenAt = now;
 			current.api.lastError = errorMessage;
+			if (status === 'running') current.api.startSuppressed = false;
 
-			if (status === 'starting') {
+			if (status === 'starting' || status === 'running') {
 				current.api.ownerWindowId = this.callbacks.getWindowId();
 			} else if (status === 'stopped' || status === 'error') {
 				current.api.ownerWindowId = null;
@@ -458,7 +552,14 @@ export class ApiServer {
 				signal: AbortSignal.timeout(config.apiServer.portHealthRequestTimeoutMs)
 			});
 
-			return response.ok;
+			if (!response.ok) return false;
+			const raw: unknown = await response.json();
+			const health = raw as { service?: string; pid?: number };
+
+			if (health.service !== 'ungate' || !Number.isInteger(health.pid)) return false;
+			this.attachedPid = health.pid ?? null;
+
+			return true;
 		} catch {
 			return false;
 		}

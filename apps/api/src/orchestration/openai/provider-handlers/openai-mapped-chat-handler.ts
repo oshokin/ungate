@@ -1,4 +1,4 @@
-import { CompletionRequestTelemetry } from 'src/metrics';
+import { ProxyResponseHeaders } from 'src/metrics';
 import { CompletionErrorMapper, CompletionModelRouting, CompletionStreamingGateway } from 'src/orchestration/openai';
 import { proxyOpenAIRequest } from 'src/proxy/proxy-client';
 
@@ -19,30 +19,13 @@ export class OpenAiMappedChatHandler {
 			const errorMessage = await CompletionErrorMapper.openAiUpstreamErrorMessage(response);
 			const latencyMs = Date.now() - context.startTime;
 
-			CompletionRequestTelemetry.recordAndApplyProxyHeaders(reply, latencyMs, {
-				model: context.model,
-				source: 'error',
-				inputTokens: 0,
-				outputTokens: 0,
-				stream: false,
-				latencyMs,
-				error: errorMessage
-			});
+			ProxyResponseHeaders.apply(reply, latencyMs);
 
 			return reply.code(response.status).send({ error: { message: errorMessage, type: 'api_error' } });
 		}
 
 		if (openaiBody.stream) {
-			const latencyMs = Date.now() - context.startTime;
-
-			CompletionRequestTelemetry.record({
-				model: context.model,
-				source: context.source,
-				inputTokens: context.inputTokens ?? 0,
-				outputTokens: context.outputTokens ?? 0,
-				stream: true,
-				latencyMs
-			});
+			ProxyResponseHeaders.apply(reply, Date.now() - context.startTime);
 
 			return CompletionStreamingGateway.sendOpenAiPassthroughStream(reply, response);
 		}
@@ -50,14 +33,7 @@ export class OpenAiMappedChatHandler {
 		const responseJson = await response.json();
 		const latencyMs = Date.now() - context.startTime;
 
-		CompletionRequestTelemetry.recordAndApplyProxyHeaders(reply, latencyMs, {
-			model: context.model,
-			source: context.source,
-			inputTokens: context.inputTokens ?? 0,
-			outputTokens: context.outputTokens ?? 0,
-			stream: false,
-			latencyMs
-		});
+		ProxyResponseHeaders.apply(reply, latencyMs);
 
 		return reply.send(responseJson);
 	}

@@ -1,7 +1,5 @@
 import { logger } from 'src/utils/logger';
 
-import { Requests } from '../database/requests';
-
 import type { RequestContext, StreamResult } from '../types/proxy';
 
 type MiniMaxStreamState = 'content' | 'thinking';
@@ -177,6 +175,7 @@ export class MiniMaxStreamHandler {
 				let sentStart = false;
 				let finishReason: 'stop' | 'length' | 'tool_calls' | null = null;
 				let sawDone = false;
+				const pendingTools = new Map<number, MiniMaxToolCallDelta>();
 				let usage:
 					| {
 							prompt_tokens: number;
@@ -245,27 +244,16 @@ export class MiniMaxStreamHandler {
 								const toolCallDeltas = choice?.delta?.tool_calls;
 								if (toolCallDeltas && toolCallDeltas.length > 0) {
 									for (const tc of toolCallDeltas) {
-										const toolCallChunk: Record<string, unknown> = { index: tc.index };
-										const toolFunction: Record<string, string> = {};
-
-										if (tc.id) {
-											toolCallChunk.id = tc.id;
-											toolCallChunk.type = tc.type ?? 'function';
-										}
-
-										if (tc.function?.name !== undefined) {
-											toolFunction.name = tc.function.name;
-										}
-
-										if (tc.function?.arguments !== undefined) {
-											toolFunction.arguments = tc.function.arguments;
-										}
-
-										if (Object.keys(toolFunction).length > 0) {
-											toolCallChunk.function = toolFunction;
-										}
-
-										safeEnqueue(buildChunk(streamId, modelName, { tool_calls: [toolCallChunk] }));
+										const previous = pendingTools.get(tc.index);
+										pendingTools.set(tc.index, {
+											index: tc.index,
+											id: tc.id ?? previous?.id,
+											type: tc.type ?? previous?.type,
+											function: {
+												name: tc.function?.name ?? previous?.function?.name,
+												arguments: (previous?.function?.arguments ?? '') + (tc.function?.arguments ?? '')
+											}
+										});
 									}
 									continue;
 								}
@@ -303,30 +291,31 @@ export class MiniMaxStreamHandler {
 						}
 					}
 
-					safeEnqueue(buildChunk(streamId, modelName, {}, finishReason ?? 'stop'));
+					let finalReason = finishReason ?? (sawDone && pendingTools.size === 0 ? 'stop' : 'length');
+					if (pendingTools.size > 0) {
+						try {
+							if (finishReason !== 'tool_calls') throw new Error('Unfinished tool stream');
+							for (const tool of pendingTools.values()) {
+								if (!tool.id || !tool.function?.name) throw new Error('Incomplete tool identity');
+								JSON.parse(tool.function.arguments ?? '');
+							}
+							safeEnqueue(buildChunk(streamId, modelName, { tool_calls: [...pendingTools.values()] }));
+						} catch {
+							finalReason = 'length';
+						}
+					}
+					safeEnqueue(buildChunk(streamId, modelName, {}, finalReason));
 
 					if (usage) {
 						safeEnqueue(buildUsageChunk(streamId, modelName, usage));
 					}
 
-					Requests.record({
-						model: modelName,
-						source: 'minimax',
-						inputTokens: usage?.prompt_tokens ?? 0,
-						outputTokens: usage?.completion_tokens ?? 0,
-						stream: true,
-						latencyMs: Date.now() - context.startTime
-					});
-
 					safeEnqueue('data: [DONE]\n\n');
 				} catch (error) {
 					if (!cancelled) {
 						logger.error(`MiniMax stream processing failed: ${String(error)}`);
-						try {
-							controller.error(error);
-						} catch {
-							// Controller already closed
-						}
+						safeEnqueue(buildChunk(streamId, modelName, {}, 'length'));
+						safeEnqueue('data: [DONE]\n\n');
 					}
 				} finally {
 					if (!sawDone && !cancelled) {

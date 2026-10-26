@@ -21,6 +21,7 @@ describe('database-app-settings', () => {
 		const settings = Settings.get();
 
 		expect(settings.port).toBe(47821);
+		expect(settings.tunnelProtocol).toBe('http2');
 		expect(settings.apiKey).toBeTypeOf('string');
 		expect(settings.models).toEqual(expectedModels);
 	});
@@ -40,12 +41,14 @@ describe('database-app-settings', () => {
 		Settings.update({
 			quiet: true,
 			extraInstruction: 'extra',
+			tunnelProtocol: 'quic',
 			models: [model]
 		});
 
 		const settings = Settings.get();
 		expect(settings.quiet).toBe(true);
 		expect(settings.extraInstruction).toBe('extra');
+		expect(settings.tunnelProtocol).toBe('quic');
 		expect(settings.models).toEqual([model]);
 	});
 });

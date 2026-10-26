@@ -42,7 +42,7 @@ export class NodeResolver {
 		const result = cp.spawnSync(
 			runtime,
 			['-p', 'JSON.stringify({ abi: process.versions.modules, platform: process.platform, arch: process.arch })'],
-			{ encoding: 'utf8' }
+			{ encoding: 'utf8', timeout: 5000, windowsHide: true }
 		);
 
 		if (result.error) {

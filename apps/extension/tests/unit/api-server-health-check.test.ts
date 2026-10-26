@@ -77,9 +77,17 @@ vi.mock('../../src/utils/better-sqlite3-installer', () => {
 
 vi.mock('@ungate/shared', () => {
 	return {
-		sleep: sleepMock
+		sleep: sleepMock,
+		getAdminToken: () => 'test-admin'
 	};
 });
+
+vi.mock('../../src/local-api', () => ({
+	assertCompatibleApi: vi.fn().mockResolvedValue(undefined),
+	readApiHealth: vi.fn().mockResolvedValue(null)
+}));
+
+vi.mock('../../src/utils/cross-process-lock', () => ({ CrossProcessLock: { acquire: () => Promise.resolve(() => {}) } }));
 
 vi.mock('vscode', () => {
 	return {
@@ -98,6 +106,7 @@ vi.mock('../../src/runtime-state', () => {
 	return {
 		RuntimeStateStore: {
 			read: runtimeReadMock,
+			getLiveClientIds: (state: RuntimeState) => Object.keys(state.clients),
 			hasLiveClients: runtimeHasLiveClientsMock,
 			mutate: runtimeMutateMock,
 			isApiStartSuppressed: (...args: unknown[]) => isApiStartSuppressedMock(...args),
@@ -124,8 +133,8 @@ interface ApiServerInternals {
 	shouldRespawn(): boolean;
 }
 
-function createRuntimeState(): RuntimeState {
-	const runtimeState = TestHelper.createRuntimeState([], 4783);
+function createRuntimeState(windowIds: string[] = [], port: number | null = 4783): RuntimeState {
+	const runtimeState = TestHelper.createRuntimeState(windowIds, port);
 
 	return runtimeState;
 }
@@ -182,6 +191,7 @@ describe('ApiServer.runHealthCheckCycle', () => {
 		suppressApiAutoStartMock.mockReset();
 		resetApiForRestartMock.mockReset();
 		sleepMock.mockReset();
+		sleepMock.mockImplementation(() => new Promise((resolve) => setTimeout(resolve, 1)));
 		ensureInstalledMock.mockReset();
 		spawnSyncMock.mockReset();
 		spawnSyncMock.mockImplementation((runtime, args) => {
@@ -251,7 +261,10 @@ describe('ApiServer.runHealthCheckCycle', () => {
 
 			return Promise.resolve(nextState);
 		});
-		const spawnSpy = vi.spyOn(internals, 'spawn').mockImplementation(() => {});
+		const spawnSpy = vi.spyOn(internals, 'spawn').mockImplementation(() => {
+			Object.assign(internals, { port: 4783, process: {} });
+		});
+		vi.spyOn(internals, 'checkPortHealth').mockResolvedValue(true);
 		vi.spyOn(internals, 'checkPortHealth').mockResolvedValue(true);
 		vi.spyOn(internals, 'startHealthCheck').mockImplementation(() => {});
 
@@ -267,7 +280,10 @@ describe('ApiServer.runHealthCheckCycle', () => {
 		const { server } = createServer();
 		const internals = getInternals(server);
 		runtimeReadMock.mockReturnValue(runtimeState);
-		const spawnSpy = vi.spyOn(internals, 'spawn').mockImplementation(() => {});
+		const spawnSpy = vi.spyOn(internals, 'spawn').mockImplementation(() => {
+			Object.assign(internals, { port: 4783, process: {} });
+		});
+		vi.spyOn(internals, 'checkPortHealth').mockResolvedValue(true);
 
 		Object.assign(internals, {
 			process: {}
@@ -291,6 +307,12 @@ describe('ApiServer.runHealthCheckCycle', () => {
 
 		vi.spyOn(internals, 'startHealthCheck').mockImplementation(() => {});
 
+		ensureInstalledMock.mockImplementation(() => {
+			Object.assign(internals, { port: 4783 });
+
+			return Promise.resolve();
+		});
+		vi.spyOn(internals, 'checkPortHealth').mockResolvedValue(true);
 		await server.start();
 
 		expect(spawnMock).toHaveBeenCalledWith(
@@ -317,7 +339,10 @@ describe('ApiServer.runHealthCheckCycle', () => {
 
 			return Promise.resolve(nextState);
 		});
-		const spawnSpy = vi.spyOn(internals, 'spawn').mockImplementation(() => {});
+		const spawnSpy = vi.spyOn(internals, 'spawn').mockImplementation(() => {
+			Object.assign(internals, { port: 4783, process: {} });
+		});
+		vi.spyOn(internals, 'checkPortHealth').mockResolvedValue(true);
 
 		await server.start();
 
@@ -343,7 +368,10 @@ describe('ApiServer.runHealthCheckCycle', () => {
 			});
 		});
 
-		const spawnSpy = vi.spyOn(internals, 'spawn').mockImplementation(() => {});
+		const spawnSpy = vi.spyOn(internals, 'spawn').mockImplementation(() => {
+			Object.assign(internals, { port: 4783, process: {} });
+		});
+		vi.spyOn(internals, 'checkPortHealth').mockResolvedValue(true);
 
 		const first = server.start();
 		const second = server.start();
@@ -523,7 +551,10 @@ describe('ApiServer.onExit', () => {
 	it('does not respawn after a deliberate shutdown', () => {
 		const { server } = createServer();
 		const internals = getInternals(server);
-		const spawnSpy = vi.spyOn(internals, 'spawn').mockImplementation(() => {});
+		const spawnSpy = vi.spyOn(internals, 'spawn').mockImplementation(() => {
+			Object.assign(internals, { port: 4783, process: {} });
+		});
+		vi.spyOn(internals, 'checkPortHealth').mockResolvedValue(true);
 
 		Object.assign(internals, {
 			shutDownDeliberately: true,
@@ -535,10 +566,11 @@ describe('ApiServer.onExit', () => {
 		expect(spawnSpy).not.toHaveBeenCalled();
 	});
 
-	it('respawns after a clean exit', async () => {
+	it('uses the locked startup path after a clean exit', async () => {
 		const { server } = createServer();
 		const internals = getInternals(server);
-		const spawnSpy = vi.spyOn(internals, 'spawn').mockImplementation(() => {});
+		const startSpy = vi.spyOn(server, 'start').mockResolvedValue(undefined);
+		vi.spyOn(internals, 'checkPortHealth').mockResolvedValue(true);
 
 		Object.assign(internals, {
 			restartRequested: false,
@@ -549,7 +581,7 @@ describe('ApiServer.onExit', () => {
 		internals.onExit(0, null);
 		await flushPromises();
 
-		expect(spawnSpy).toHaveBeenCalledTimes(1);
+		expect(startSpy).toHaveBeenCalledTimes(1);
 		expect(sleepMock).toHaveBeenCalledTimes(1);
 	});
 
@@ -578,7 +610,10 @@ describe('ApiServer.onExit', () => {
 	it('does not respawn after a clean exit when extension host is inactive', async () => {
 		const { server } = createServer({ isExtensionHostActive: false });
 		const internals = getInternals(server);
-		const spawnSpy = vi.spyOn(internals, 'spawn').mockImplementation(() => {});
+		const spawnSpy = vi.spyOn(internals, 'spawn').mockImplementation(() => {
+			Object.assign(internals, { port: 4783, process: {} });
+		});
+		vi.spyOn(internals, 'checkPortHealth').mockResolvedValue(true);
 
 		Object.assign(internals, {
 			restartRequested: false,
@@ -612,7 +647,7 @@ describe('ApiServer.onExit', () => {
 		});
 
 		internals.onExit(1, null);
-		await flushPromises();
+		await vi.waitFor(() => expect(onStatusChange).toHaveBeenCalledWith('running'));
 
 		expect(onPortDetected).toHaveBeenCalledWith(47821);
 		expect(onStatusChange).toHaveBeenCalledWith('running');

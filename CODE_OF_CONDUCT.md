@@ -27,4 +27,4 @@ GitHub issues, pull requests, and discussions. Anywhere else the project opens l
 
 ## Reporting
 
-Contact the author through [orchidfiles.com](https://orchidfiles.com). The author reviews each report and decides what to do. There is no formal escalation — common sense applies.
+Contact the maintainer through the private channel in [SECURITY.md](SECURITY.md). The maintainer reviews each report and decides what to do. There is no formal escalation — common sense applies.

@@ -3,7 +3,7 @@
 ## Quick start
 
 ```sh
-git clone https://github.com/orchidfiles/ungate.git
+git clone https://github.com/oshokin/ungate.git
 cd ungate
 pnpm install
 ```
@@ -94,7 +94,7 @@ ESLint and Prettier configs live in `packages/dev-kit`. The pre-commit hook runs
 
 ## Community and license
 
-- **Bugs and feature requests**: [GitHub Issues](https://github.com/orchidfiles/ungate/issues). Use the Bug Report or Feature Request template.
+- **Bugs and feature requests**: [GitHub Issues](https://github.com/oshokin/ungate/issues). Use the Bug Report or Feature Request template.
 - **Security issues:** see [SECURITY.md](SECURITY.md) for private vulnerability reporting.
 - **Questions, setup help, anything else:** see [SUPPORT.md](SUPPORT.md).
 

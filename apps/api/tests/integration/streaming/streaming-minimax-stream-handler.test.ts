@@ -1,14 +1,6 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { MiniMaxStreamHandler } from 'src/streaming/minimax-stream-handler';
-
-const recordMock = vi.fn();
-
-vi.mock('src/database/requests', () => ({
-	Requests: {
-		record: (...args: unknown[]) => recordMock(...args)
-	}
-}));
 
 function createResponseWithSse(lines: string[]): Response {
 	const stream = new ReadableStream<Uint8Array>({
@@ -42,9 +34,7 @@ async function readStream(stream: ReadableStream): Promise<string> {
 }
 
 describe('streaming-minimax-stream-handler', () => {
-	afterEach(() => {
-		recordMock.mockReset();
-	});
+	afterEach(() => {});
 
 	it('streams content, reasoning, usage and done', async () => {
 		const response = createResponseWithSse([
@@ -70,7 +60,20 @@ describe('streaming-minimax-stream-handler', () => {
 		expect(output).toContain('"finish_reason":"stop"');
 		expect(output).toContain('"usage"');
 		expect(output).toContain('data: [DONE]');
-		expect(recordMock).toHaveBeenCalledTimes(1);
+	});
+
+	it('finishes cleanly when the stream ends without DONE', async () => {
+		const response = createResponseWithSse([
+			'data: {"choices":[{"delta":{"content":"partial"},"finish_reason":null}]}'
+		]);
+		const { stream } = MiniMaxStreamHandler.createStreamResponse(response, 'mm-incomplete', 'minimax-model', {
+			model: 'minimax-model',
+			source: 'minimax',
+			startTime: Date.now(),
+			reverseToolMapping: {}
+		});
+
+		await expect(readStream(stream)).resolves.toContain('data: [DONE]');
 	});
 
 	it('streams tool call deltas', async () => {

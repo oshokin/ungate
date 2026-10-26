@@ -2,15 +2,16 @@ import { z } from 'zod';
 
 import {
 	ClaudeCliVersion,
+	TUNNEL_PROTOCOLS,
 	isClaudeCliVersionMode,
 	isModelMappingProvider,
 	isModelServiceTier,
 	isReasoningBudgetTier,
 	type AppSettings
 } from '@ungate/shared';
+import { logger } from 'src/utils/logger';
 
 import { Settings } from '../database/app-settings';
-import { logger } from '../utils/logger';
 
 import type { FastifyPluginCallback } from 'fastify';
 
@@ -36,7 +37,7 @@ const ModelMappingUpdateSchema = z
 const SettingsUpdateSchema = z
 	.object({
 		port: z.number().int().min(1).max(65535).optional(),
-		apiKey: z.union([z.string(), z.null()]).optional(),
+		apiKey: z.string().trim().min(1, 'Ungate API key cannot be empty').optional(),
 		quiet: z.boolean().optional(),
 		extraInstruction: z.union([z.string(), z.null()]).optional(),
 		claudeCliVersionMode: z
@@ -44,6 +45,7 @@ const SettingsUpdateSchema = z
 			.refine((value) => isClaudeCliVersionMode(value), { message: 'claudeCliVersionMode must be stable, latest, or custom' })
 			.optional(),
 		claudeCliVersionCustom: z.union([z.string(), z.null()]).optional(),
+		tunnelProtocol: z.enum(TUNNEL_PROTOCOLS).optional(),
 		models: z.array(ModelMappingUpdateSchema).optional()
 	})
 	.strip();
@@ -95,6 +97,8 @@ const plugin: FastifyPluginCallback = (app) => {
 		}
 
 		Settings.update(validation.value);
+		// Key changes take effect immediately, rather than silently using the old key until restart.
+		if (validation.value.apiKey !== undefined) app.config.apiKey = validation.value.apiKey ?? undefined;
 
 		return reply.send({ ok: true });
 	});

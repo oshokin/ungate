@@ -7,18 +7,17 @@
 	"license": "MIT",
 	"pricing": "Free",
 	"author": {
-		"name": "orchidfiles",
-		"email": "orchid@orchidfiles.com",
-		"url": "https://orchidfiles.com"
+		"name": "oshokin",
+		"url": "https://github.com/oshokin"
 	},
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/orchidfiles/ungate.git"
+		"url": "https://github.com/oshokin/ungate.git"
 	},
 	"bugs": {
-		"url": "https://github.com/orchidfiles/ungate/issues"
+		"url": "https://github.com/oshokin/ungate/issues"
 	},
-	"homepage": "https://github.com/orchidfiles/ungate",
+	"homepage": "https://github.com/oshokin/ungate",
 	"keywords": [
 		"claude",
 		"anthropic",
@@ -41,29 +40,91 @@
 		"onStartupFinished"
 	],
 	"main": "./dist/extension.js",
+	"extensionKind": [
+		"ui"
+	],
 	"contributes": {
 		"commands": [
 			{
 				"command": "ungate.openDashboard",
-				"title": "Ungate: Open Dashboard"
+				"title": "Open Dashboard",
+				"category": "Ungate"
+			},
+			{
+				"command": "ungate.openCursorModels",
+				"title": "Open Cursor Models",
+				"category": "Ungate",
+				"icon": "$(list-selection)"
 			},
 			{
 				"command": "ungate.copyTunnelUrl",
-				"title": "Ungate: Copy Tunnel URL"
+				"title": "Copy Tunnel URL",
+				"category": "Ungate"
+			},
+			{
+				"command": "ungate.copyApiKey",
+				"title": "Copy API Key",
+				"category": "Ungate"
+			},
+			{
+				"command": "ungate.reloadWindow",
+				"title": "Reload Window",
+				"category": "Ungate",
+				"icon": "$(refresh)"
+			},
+			{
+				"command": "ungate.startTunnel",
+				"title": "Start Tunnel",
+				"category": "Ungate"
 			},
 			{
 				"command": "ungate.restartTunnel",
-				"title": "Ungate: Restart Tunnel"
+				"title": "Restart Tunnel",
+				"category": "Ungate"
 			},
 			{
-				"command": "ungate.toggleKeyFix",
-				"title": "Ungate: Toggle OpenAI Key Fix"
+				"command": "ungate.stopTunnel",
+				"title": "Stop Tunnel Only",
+				"category": "Ungate"
+			},
+			{
+				"command": "ungate.restartServices",
+				"title": "Restart Shared API",
+				"category": "Ungate"
+			},
+			{
+				"command": "ungate.stopServices",
+				"title": "Stop Shared API and Tunnel",
+				"category": "Ungate"
 			}
-		]
+		],
+		"menus": {
+			"editor/title": [
+				{
+					"command": "ungate.openCursorModels",
+					"when": "activeWebviewPanelId == ungate",
+					"group": "navigation@1"
+				},
+				{
+					"command": "ungate.reloadWindow",
+					"when": "activeWebviewPanelId == ungate",
+					"group": "navigation@2"
+				},
+				{
+					"command": "ungate.restartServices",
+					"when": "activeWebviewPanelId == ungate",
+					"group": "ungate@1"
+				},
+				{
+					"command": "ungate.stopServices",
+					"when": "activeWebviewPanelId == ungate",
+					"group": "ungate@2"
+				}
+			]
+		}
 	},
 	"scripts": {
-		"build": "rm -rf dist && tsup",
-		"publish": "ovsx publish out/ungate.vsix",
+		"build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsup",
 		"lint": "eslint .",
 		"lint:fix": "eslint . --fix",
 		"test": "vitest run"

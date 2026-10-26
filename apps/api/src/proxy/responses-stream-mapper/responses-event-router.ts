@@ -8,6 +8,7 @@ import type { StreamProcessResult, StreamState } from './stream-state';
 
 export class ResponsesEventRouter {
 	static route(state: StreamState, payload: Record<string, unknown>, results: StreamProcessResult[]): void {
+		if (state.completed) return;
 		const kind = payload?.type as string | undefined;
 		StreamDiagnostics.noteKind(state, kind);
 
@@ -15,7 +16,7 @@ export class ResponsesEventRouter {
 			return;
 		}
 
-		if (this.handleOutputItemAddedEvent(state, payload, kind, results)) {
+		if (this.handleOutputItemAddedEvent(state, payload, kind)) {
 			return;
 		}
 
@@ -57,8 +58,7 @@ export class ResponsesEventRouter {
 	private static handleOutputItemAddedEvent(
 		state: StreamState,
 		payload: Record<string, unknown>,
-		kind: string | undefined,
-		results: StreamProcessResult[]
+		kind: string | undefined
 	): boolean {
 		if (kind !== 'response.output_item.added') {
 			return false;
@@ -83,24 +83,10 @@ export class ResponsesEventRouter {
 				callId,
 				openAiIndex: outputIndex,
 				argsBuffer: '',
-				deferred: !nameRaw
+				deferred: true,
+				name: nameRaw
 			});
 			state.toolCallsSeen = true;
-
-			if (nameRaw) {
-				const delta: Record<string, unknown> = {
-					tool_calls: [
-						{
-							index: outputIndex,
-							id: callId,
-							type: 'function',
-							function: { name: nameRaw, arguments: '' }
-						}
-					]
-				};
-
-				this.pushAssistantChunk(state, results, delta);
-			}
 		}
 
 		return true;
@@ -259,7 +245,7 @@ export class ResponsesEventRouter {
 			const buffered = pending.argsBuffer;
 
 			if (pending.deferred) {
-				const fnName = doneName || 'unknown';
+				const fnName = doneName || (pending.name ?? 'unknown');
 				const combinedArgs = argsStr || buffered;
 				const fcDelta: Record<string, unknown> = {
 					tool_calls: [
@@ -297,7 +283,7 @@ export class ResponsesEventRouter {
 		kind: string | undefined,
 		results: StreamProcessResult[]
 	): void {
-		if (kind !== 'response.completed') {
+		if (kind !== 'response.completed' && kind !== 'response.incomplete' && kind !== 'response.failed' && kind !== 'error') {
 			return;
 		}
 
@@ -313,13 +299,18 @@ export class ResponsesEventRouter {
 		}
 
 		const usage = resp?.usage as Record<string, number> | undefined;
-		let finish: 'tool_calls' | 'stop' = 'stop';
+		let finish: 'tool_calls' | 'stop' | 'length' = 'stop';
 
 		if (state.toolCallsSeen) {
 			finish = 'tool_calls';
 		}
 
+		if (kind !== 'response.completed' || state.pendingFunctionCalls.size > 0) finish = 'length';
+		state.pendingFunctionCalls.clear();
+		state.completed = true;
+		state.successfulCompletion = kind === 'response.completed' && finish !== 'length';
 		const mappedUsage = StreamDiagnostics.mapUsage(usage);
+		state.usage = mappedUsage;
 
 		results.push({ type: 'chunk', data: StreamChunkMapper.chunk(state, {}, finish, mappedUsage) });
 		results.push({ type: 'done' });

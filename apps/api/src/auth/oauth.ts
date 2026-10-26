@@ -19,6 +19,7 @@ interface TokenExchangeResponse extends TokenRefreshResponse {
 }
 
 export class OAuth {
+	private static readonly refreshFlights = new Map<string, Promise<TokenInfo | null>>();
 	private static readonly pkceStore = new Map<string, PkceSession>();
 	private static readonly SESSION_TTL_MS = minutesToMilliseconds(15);
 
@@ -98,6 +99,7 @@ export class OAuth {
 		try {
 			const response = await fetch(config.claude.oauth.tokenUrl, {
 				method: 'POST',
+				signal: AbortSignal.timeout(10000),
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					grant_type: 'authorization_code',
@@ -143,12 +145,25 @@ export class OAuth {
 		return Date.now() >= expiresAt - bufferMs;
 	}
 
-	static async refreshToken(refreshTokenValue: string): Promise<TokenInfo | null> {
+	static refreshToken(refreshTokenValue: string): Promise<TokenInfo | null> {
+		const active = this.refreshFlights.get(refreshTokenValue);
+		if (active) return active;
+		const flight = this.performRefresh(refreshTokenValue).finally(() => {
+			this.refreshFlights.delete(refreshTokenValue);
+		});
+		this.refreshFlights.set(refreshTokenValue, flight);
+
+		return flight;
+	}
+
+	private static async performRefresh(refreshTokenValue: string): Promise<TokenInfo | null> {
 		try {
+			const owner = ProviderSettings.get('claude');
 			logger.log('Refreshing OAuth token...');
 
 			const response = await fetch(config.claude.oauth.tokenUrl, {
 				method: 'POST',
+				signal: AbortSignal.timeout(10000),
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					grant_type: 'refresh_token',
@@ -167,17 +182,24 @@ export class OAuth {
 			const data: TokenRefreshResponse = await response.json();
 			const expiresAt = Date.now() + data.expires_in * 1000;
 
+			const current = ProviderSettings.get('claude');
+			if (!current || current.accessToken !== owner?.accessToken || current.refreshToken !== refreshTokenValue) return null;
+			const refreshToken = data.refresh_token ?? refreshTokenValue;
+			if (typeof data.access_token !== 'string' || !data.access_token || !Number.isFinite(expiresAt) || expiresAt <= Date.now())
+				return null;
 			ProviderSettings.upsertOAuth('claude', {
 				accessToken: data.access_token,
-				refreshToken: data.refresh_token,
-				expiresAt
+				refreshToken,
+				expiresAt,
+				email: current.email ?? undefined,
+				accountId: current.accountId ?? undefined
 			});
 
 			logger.log('Token refreshed successfully');
 
 			const result: TokenInfo = {
 				accessToken: data.access_token,
-				refreshToken: data.refresh_token,
+				refreshToken,
 				expiresAt,
 				isExpired: false
 			};

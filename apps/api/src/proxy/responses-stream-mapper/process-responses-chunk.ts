@@ -28,7 +28,7 @@ export class ResponsesSseProcessor {
 	}
 
 	static process(state: StreamState, chunk: string): StreamProcessResult[] {
-		state.buffer += chunk;
+		state.buffer += chunk.replace(/\r/g, '');
 		const results: StreamProcessResult[] = [];
 		const parts = state.buffer.split('\n\n');
 		const tail = parts.pop();

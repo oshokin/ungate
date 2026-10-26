@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        For setup walkthroughs, see `README.md` and [SUPPORT.md](https://github.com/orchidfiles/ungate/blob/main/SUPPORT.md), and the **Discussions → Q&A** section for previously answered questions.
+        For setup walkthroughs, see `README.md` and [SUPPORT.md](https://github.com/oshokin/ungate/blob/main/SUPPORT.md), and the **Discussions → Q&A** section for previously answered questions.
         This template is here as a fallback — prefer Discussions for questions so others can find the answers.
 
   - type: textarea

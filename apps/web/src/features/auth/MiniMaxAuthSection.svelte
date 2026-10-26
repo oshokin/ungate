@@ -5,14 +5,16 @@ import IconLoader from 'virtual:icons/lucide/loader-circle';
 import IconLogOut from 'virtual:icons/lucide/log-out';
 
 import { Api } from '$shared/api';
+import { createToastWatcher } from '$shared/toast.svelte';
 
 type UrlType = 'global' | 'china' | 'custom';
 
 interface Props {
 	onAuthStatusChange?: () => void;
+	onConnected?: () => void | Promise<void>;
 }
 
-let { onAuthStatusChange }: Props = $props();
+let { onAuthStatusChange, onConnected }: Props = $props();
 
 let authenticated = $state(false);
 let loading = $state(true);
@@ -20,6 +22,9 @@ let apiKey = $state('');
 let urlType = $state<UrlType>('global');
 let customUrl = $state('');
 let error = $state<string | null>(null);
+const watchError = createToastWatcher();
+
+$effect(() => watchError(error, 'error'));
 let saving = $state(false);
 let savingBaseUrl = $state(false);
 
@@ -75,6 +80,7 @@ async function handleSave() {
 		authenticated = true;
 		apiKey = '';
 		onAuthStatusChange?.();
+		await onConnected?.();
 	} catch (e) {
 		error = e instanceof Error ? e.message : String(e);
 	}
@@ -106,6 +112,7 @@ async function saveBaseUrlImmediately(): Promise<void> {
 
 			return;
 		}
+		await onConnected?.();
 	} catch (e) {
 		error = e instanceof Error ? e.message : String(e);
 	} finally {
@@ -224,12 +231,6 @@ async function handleLogout() {
 					</button>
 				</div>
 			{/if}
-		</div>
-	{/if}
-
-	{#if error}
-		<div class="card preset-tonal-error p-3 text-sm">
-			{error}
 		</div>
 	{/if}
 </div>

@@ -1,7 +1,6 @@
 import { logger } from 'src/utils/logger';
 
 import { AnthropicToOpenai } from '../adapter/anthropic-to-openai';
-import { Requests } from '../database/requests';
 import { ToolNormalizer } from '../tools/normalizer';
 import { type ToolUseBlock, type StreamResult, type RequestContext } from '../types/proxy';
 
@@ -18,7 +17,7 @@ interface ActiveToolCall {
 	id: string;
 	name: string;
 	inputJson: string;
-	blockIndex: number;
+	index: number;
 	outputIndex: number;
 }
 
@@ -57,23 +56,18 @@ export class OpenAIStreamHandler {
 		let cancelled = false;
 		const activeToolCalls = new Map<number, ActiveToolCall>();
 
-		const describeOpenTools = (): string => {
-			if (activeToolCalls.size === 0) {
-				return 'tool=none';
-			}
-
-			return Array.from(activeToolCalls.values())
-				.map((toolCall) => `tool=${toolCall.name} toolId=${toolCall.id} argsLength=${toolCall.inputJson.length}`)
-				.join(' ');
-		};
+		const describeOpenTool = (): string =>
+			[...activeToolCalls.values()]
+				.map((tool) => `tool=${tool.name} toolId=${tool.id} argsLength=${tool.inputJson.length}`)
+				.join('; ') || 'tool=none';
 
 		return new ReadableStream({
 			async start(controller) {
 				const decoder = new TextDecoder();
 				let buffer = '';
 				let sentStart = false;
-				let nextToolCallIndex = 0;
-				let completedToolCallCount = 0;
+				let toolCallIndex = 0;
+				let completedToolCalls = 0;
 				let finalized = false;
 				let stopReason: AnthropicStopReason | null = null;
 				let finalUsage: StreamUsage | null = null;
@@ -89,24 +83,27 @@ export class OpenAIStreamHandler {
 					}
 				};
 
-				const flushToolCall = (toolCall: ActiveToolCall, mode: 'complete' | 'salvage'): boolean => {
-					if (mode === 'salvage' && !toolCall.inputJson) {
-						logger.error(
-							`Incomplete tool call tool=${toolCall.name} toolId=${toolCall.id} argsLength=${toolCall.inputJson.length}`
-						);
-						activeToolCalls.delete(toolCall.blockIndex);
+				const flushToolCall = (index: number, mode: 'complete' | 'salvage'): boolean => {
+					const currentToolCall = activeToolCalls.get(index);
+					if (!currentToolCall) {
+						return false;
+					}
+
+					if (mode === 'salvage' && !currentToolCall.inputJson) {
+						logger.error(`Incomplete tool call ${describeOpenTool()}`);
+						activeToolCalls.delete(index);
 
 						return false;
 					}
 
-					let finalJson = toolCall.inputJson || '{}';
+					let finalJson = currentToolCall.inputJson || '{}';
 
 					try {
 						const parsedArgs = JSON.parse(finalJson);
 						const toolUse: ToolUseBlock = {
 							type: 'tool_use',
-							id: toolCall.id,
-							name: toolCall.name,
+							id: currentToolCall.id,
+							name: currentToolCall.name,
 							input: parsedArgs
 						};
 
@@ -115,23 +112,30 @@ export class OpenAIStreamHandler {
 							finalJson = JSON.stringify(normalized.input);
 						}
 					} catch {
-						logger.error(`Failed to parse tool args for ${toolCall.name}`);
+						logger.error(`Failed to parse tool args for ${currentToolCall.name}`);
 
-						if (mode === 'salvage') {
-							activeToolCalls.delete(toolCall.blockIndex);
+						salvageFailed = true;
+						activeToolCalls.delete(index);
 
-							return false;
-						}
+						return false;
 					}
 
 					safeEnqueue(
 						new TextEncoder().encode(
-							AnthropicToOpenai.toolCallChunk(streamId, modelName, toolCall.outputIndex, undefined, undefined, finalJson, null)
+							AnthropicToOpenai.toolCallChunk(
+								streamId,
+								modelName,
+								currentToolCall.outputIndex,
+								undefined,
+								undefined,
+								finalJson,
+								null
+							)
 						)
 					);
 
-					completedToolCallCount++;
-					activeToolCalls.delete(toolCall.blockIndex);
+					completedToolCalls++;
+					activeToolCalls.delete(index);
 
 					return true;
 				};
@@ -141,7 +145,7 @@ export class OpenAIStreamHandler {
 						return 'length';
 					}
 
-					if (completedToolCallCount > 0) {
+					if (completedToolCalls > 0) {
 						return 'tool_calls';
 					}
 
@@ -156,11 +160,12 @@ export class OpenAIStreamHandler {
 					finalized = true;
 
 					logger.log(
-						`Stream stop_reason=${stopReason ?? 'none'} unexpectedEof=${unexpectedEof} completedToolCalls=${completedToolCallCount}`
+						`Stream stop_reason=${stopReason ?? 'none'} unexpectedEof=${unexpectedEof} completedToolCalls=${toolCallIndex}`
 					);
 
-					if (unexpectedEof && activeToolCalls.size > 0) {
-						logger.error(`Unexpected EOF with open tool calls ${describeOpenTools()}`);
+					if (activeToolCalls.size > 0) {
+						logger.error(`Incomplete stream with open tool call ${describeOpenTool()}`);
+						salvageFailed = true;
 						activeToolCalls.clear();
 					}
 
@@ -177,19 +182,6 @@ export class OpenAIStreamHandler {
 									total_tokens: finalUsage.input_tokens + finalUsage.output_tokens
 								})
 							)
-						);
-
-						Requests.record(
-							{
-								model: context.model,
-								source: context.source,
-								inputTokens: finalUsage.input_tokens,
-								outputTokens: finalUsage.output_tokens,
-								stream: true,
-								latencyMs: Date.now() - context.startTime
-							},
-							finalUsage.cache_read_input_tokens,
-							finalUsage.cache_creation_input_tokens
 						);
 					}
 
@@ -214,7 +206,7 @@ export class OpenAIStreamHandler {
 
 						for (const line of lines) {
 							if (cancelled) break;
-							if (!line.startsWith('data: ')) continue;
+							if (finalized || !line.startsWith('data: ')) continue;
 
 							const data = line.slice(6);
 							if (data === '[DONE]') {
@@ -240,45 +232,36 @@ export class OpenAIStreamHandler {
 
 									if (block?.type === 'tool_use') {
 										const originalName = context.reverseToolMapping[block.name] ?? block.name;
-										const toolCall: ActiveToolCall = {
+
+										const outputIndex = toolCallIndex++;
+										activeToolCalls.set(event.index, {
 											id: block.id,
 											name: originalName,
 											inputJson: '',
-											blockIndex: event.index,
-											outputIndex: nextToolCallIndex++
-										};
-
-										activeToolCalls.set(event.index, toolCall);
+											index: event.index,
+											outputIndex
+										});
 
 										safeEnqueue(
 											new TextEncoder().encode(
-												AnthropicToOpenai.toolCallChunk(
-													streamId,
-													modelName,
-													toolCall.outputIndex,
-													block.id,
-													originalName,
-													undefined,
-													null
-												)
+												AnthropicToOpenai.toolCallChunk(streamId, modelName, outputIndex, block.id, originalName, undefined, null)
 											)
 										);
 									}
 								}
 
-								if (event.type === 'content_block_stop') {
-									const toolCall = activeToolCalls.get(event.index);
-									if (toolCall) {
-										flushToolCall(toolCall, 'complete');
-									}
+								if (event.type === 'content_block_stop' && activeToolCalls.has(event.index)) {
+									flushToolCall(event.index, 'complete');
 								}
 
-								if (event.type === 'content_block_delta' && event.delta?.type === 'input_json_delta') {
-									const toolCall = activeToolCalls.get(event.index);
-									if (toolCall) {
-										toolCall.inputJson += event.delta.partial_json ?? '';
-										continue;
-									}
+								if (
+									event.type === 'content_block_delta' &&
+									activeToolCalls.has(event.index) &&
+									event.delta?.type === 'input_json_delta' &&
+									activeToolCalls.has(event.index)
+								) {
+									activeToolCalls.get(event.index)!.inputJson += event.delta.partial_json ?? '';
+									continue;
 								}
 
 								if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta' && event.delta?.text) {
@@ -316,14 +299,9 @@ export class OpenAIStreamHandler {
 
 								if (event.type === 'message_stop') {
 									if (stopReason === 'tool_use') {
-										for (const toolCall of activeToolCalls.values()) {
-											if (!flushToolCall(toolCall, 'salvage')) {
-												salvageFailed = true;
-											}
+										for (const index of activeToolCalls.keys()) {
+											if (!flushToolCall(index, 'salvage')) salvageFailed = true;
 										}
-									} else if (activeToolCalls.size > 0) {
-										logger.error(`Open tool calls at message_stop stop_reason=${stopReason ?? 'none'} ${describeOpenTools()}`);
-										activeToolCalls.clear();
 									}
 
 									finalizeStream(false);
@@ -370,7 +348,7 @@ export class OpenAIStreamHandler {
 			},
 			cancel(reason) {
 				cancelled = true;
-				logger.error(`Downstream cancelled stream id=${streamId} reason=${String(reason)} ${describeOpenTools()}`);
+				logger.error(`Downstream cancelled stream id=${streamId} reason=${String(reason)} ${describeOpenTool()}`);
 				reader.cancel(reason).catch(() => {});
 			}
 		});

@@ -1,0 +1,35 @@
+version: '3'
+
+# As in Cursor Chat Transit: package scripts own behavior; Task is a thin entry point.
+# Ordered work uses cmds. Task deps may run concurrently.
+tasks:
+  default:
+    desc: List development commands
+    cmds: [task --list]
+  setup:
+    desc: Check Node and install the locked dependency tree
+    cmds:
+      - node scripts/doctor.mjs
+      - corepack pnpm install --frozen-lockfile
+      - corepack pnpm browser:install
+  node:
+    desc: Show the development runtime
+    cmds: [node scripts/doctor.mjs]
+  build:
+    desc: Build shared, API, web and extension in order
+    cmds: [corepack pnpm build]
+  check:
+    desc: Build, check types, lint, test and exercise the dashboard
+    cmds: [corepack pnpm check]
+  test:
+    desc: Run API and extension regression tests
+    cmds: [corepack pnpm test]
+  lint:
+    desc: Run workspace lint checks
+    cmds: [corepack pnpm -r run lint]
+  package:
+    desc: Run all checks, package VSIX and verify actual archive bytes
+    cmds: [corepack pnpm package]
+  install:
+    desc: Check, package, verify and install in Cursor
+    cmds: [corepack pnpm package --install]

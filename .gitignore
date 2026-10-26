@@ -31,9 +31,26 @@ coverage/
 .nyc_output/
 
 # IDEs and editors
+.vscode/
 .idea/
 *.sublime-workspace
 .history/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Local databases
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
 
 # OS generated files
 .DS_Store
@@ -66,3 +83,14 @@ out/
 /apps/extension/LICENSE
 /apps/extension/README.md
 /apps/extension/CHANGELOG.md
+
+# Local packaging
+/install/
+/changes.patch
+/DELIVERY.json
+/SOURCE-SHA256SUMS.txt
+
+# Generated audit output
+/docs/audit-*/evidence/
+/docs/review-*/evidence/
+/docs/review-*/REPORT*.html

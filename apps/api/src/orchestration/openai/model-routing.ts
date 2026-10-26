@@ -58,7 +58,7 @@ export class CompletionModelRouting {
 				}
 			: withModel;
 
-		if (resolved.reasoningBudget) {
+		if (resolved.reasoningBudget && openaiBody.reasoning?.effort === undefined && openaiBody.reasoning_effort === undefined) {
 			const withReasoning: OpenAIChatRequest = {
 				...withServiceTier,
 				reasoning: { effort: resolved.reasoningBudget }

@@ -17,6 +17,9 @@ export class RuntimeStateDefaults {
 			tunnel: {
 				status: 'stopped',
 				url: null,
+				publicStatus: 'unchecked',
+				publicCheckedAt: null,
+				publicError: null,
 				lastSeenAt: now,
 				lastError: null,
 				ownerWindowId: null

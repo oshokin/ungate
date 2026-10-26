@@ -1,12 +1,20 @@
+import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
+import {
+	dashboardActionSchema,
+	type DashboardActionRequest,
+	type ServiceState,
+	type LogEntry,
+	type TunnelState,
+	type WebviewToExtension
+} from '@ungate/shared/frontend';
 import * as vscode from 'vscode';
 
+import { DashboardApiBridge } from './dashboard-api-bridge';
 import { SharedLogStore } from './runtime-state/shared-log-store';
 import { LogRingBuffer } from './utils/log-ring-buffer';
-
-import type { LogEntry, TunnelState, WebviewToExtension } from '@ungate/shared/frontend';
 
 const LOG_BUFFER_SIZE = 500;
 const LOG_POLL_INTERVAL_MS = 500;
@@ -15,7 +23,7 @@ const MSGS_SIMPLE = ['webview-ready', 'restart-server', 'start-tunnel', 'stop-tu
 
 export type Msg =
 	| { type: 'open-external-url'; url: string }
-	| { type: 'set-key-fix-enabled'; enabled: boolean }
+	| DashboardActionRequest
 	| { type: 'clear-logs'; source: 'api' | 'tunnel' }
 	| Extract<WebviewToExtension, { type: (typeof MSGS_SIMPLE)[number] }>;
 
@@ -27,24 +35,48 @@ export class Dashboard {
 	private apiLogFileOffset = 0;
 	private tunnelLogFileOffset = 0;
 	private logPollTimer: NodeJS.Timeout | null = null;
+	private htmlSource: string | null = null;
 
 	constructor(
 		private readonly context: vscode.ExtensionContext,
 		private readonly onMessage: (message: Msg) => void
-	) {}
+	) {
+		this.prepare();
+	}
+
+	/** Reads dashboard HTML during activation so a status-bar click only opens the panel. */
+	prepare(): void {
+		try {
+			this.readHtmlSource();
+		} catch {
+			this.htmlSource = null;
+		}
+	}
 
 	show(): void {
 		if (this.panel) {
-			this.panel.reveal();
+			this.panel.reveal(vscode.ViewColumn.Active);
 
 			return;
 		}
 
-		this.panel = vscode.window.createWebviewPanel('ungate', 'Ungate', vscode.ViewColumn.One, this.getWebviewOptions());
-
-		this.panel.iconPath = vscode.Uri.file(path.join(this.context.extensionPath, 'resources', 'icon.png'));
+		const panel = vscode.window.createWebviewPanel('ungate', 'Ungate', vscode.ViewColumn.Active, this.getWebviewOptions());
+		this.panel = panel;
+		panel.webview.html = this.buildHtml();
+		panel.iconPath = vscode.Uri.file(path.join(this.context.extensionPath, 'resources', 'icon.png'));
+		const bridge = new DashboardApiBridge(
+			() => this.currentPort,
+			(response) => {
+				void panel.webview.postMessage(response);
+			}
+		);
 
 		this.panel.webview.onDidReceiveMessage((message: unknown) => {
+			if (typeof message === 'object' && message !== null && 'type' in message && message.type === 'api-request') {
+				void bridge.handle(message);
+
+				return;
+			}
 			const parsed = Dashboard.parseIncomingMessage(message);
 
 			if (!parsed) {
@@ -54,21 +86,22 @@ export class Dashboard {
 			this.onMessage(parsed);
 		});
 
-		this.panel.webview.html = this.buildHtml();
-
-		this.panel.onDidChangeViewState(() => {
+		panel.onDidChangeViewState(() => {
 			if (this.panel?.visible) {
 				this.sendBufferedLogs('api');
 				this.sendBufferedLogs('tunnel');
 			}
 		});
 
-		this.panel.onDidDispose(() => {
+		panel.onDidDispose(() => {
+			bridge.dispose();
 			this.stopLogPoll();
-			this.panel = null;
+			if (this.panel === panel) this.panel = null;
 		});
 
-		this.startLogPoll();
+		setTimeout(() => {
+			if (this.panel === panel) this.startLogPoll();
+		}, 0);
 	}
 
 	setPort(port: number | null): void {
@@ -78,12 +111,7 @@ export class Dashboard {
 
 		this.currentPort = port;
 
-		if (this.panel) {
-			this.panel.webview.options = this.getWebviewOptions();
-		}
-
 		this.sendPort();
-		this.rebuildHtml();
 	}
 
 	pushLog(source: 'api' | 'tunnel', entry: LogEntry): void {
@@ -109,8 +137,12 @@ export class Dashboard {
 		this.panel?.webview.postMessage({ type: 'tunnel-status', state: tunnelState });
 	}
 
-	sendKeyFixState(enabled: boolean): void {
-		this.panel?.webview.postMessage({ type: 'key-fix-state', enabled });
+	sendServiceState(state: ServiceState): void {
+		this.panel?.webview.postMessage({ type: 'service-state', state });
+	}
+
+	sendActionResult(id: string, error?: string): void {
+		this.panel?.webview.postMessage({ type: 'action-result', id, ...(error ? { error } : {}) });
 	}
 
 	sendTunnelState(state: TunnelState): void {
@@ -143,14 +175,10 @@ export class Dashboard {
 			return { type: 'open-external-url', url };
 		}
 
-		if (type === 'set-key-fix-enabled') {
-			const enabled = record.enabled;
+		if (type === 'dashboard-action') {
+			const parsed = dashboardActionSchema.safeParse(raw);
 
-			if (typeof enabled !== 'boolean') {
-				return null;
-			}
-
-			return { type: 'set-key-fix-enabled', enabled };
+			return parsed.success ? parsed.data : null;
 		}
 
 		if (type === 'clear-logs') {
@@ -172,16 +200,11 @@ export class Dashboard {
 		return null;
 	}
 
-	private getWebviewOptions(): vscode.WebviewOptions {
-		// The webview runs on the user's machine, but the API listens wherever the extension host runs.
-		// Under Remote SSH, WSL or Dev Containers those are different machines, and the editor only forwards
-		// localhost ports listed in portMapping. In a local window the mapping changes nothing.
-		const portMapping = this.currentPort ? [{ webviewPort: this.currentPort, extensionHostPort: this.currentPort }] : [];
-
+	private getWebviewOptions(): vscode.WebviewPanelOptions & vscode.WebviewOptions {
 		return {
 			enableScripts: true,
-			localResourceRoots: [vscode.Uri.file(this.getWebDistPath())],
-			portMapping
+			retainContextWhenHidden: true,
+			localResourceRoots: [vscode.Uri.file(this.getWebDistPath())]
 		};
 	}
 
@@ -195,14 +218,6 @@ export class Dashboard {
 
 	private sendPort(): void {
 		this.panel?.webview.postMessage({ type: 'port', port: this.currentPort });
-	}
-
-	private rebuildHtml(): void {
-		if (!this.panel) {
-			return;
-		}
-
-		this.panel.webview.html = this.buildHtml();
 	}
 
 	private sendBufferedLogs(source: 'api' | 'tunnel'): void {
@@ -252,20 +267,26 @@ export class Dashboard {
 		this.tunnelLogFileOffset = fileSize;
 	}
 
+	private readHtmlSource(): string {
+		this.htmlSource ??= fs.readFileSync(path.join(this.getWebDistPath(), 'index.html'), 'utf-8');
+
+		return this.htmlSource;
+	}
+
 	private buildHtml(): string {
 		const distPath = this.getWebDistPath();
 		const assetsUri = this.panel!.webview.asWebviewUri(vscode.Uri.file(path.join(distPath, 'assets')));
 		const faviconUri = this.panel!.webview.asWebviewUri(vscode.Uri.file(path.join(distPath, 'favicon.png')));
 
-		let html = fs.readFileSync(path.join(distPath, 'index.html'), 'utf-8');
+		let html = this.readHtmlSource();
+		const nonce = randomUUID().replaceAll('-', '');
+		const csp = `default-src 'none'; img-src ${this.panel!.webview.cspSource} data:; style-src ${this.panel!.webview.cspSource} 'unsafe-inline'; script-src ${this.panel!.webview.cspSource} 'nonce-${nonce}'; connect-src 'none';`;
+		html = html.replace('<head>', `<head><meta http-equiv="Content-Security-Policy" content="${csp}">`);
 
 		html = html.replace(/src="\/assets\//g, `src="${assetsUri.toString()}/`);
 		html = html.replace(/href="\/assets\//g, `href="${assetsUri.toString()}/`);
 		html = html.replace('href="/favicon.png"', `href="${faviconUri.toString()}"`);
-		html = html.replace(
-			'</head>',
-			`<script>window.__PORT__ = ${this.currentPort}; window.__TS__ = ${Date.now()};</script>\n\t</head>`
-		);
+		html = html.replace('</head>', `<script nonce="${nonce}">window.__TS__ = ${Date.now()};</script>\n\t</head>`);
 
 		return html;
 	}

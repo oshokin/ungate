@@ -1,6 +1,12 @@
-import { ClaudeCliVersion } from '@ungate/shared/frontend';
+import { ClaudeCliVersion, isReasoningBudgetTier, isTunnelProtocol } from '@ungate/shared/frontend';
 
-import type { AppSettings, ClaudeCliVersionMode, ModelMappingConfig, ModelMappingProvider } from '@ungate/shared/frontend';
+import type {
+	AppSettings,
+	ClaudeCliVersionMode,
+	ModelMappingConfig,
+	ModelMappingProvider,
+	TunnelProtocol
+} from '@ungate/shared/frontend';
 
 interface SettingsFormStore {
 	readonly port: string;
@@ -8,15 +14,19 @@ interface SettingsFormStore {
 	readonly quiet: boolean;
 	readonly extraInstruction: string;
 	readonly models: ModelMappingConfig[];
+	readonly modelsDirty: boolean;
 	readonly claudeCliVersionMode: ClaudeCliVersionMode;
 	readonly claudeCliVersionCustom: string;
+	readonly tunnelProtocol: TunnelProtocol;
 	setPort(value: string): void;
 	setApiKey(value: string): void;
 	setQuiet(value: boolean): void;
 	setExtraInstruction(value: string): void;
 	setModels(models: ModelMappingConfig[]): void;
+	markModelsSaved(): void;
 	setClaudeCliVersionMode(mode: ClaudeCliVersionMode): void;
 	setClaudeCliVersionCustom(value: string): void;
+	setTunnelProtocol(value: string): void;
 	syncFromAppSettings(settings: AppSettings): void;
 	validate(): string | null;
 	toSavePayload(): Partial<AppSettings>;
@@ -27,8 +37,10 @@ let apiKey = $state('');
 let quiet = $state(false);
 let extraInstruction = $state('');
 let models = $state<ModelMappingConfig[]>([]);
+let savedModelsFingerprint = '';
 let claudeCliVersionMode = $state<ClaudeCliVersionMode>('stable');
 let claudeCliVersionCustom = $state('');
+let tunnelProtocol = $state<TunnelProtocol>('http2');
 
 function cloneModels(items: ModelMappingConfig[]): ModelMappingConfig[] {
 	return items.map((model, index) => {
@@ -44,14 +56,7 @@ function cloneModels(items: ModelMappingConfig[]): ModelMappingConfig[] {
 			provider = 'openai';
 		}
 
-		if (
-			reasoningBudget !== 'none' &&
-			reasoningBudget !== 'low' &&
-			reasoningBudget !== 'medium' &&
-			reasoningBudget !== 'high' &&
-			reasoningBudget !== 'xhigh' &&
-			reasoningBudget !== 'max'
-		) {
+		if (!isReasoningBudgetTier(reasoningBudget)) {
 			reasoningBudget = null;
 		}
 
@@ -67,14 +72,21 @@ function withSortOrder(items: ModelMappingConfig[]): ModelMappingConfig[] {
 	return items.map((model, index) => ({ ...model, sortOrder: index }));
 }
 
+function modelsFingerprint(items: ModelMappingConfig[]): string {
+	return JSON.stringify(withSortOrder(items));
+}
+
 function syncFromAppSettings(settings: AppSettings): void {
+	const nextModels = cloneModels(settings.models);
 	port = String(settings.port);
 	apiKey = settings.apiKey ?? '';
 	quiet = settings.quiet;
 	extraInstruction = settings.extraInstruction ?? '';
 	claudeCliVersionMode = settings.claudeCliVersionMode ?? 'stable';
 	claudeCliVersionCustom = settings.claudeCliVersionCustom ?? '';
-	models = cloneModels(settings.models);
+	tunnelProtocol = isTunnelProtocol(settings.tunnelProtocol) ? settings.tunnelProtocol : 'http2';
+	models = nextModels;
+	savedModelsFingerprint = modelsFingerprint(nextModels);
 }
 
 function setPort(value: string): void {
@@ -97,6 +109,10 @@ function setModels(nextModels: ModelMappingConfig[]): void {
 	models = withSortOrder(nextModels);
 }
 
+function markModelsSaved(): void {
+	savedModelsFingerprint = modelsFingerprint(models);
+}
+
 function setClaudeCliVersionMode(mode: ClaudeCliVersionMode): void {
 	claudeCliVersionMode = mode;
 }
@@ -105,12 +121,18 @@ function setClaudeCliVersionCustom(value: string): void {
 	claudeCliVersionCustom = value;
 }
 
+function setTunnelProtocol(value: string): void {
+	if (isTunnelProtocol(value)) tunnelProtocol = value;
+}
+
 function validate(): string | null {
 	const parsedPort = parseInt(port, 10);
 
 	if (!Number.isInteger(parsedPort) || parsedPort < 1 || parsedPort > 65535) {
 		return 'Port must be an integer between 1 and 65535.';
 	}
+
+	if (!apiKey.trim()) return 'An Ungate API key is required. Copy the saved key into Cursor Settings → Models.';
 
 	for (const model of models) {
 		if (!model.id.trim()) {
@@ -142,10 +164,11 @@ function toSavePayload(): Partial<AppSettings> {
 	const payload: Partial<AppSettings> = {
 		port: parsedPort,
 		quiet,
-		apiKey: apiKey.trim() || null,
+		apiKey: apiKey.trim(),
 		extraInstruction: extraInstruction.trim() || null,
 		claudeCliVersionMode,
 		claudeCliVersionCustom: claudeCliVersionCustom.trim() || null,
+		tunnelProtocol,
 		models: cloneModels(models)
 	};
 
@@ -169,19 +192,27 @@ export function getSettingsFormStore(): SettingsFormStore {
 		get models() {
 			return models;
 		},
+		get modelsDirty() {
+			return modelsFingerprint(models) !== savedModelsFingerprint;
+		},
 		get claudeCliVersionMode() {
 			return claudeCliVersionMode;
 		},
 		get claudeCliVersionCustom() {
 			return claudeCliVersionCustom;
 		},
+		get tunnelProtocol() {
+			return tunnelProtocol;
+		},
 		setPort,
 		setApiKey,
 		setQuiet,
 		setExtraInstruction,
 		setModels,
+		markModelsSaved,
 		setClaudeCliVersionMode,
 		setClaudeCliVersionCustom,
+		setTunnelProtocol,
 		syncFromAppSettings,
 		validate,
 		toSavePayload

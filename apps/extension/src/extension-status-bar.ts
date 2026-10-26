@@ -4,21 +4,72 @@ import { extensionCommands } from './extension-commands';
 
 import type { ApiStatus as ApiBarStatus, TunnelState } from '@ungate/shared/frontend';
 
+export type UngateConnectionStatus = 'ready' | 'connecting' | 'offline';
+
 export class ExtensionStatusBar {
-	public static formatApiTip(apiState: ApiBarStatus): string {
+	public static connectionStatus(apiState: ApiBarStatus, tunnel: TunnelState): UngateConnectionStatus {
+		if (apiState === 'running' && tunnel.status === 'running' && tunnel.publicStatus === 'reachable') {
+			return 'ready';
+		}
+
+		if (
+			apiState === 'starting' ||
+			tunnel.status === 'starting' ||
+			tunnel.status === 'installing' ||
+			(tunnel.status === 'running' &&
+				(tunnel.publicStatus === 'checking' || tunnel.publicStatus === 'unchecked' || !tunnel.publicStatus))
+		) {
+			return 'connecting';
+		}
+
+		return 'offline';
+	}
+
+	public static statusText(status: UngateConnectionStatus): string {
+		const labels: Record<UngateConnectionStatus, string> = {
+			ready: '$(check) Ungate: Ready',
+			connecting: '$(sync~spin) Ungate: Connecting',
+			offline: '$(warning) Ungate: Offline'
+		};
+
+		return labels[status];
+	}
+
+	public static accessibilityLabel(status: UngateConnectionStatus): string {
+		const labels: Record<UngateConnectionStatus, string> = {
+			ready: 'Ungate ready. API and public tunnel are available.',
+			connecting: 'Ungate connecting. API or public tunnel is being checked.',
+			offline: 'Ungate offline. API or public tunnel is unavailable.'
+		};
+
+		return labels[status];
+	}
+
+	public static formatApiTip(apiState: ApiBarStatus, apiUrl: string | null, apiError: string | null): string {
 		const statusLine: Record<ApiBarStatus, string> = {
 			starting: '$(sync~spin) API: starting',
 			running: '$(check) API: running',
 			stopped: '$(circle-slash) API: stopped',
 			error: '$(error) API: error'
 		};
+		const details = [statusLine[apiState]];
 
-		return statusLine[apiState];
+		if (apiUrl) details.push(`Local: \`${apiUrl}\``);
+		if (apiError) details.push(`Last error: ${apiError}`);
+
+		return details.join('\n\n');
 	}
 
 	public static formatTunnelTip(tunnel: TunnelState, tunnelApiUrl: string | null): string {
 		if (tunnelApiUrl) {
-			return `$(globe) Tunnel: running\n\n\`${tunnelApiUrl}\``;
+			const publicRoute =
+				tunnel.publicStatus === 'reachable'
+					? '$(check) Public route: reachable'
+					: tunnel.publicStatus === 'unreachable'
+						? `$(error) Public route: unavailable (${tunnel.publicError ?? 'health check failed'})`
+						: '$(sync~spin) Public route: checking';
+
+			return `$(globe) Tunnel process: running\n\n${publicRoute}\n\n\`${tunnelApiUrl}\``;
 		}
 
 		if (tunnel.status === 'starting' || tunnel.status === 'installing') {
@@ -32,14 +83,6 @@ export class ExtensionStatusBar {
 		return '$(circle-slash) Tunnel: not started';
 	}
 
-	public static formatKeyFixTip(keyFixEnabled: boolean): string {
-		if (keyFixEnabled) {
-			return '$(check) OpenAI API Key: on';
-		}
-
-		return '$(circle-slash) OpenAI API Key: off';
-	}
-
 	public static tunnelRestartLabel(tunnel: TunnelState): string {
 		if (tunnel.status === 'stopped') {
 			return 'Start tunnel';
@@ -49,17 +92,19 @@ export class ExtensionStatusBar {
 	}
 
 	public static createTooltip(
+		status: UngateConnectionStatus,
 		apiState: ApiBarStatus,
+		apiUrl: string | null,
+		apiError: string | null,
 		tunnel: TunnelState,
-		tunnelApiUrl: string | null,
-		keyFixEnabled: boolean
+		tunnelApiUrl: string | null
 	): vscode.MarkdownString {
 		const tip = new vscode.MarkdownString('', true);
 		tip.isTrusted = true;
 
-		tip.appendMarkdown(this.formatApiTip(apiState));
+		tip.appendMarkdown(`**${this.statusText(status).replace(/\$\([^)]+\)\s*/u, '')}**`);
 		tip.appendMarkdown('\n\n');
-		tip.appendMarkdown(this.formatKeyFixTip(keyFixEnabled));
+		tip.appendMarkdown(this.formatApiTip(apiState, apiUrl, apiError));
 		tip.appendMarkdown('\n\n');
 		tip.appendMarkdown(this.formatTunnelTip(tunnel, tunnelApiUrl));
 
@@ -75,35 +120,10 @@ export class ExtensionStatusBar {
 			actions.push(`[$(clippy) Copy URL](command:${extensionCommands.copyTunnelUrl})`);
 		}
 
-		let keyFixLabel = 'Turn on key auto-fix';
-
-		if (keyFixEnabled) {
-			keyFixLabel = 'Turn off key auto-fix';
-		}
-
-		actions.push(`[$(settings-gear) ${keyFixLabel}](command:${extensionCommands.toggleKeyFix})`);
+		actions.push(`[$(settings-gear) Cursor Models](command:${extensionCommands.openCursorModels})`);
 
 		tip.appendMarkdown(actions.join(' · '));
 
 		return tip;
-	}
-
-	public static barText(apiState: ApiBarStatus, tunnel: TunnelState): string {
-		const apiIcon: Record<ApiBarStatus, string> = {
-			starting: '$(sync~spin)',
-			running: '$(check)',
-			stopped: '$(circle-slash)',
-			error: '$(error)'
-		};
-
-		const tunnelIcon: Record<TunnelState['status'], string> = {
-			running: '$(globe)',
-			starting: '$(sync~spin)',
-			installing: '$(sync~spin)',
-			stopped: '$(circle-slash)',
-			error: '$(error)'
-		};
-
-		return `Ungate: API ${apiIcon[apiState]} | Tunnel ${tunnelIcon[tunnel.status]}`;
 	}
 }

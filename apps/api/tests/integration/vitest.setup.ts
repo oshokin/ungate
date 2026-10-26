@@ -11,11 +11,9 @@ export function resetIntegrationDatabase(): void {
 
 	try {
 		sqlite.exec('PRAGMA foreign_keys = OFF;');
-		sqlite.exec('DELETE FROM requests;');
 		sqlite.exec('DELETE FROM provider_settings;');
 		sqlite.exec('DELETE FROM model_mappings;');
 		sqlite.exec('DELETE FROM app_settings;');
-		sqlite.exec("DELETE FROM sqlite_sequence WHERE name = 'requests';");
 		sqlite.exec('PRAGMA foreign_keys = ON;');
 		sqlite.exec('COMMIT');
 	} catch (error) {

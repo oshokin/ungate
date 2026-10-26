@@ -4,7 +4,7 @@ Ungate runs a local proxy in front of your Claude, ChatGPT, and MiniMax subscrip
 
 ## Supported versions
 
-Only the latest release on [Open VSX](https://open-vsx.org/extension/orchidfiles/ungate) and the matching `main` branch on GitHub receive security fixes. Older releases are not patched.
+Only the latest release of this fork and the matching `main` branch receive security fixes. Older releases are not patched.
 
 | Version | Supported |
 | --- | --- |
@@ -14,10 +14,7 @@ Only the latest release on [Open VSX](https://open-vsx.org/extension/orchidfiles
 
 ## Reporting a vulnerability
 
-Report through either channel:
-
-- **GitHub Private vulnerability reporting** — [report here](https://github.com/orchidfiles/ungate/security/advisories/new). Encrypted end to end and kept out of public issue trackers.
-- **Email:** `orchid@orchidfiles.com`. For other channels, see [orchidfiles.com](https://orchidfiles.com).
+Use [GitHub Private vulnerability reporting](https://github.com/oshokin/ungate/security/advisories/new). Reports stay outside public issue trackers.
 
 Please **do not** file public issues for suspected vulnerabilities.
 
@@ -111,7 +108,7 @@ These are documented in [README.md](README.md) and listed here so they are not r
 
 ## Published advisories
 
-Past advisories are listed on the [GitHub Security Advisories tab](https://github.com/orchidfiles/ungate/security/advisories). When a fix ships, the advisory credits the reporter with their permission. If you reported something that was fixed and want your handle included, mention it in the original report or reply to the advisory draft.
+Past advisories are listed on the [GitHub Security Advisories tab](https://github.com/oshokin/ungate/security/advisories). When a fix ships, the advisory credits the reporter with their permission. If you reported something that was fixed and want your handle included, mention it in the original report or reply to the advisory draft.
 
 ## What we will and will not do
 

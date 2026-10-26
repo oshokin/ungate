@@ -9,10 +9,15 @@
 	},
 	"scripts": {
 		"tunnel": "pnpm --filter @ungate/scripts run tunnel",
-		"package:build": "bash scripts/build-package/run.sh",
+		"package:build": "node scripts/run.mjs package",
 		"lint:fix": "pnpm -r --parallel run lint:fix",
-		"test": "pnpm --filter ungate test && pnpm --filter @ungate/api test",
-		"prepare": "husky"
+		"test": "node scripts/run.mjs test",
+		"prepare": "husky",
+		"build": "node scripts/run.mjs build",
+		"check": "node scripts/run.mjs check",
+		"package": "node scripts/run.mjs package",
+		"package:vsix": "node scripts/run.mjs vsix",
+		"browser:install": "node scripts/run.mjs browser"
 	},
 	"devDependencies": {
 		"@ungate/dev-kit": "workspace:*",

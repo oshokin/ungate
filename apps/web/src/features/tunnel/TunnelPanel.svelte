@@ -1,132 +1,203 @@
 <script lang="ts">
-import { sleep } from '@ungate/shared/frontend';
+import IconCheck from 'virtual:icons/lucide/check';
 import IconCopy from 'virtual:icons/lucide/copy';
-import IconPlay from 'virtual:icons/lucide/play';
-import IconRotateCcw from 'virtual:icons/lucide/rotate-ccw';
-import IconSquare from 'virtual:icons/lucide/square';
+import IconEye from 'virtual:icons/lucide/eye';
+import IconEyeOff from 'virtual:icons/lucide/eye-off';
+
+import { getActionStore, performAction, runDashboardAction } from '$shared/actions.svelte';
+import { Api } from '$shared/api';
+import { getServiceStore } from '$shared/service-store.svelte';
+import { createToastWatcher, showToast } from '$shared/toast.svelte';
 
 import { getTunnelStore } from './tunnel-store.svelte';
 
 const store = getTunnelStore();
-
-const statusLabel: Record<string, string> = {
-	stopped: 'Stopped',
-	installing: 'Downloading cloudflared...',
-	starting: 'Starting...',
-	running: 'Running',
-	error: 'Error'
-};
-
-const statusDotClass: Record<string, string> = {
-	stopped: 'bg-surface-400',
-	installing: 'bg-warning-500 animate-pulse',
-	starting: 'bg-warning-500 animate-pulse',
-	running: 'bg-success-500',
-	error: 'bg-error-500'
-};
-
+const service = getServiceStore();
+const actions = getActionStore();
+const watchTunnelError = createToastWatcher();
+const labels = { stopped: 'Stopped', installing: 'Installing…', starting: 'Starting…', running: 'Running', error: 'Error' };
+const tunnelLabel = $derived(labels[store.tunnel.status]);
 let copied = $state(false);
+let apiKeyCopied = $state(false);
+let copiedTimer: ReturnType<typeof setTimeout> | null = null;
+let apiKeyCopiedTimer: ReturnType<typeof setTimeout> | null = null;
+let apiKey = $state('');
+let savedApiKey = $state('');
+let revealApiKey = $state(false);
+let savingApiKey = $state(false);
 
-function handleCopy() {
-	if (!store.tunnel.url) return;
-
-	void navigator.clipboard.writeText(`${store.tunnel.url}/v1`).then(async () => {
+async function copyTunnelUrl(): Promise<void> {
+	try {
+		await runDashboardAction('copy-tunnel-url');
 		copied = true;
-		await sleep(2000);
-		copied = false;
-	});
+		if (copiedTimer) clearTimeout(copiedTimer);
+		copiedTimer = setTimeout(() => {
+			copied = false;
+		}, 3000);
+	} catch {
+		// The shared toast renders the error.
+	}
 }
 
-function handleKeyFixChange(event: Event): void {
-	const target = event.currentTarget as HTMLInputElement;
-	store.setKeyFixEnabled(target.checked);
+async function copyApiKey(): Promise<void> {
+	try {
+		await runDashboardAction('copy-api-key');
+		apiKeyCopied = true;
+		if (apiKeyCopiedTimer) clearTimeout(apiKeyCopiedTimer);
+		apiKeyCopiedTimer = setTimeout(() => {
+			apiKeyCopied = false;
+		}, 3000);
+	} catch {
+		// The shared toast renders the error.
+	}
 }
+
+async function loadApiKey(): Promise<void> {
+	try {
+		const settings = await Api.fetchSettings();
+		apiKey = settings.apiKey ?? '';
+		savedApiKey = apiKey;
+	} catch {
+		// The settings page owns the persistent load error.
+	}
+}
+
+async function saveApiKey(): Promise<void> {
+	if (!apiKey.trim()) {
+		showToast('Ungate API key cannot be empty', 'error');
+
+		return;
+	}
+	savingApiKey = true;
+	try {
+		await Api.updateSettings({ apiKey: apiKey.trim() });
+		savedApiKey = apiKey.trim();
+		await runDashboardAction('restart-services');
+		showToast('API key saved', 'status');
+	} catch {
+		// The shared action/toast layer renders the error.
+	} finally {
+		savingApiKey = false;
+	}
+}
+
+$effect(() => {
+	if (service.state.status === 'ready') void loadApiKey();
+});
+$effect(() => watchTunnelError(store.tunnel.error, 'error'));
 </script>
 
-<div class="card preset-tonal-surface border border-surface-700/30 p-5 space-y-4">
-	<div class="flex items-center justify-between">
-		<p class="text-sm font-semibold">Cloudflare Tunnel</p>
-		<div class="flex items-center gap-2">
-			<span class="size-2 rounded-full {statusDotClass[store.tunnel.status] ?? 'bg-surface-400'}"></span>
-			<span class="text-xs text-surface-400">{statusLabel[store.tunnel.status] ?? store.tunnel.status}</span>
+<section
+	class="ug-card ug-stack"
+	aria-label="Connection">
+	<div class="ug-row">
+		<h1 class="ug-title">Connection</h1>
+		<div class="ug-statuses">
+			<span
+				>API {service.state.version ?? (service.state.status === 'incompatible' ? 'legacy' : '')} · {service.state.status ===
+				'ready'
+					? 'Ready'
+					: service.state.status}</span>
+			<span
+				><span
+					class="ug-dot"
+					class:ug-online={store.tunnel.status === 'running'}></span
+				>Tunnel · {tunnelLabel}</span>
 		</div>
 	</div>
-
-	{#if store.tunnel.status === 'running' && store.tunnel.url}
-		<div class="space-y-2">
-			<div class="flex items-center gap-2">
-				<code class="code text-surface-950-50 text-xs flex-1 truncate">{store.tunnel.url}/v1</code>
+	{#if store.tunnel.url && store.tunnel.status === 'running'}
+		<div class="ug-endpoint">
+			<input
+				readonly
+				aria-label="Tunnel API URL"
+				value={`${store.tunnel.url}/v1`} />
+			<button
+				class="ug-button ug-quiet"
+				disabled={!!actions.busy}
+				onclick={() => void copyTunnelUrl()}
+				aria-label={copied ? 'Tunnel URL copied' : 'Copy tunnel URL'}
+				title={copied ? 'Copied' : 'Copy tunnel URL'}>
+				{#if copied}<IconCheck class="size-4" />{:else}<IconCopy class="size-4" />{/if}
+			</button>
+		</div>
+		<label class="ug-label">
+			API key
+			<div class="ug-endpoint">
+				<input
+					type={revealApiKey ? 'text' : 'password'}
+					aria-label="Ungate API key"
+					autocomplete="off"
+					bind:value={apiKey} />
 				<button
-					class="btn btn-sm preset-tonal-surface"
-					onclick={handleCopy}
-					title="Copy URL">
-					<IconCopy class="size-4" />
-					{copied ? 'Copied!' : 'Copy'}
+					class="ug-button ug-quiet"
+					type="button"
+					aria-label={revealApiKey ? 'Hide API key' : 'Show API key'}
+					title={revealApiKey ? 'Hide API key' : 'Show API key'}
+					onclick={() => (revealApiKey = !revealApiKey)}>
+					{#if revealApiKey}<IconEyeOff class="size-4" />{:else}<IconEye class="size-4" />{/if}
+				</button>
+				<button
+					class="ug-button ug-quiet"
+					type="button"
+					disabled={!!actions.busy || service.state.status !== 'ready'}
+					aria-label={apiKeyCopied ? 'API key copied' : 'Copy API key'}
+					title={apiKeyCopied ? 'Copied' : 'Copy API key'}
+					onclick={() => void copyApiKey()}>
+					{#if apiKeyCopied}<IconCheck class="size-4" />{:else}<IconCopy class="size-4" />{/if}
 				</button>
 			</div>
-			<div class="text-xs text-surface-400 space-y-1">
-				<p>Paste this URL into Cursor Settings → Models → OpenAI API Base URL.</p>
-				<p>In the API Key field paste the key from Server Configuration below (or leave empty if no key is set).</p>
-				<p class="text-surface-500">The URL changes on each restart.</p>
+		</label>
+		{#if apiKey !== savedApiKey}
+			<button
+				class="ug-button"
+				disabled={savingApiKey || !!actions.busy}
+				onclick={() => void saveApiKey()}>{savingApiKey ? 'Saving…' : 'Save API key & restart API'}</button>
+		{/if}
+		<div class="ug-toolbar">
+			<button
+				class="ug-button ug-primary"
+				disabled={!!actions.busy}
+				onclick={() => performAction('open-cursor-models')}>Open Cursor Models</button>
+		</div>
+		<p class="ug-setup-hint">
+			Paste both values, then turn on <strong>Use OpenAI API Key</strong>
+			<span
+				class="ug-shortcut"
+				aria-label="Control Shift zero">
+				<kbd>Ctrl</kbd><span>+</span><kbd>Shift</kbd><span>+</span><kbd>0</kbd>
+			</span>
+			<span class="ug-muted">Turn it off for Cursor models.</span>
+		</p>
+	{:else}
+		<div class="ug-toolbar">
+			<button
+				class="ug-button ug-primary"
+				disabled={!!actions.busy || service.state.status !== 'ready'}
+				onclick={() => performAction('start-tunnel')}>
+				{actions.busy === 'start-tunnel' ? 'Starting…' : 'Start tunnel'}
+			</button>
+			<span class="ug-muted">Shared by local and SSH windows on this computer.</span>
+		</div>
+	{/if}
+	<details class="ug-details">
+		<summary>Connection details</summary>
+		<div class="ug-stack ug-muted">
+			<p
+				>Reloading a window keeps the shared API and tunnel alive. Restart tunnel reconnects cloudflared; if its URL changes, copy
+				the new URL into Cursor.</p>
+			<p
+				>Ungate cannot automatically change Cursor’s Base URL or verify its billing route. Quick Tunnels may work in practice, but
+				Cloudflare classifies them as development-only, provides no uptime guarantee, and does not officially support SSE.</p>
+			<div class="ug-toolbar">
+				<button
+					class="ug-button"
+					disabled={!!actions.busy}
+					onclick={() => performAction('restart-tunnel')}>Restart tunnel</button>
+				<button
+					class="ug-button"
+					disabled={!!actions.busy}
+					onclick={() => performAction('stop-tunnel')}>Stop tunnel only</button>
 			</div>
 		</div>
-	{/if}
-
-	{#if store.tunnel.status === 'error' && store.tunnel.error}
-		<div class="card preset-tonal-error p-3">
-			<p class="text-sm opacity-70">{store.tunnel.error}</p>
-		</div>
-	{/if}
-
-	<div class="flex gap-2">
-		{#if store.tunnel.status === 'stopped' || store.tunnel.status === 'error'}
-			<button
-				class="btn btn-sm preset-filled-primary-500"
-				onclick={() => store.startTunnel()}>
-				<IconPlay class="size-4" />
-				Start tunnel
-			</button>
-		{:else if store.tunnel.status === 'running'}
-			<button
-				class="btn btn-sm preset-outlined-surface-700 hover:preset-filled-surface-500"
-				onclick={() => store.restartTunnel()}>
-				<IconRotateCcw class="size-4" />
-				Restart
-			</button>
-			<button
-				class="btn btn-sm preset-outlined-surface-700 hover:preset-filled-surface-500"
-				onclick={() => store.stopTunnel()}>
-				<IconSquare class="size-4" />
-				Stop
-			</button>
-		{:else}
-			<button
-				class="btn btn-sm preset-tonal-surface"
-				disabled>
-				<IconRotateCcw class="size-4 animate-spin" />
-				{statusLabel[store.tunnel.status] ?? 'Working...'}
-			</button>
-			<button
-				class="btn btn-sm preset-outlined-surface-700 hover:preset-filled-surface-500"
-				onclick={() => store.stopTunnel()}>
-				<IconSquare class="size-4" />
-				Stop
-			</button>
-		{/if}
-	</div>
-
-	<div class="card preset-tonal-surface border border-surface-700/30 p-3 space-y-2">
-		<label class="flex items-start gap-3 cursor-pointer">
-			<input
-				class="checkbox mt-0.5"
-				type="checkbox"
-				checked={store.keyFixEnabled}
-				onchange={handleKeyFixChange} />
-			<span class="text-sm leading-5">Keep OpenAI API Key enabled in Cursor</span>
-		</label>
-		<p class="text-xs text-surface-400">
-			If Cursor turns off OpenAI API Key on its own, Ungate will turn it back on automatically. When you turn this off, Ungate
-			stops watching this setting and also turns OpenAI API Key off in Cursor.
-		</p>
-	</div>
-</div>
+	</details>
+</section>

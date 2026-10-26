@@ -5,14 +5,14 @@ import { apiKeyAuth } from 'src/plugins/auth';
 import { createTestApp } from '../test-harness';
 
 describe('plugins-auth', () => {
-	it('allows request when api key is not configured', async () => {
+	it('rejects requests when no server key is configured', async () => {
 		const app = createTestApp({});
 		app.get('/x', { onRequest: apiKeyAuth({ port: 0, quietMode: true }) }, async () => ({ ok: true }));
 		await app.ready();
 
 		const response = await app.inject({ method: 'GET', url: '/x' });
-		expect(response.statusCode).toBe(200);
-		expect(response.json()).toEqual({ ok: true });
+		expect(response.statusCode).toBe(503);
+		expect(response.json().error.type).toBe('configuration_error');
 		await app.close();
 	});
 

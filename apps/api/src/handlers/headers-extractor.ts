@@ -1,4 +1,4 @@
-import { logger as console } from 'src/utils/logger';
+import { logger } from 'src/utils/logger';
 
 import type { IncomingHttpHeaders } from 'node:http';
 
@@ -28,17 +28,17 @@ export class HeadersExtractor {
 			return Array.isArray(v) ? v.join(', ') : (v ?? 'none');
 		};
 
-		console.log(`\n📥 [${endpoint}] Request Details:`);
-		console.log(`   User-Agent: ${get('user-agent')}`);
-		console.log(`   Origin: ${get('origin')}`);
-		console.log(`   Referer: ${get('referer')}`);
-		console.log(`   CF-Ray: ${get('cf-ray')}`);
-		console.log(`   CF-Connecting-IP: ${get('cf-connecting-ip')} (Cursor backend server)`);
-		console.log(`   X-Forwarded-For: ${get('x-forwarded-for')}`);
-		console.log(`   X-Real-IP: ${get('x-real-ip')}`);
-		console.log(`   Anthropic-Beta: ${get('anthropic-beta')}`);
-		console.log(`   URL: ${parsedUrl.pathname}${parsedUrl.search}`);
-		console.log(`   Method: ${method}`);
+		logger.log(`\n📥 [${endpoint}] Request Details:`);
+		logger.log(`   User-Agent: ${get('user-agent')}`);
+		logger.log(`   Origin: ${get('origin')}`);
+		logger.log(`   Referer: ${get('referer')}`);
+		logger.log(`   CF-Ray: ${get('cf-ray')}`);
+		logger.log(`   CF-Connecting-IP: ${get('cf-connecting-ip')} (Cursor backend server)`);
+		logger.log(`   X-Forwarded-For: ${get('x-forwarded-for')}`);
+		logger.log(`   X-Real-IP: ${get('x-real-ip')}`);
+		logger.log(`   Anthropic-Beta: ${get('anthropic-beta')}`);
+		logger.log(`   URL: ${parsedUrl.pathname}${parsedUrl.search}`);
+		logger.log(`   Method: ${method}`);
 
 		const allHeaders: Record<string, string> = {};
 
@@ -52,6 +52,6 @@ export class HeadersExtractor {
 			}
 		}
 
-		console.log(`   All Headers: ${JSON.stringify(allHeaders, null, 2)}`);
+		logger.log(`   All Headers: ${JSON.stringify(allHeaders, null, 2)}`);
 	}
 }

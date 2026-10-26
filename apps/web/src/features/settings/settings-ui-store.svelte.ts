@@ -34,7 +34,7 @@ let authStates = $state<Record<ModelMappingProvider, ProviderAuthState>>(createA
 
 const providerLabels: Record<ModelMappingProvider, string> = {
 	claude: getProviderLabel('claude'),
-	openai: getProviderLabel('openai'),
+	openai: 'ChatGPT / Codex',
 	minimax: getProviderLabel('minimax')
 };
 

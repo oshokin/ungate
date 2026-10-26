@@ -1,3 +1,5 @@
+import { getCloudflaredBinPath, ManagedProcess } from '../utils/managed-process';
+
 import { config } from './config';
 import { RuntimeStateFileStore } from './file-store';
 import { RuntimeStateNormalizer } from './normalizer';
@@ -55,6 +57,8 @@ export class RuntimeStateStore {
 
 	public static getLeaderWindowId(state: RuntimeState, now = Date.now()): string | null {
 		const live = this.getLiveClientIds(state, now).sort();
+		// Opening another window must not preempt a healthy owner.
+		if (state.api.ownerWindowId && live.includes(state.api.ownerWindowId)) return state.api.ownerWindowId;
 
 		if (live.length === 0) {
 			return null;
@@ -74,9 +78,27 @@ export class RuntimeStateStore {
 			}
 
 			const now = Date.now();
+			if (ManagedProcess.matches(current.tunnel.pid, getCloudflaredBinPath(), current.tunnel.logPath)) {
+				// Process ownership outlives the window. Preserve its URL across host restarts.
+				current.tunnel.ownerWindowId = this.getLeaderWindowId(current);
 
+				return current;
+			}
+			if (current.tunnel.pid && ManagedProcess.isAlive(current.tunnel.pid)) {
+				current.tunnel.status = 'error';
+				current.tunnel.lastError = 'Tunnel process identity could not be verified. No process was stopped.';
+
+				return current;
+			}
+			current.tunnel.pid = undefined;
+			current.tunnel.logPath = undefined;
+			current.tunnel.port = undefined;
+			current.tunnel.startedAt = undefined;
 			current.tunnel.status = 'stopped';
 			current.tunnel.url = null;
+			current.tunnel.publicStatus = 'unchecked';
+			current.tunnel.publicCheckedAt = null;
+			current.tunnel.publicError = null;
 			current.tunnel.lastError = null;
 			current.tunnel.ownerWindowId = null;
 			current.tunnel.lastSeenAt = now;
@@ -120,7 +142,14 @@ export class RuntimeStateStore {
 	}
 
 	public static async prepareApiForBootstrap(): Promise<RuntimeState> {
-		const current = this.read();
+		let current = this.read();
+		if (current.keyFix.enabled)
+			current = await this.mutate((state) => {
+				state.keyFix.enabled = false;
+
+				return state;
+			});
+		if (current.api.status === 'stopped' && current.api.startSuppressed) return current;
 
 		const portHealthy = current.api.port !== null ? await this.isApiPortHealthy(current.api.port) : false;
 
@@ -134,7 +163,16 @@ export class RuntimeStateStore {
 
 		return await this.mutate((state) => {
 			const now = Date.now();
+			if (state.api.port !== current.api.port || state.api.lastSeenAt !== current.api.lastSeenAt) return state;
+			if (
+				state.api.status === 'starting' &&
+				now - state.api.lastSeenAt < 120000 &&
+				state.api.ownerWindowId &&
+				this.getLiveClientIds(state).includes(state.api.ownerWindowId)
+			)
+				return state;
 
+			if (state.api.pid && ManagedProcess.isAlive(state.api.pid)) return state;
 			state.api.startSuppressed = false;
 			state.api.status = 'stopped';
 			state.api.ownerWindowId = null;
@@ -194,11 +232,15 @@ export class RuntimeStateStore {
 
 	private static async isApiPortHealthy(port: number): Promise<boolean> {
 		try {
-			const response = await fetch(`http://localhost:${port}/health`, {
+			const response = await fetch(`http://127.0.0.1:${port}/health`, {
 				signal: AbortSignal.timeout(config.apiServer.portHealthRequestTimeoutMs)
 			});
 
-			return response.ok;
+			if (!response.ok) return false;
+			const raw: unknown = await response.json();
+			const health = raw as { service?: string };
+
+			return health.service === 'ungate';
 		} catch {
 			return false;
 		}

@@ -9,6 +9,7 @@ export class OpenAIOAuthClient {
 		try {
 			const response = await fetch(oauthConfig.tokenUrl, {
 				method: 'POST',
+				signal: AbortSignal.timeout(10000),
 				headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
 				body: new URLSearchParams({
 					grant_type: 'authorization_code',
@@ -43,6 +44,7 @@ export class OpenAIOAuthClient {
 		try {
 			const response = await fetch(oauthConfig.tokenUrl, {
 				method: 'POST',
+				signal: AbortSignal.timeout(10000),
 				headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
 				body: new URLSearchParams({
 					grant_type: 'refresh_token',

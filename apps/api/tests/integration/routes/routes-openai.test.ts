@@ -8,7 +8,6 @@ const resolveForChatCompletionMock = vi.fn();
 const proxyMiniMaxRequestMock = vi.fn();
 const proxyOpenAIRequestMock = vi.fn();
 const proxyRequestMock = vi.fn();
-const requestsRecordMock = vi.fn();
 
 vi.mock('src/database/model-mappings', () => ({
 	ModelMappings: {
@@ -26,12 +25,6 @@ vi.mock('src/proxy/proxy-client', () => ({
 
 vi.mock('src/proxy/anthropic-client', () => ({
 	proxyRequest: (...args: unknown[]) => proxyRequestMock(...args)
-}));
-
-vi.mock('src/database/requests', () => ({
-	Requests: {
-		record: (...args: unknown[]) => requestsRecordMock(...args)
-	}
 }));
 
 vi.mock('src/adapter/openai-to-anthropic', () => ({
@@ -58,6 +51,21 @@ function anthropicSseResponse(lines: string[]): Response {
 describe('routes-openai', () => {
 	afterEach(() => {
 		vi.clearAllMocks();
+	});
+
+	it('rejects unauthenticated chat requests', async () => {
+		const app = await withPlugin(openaiPlugin, { apiKey: 'secret' });
+
+		expect(
+			(
+				await app.inject({
+					method: 'POST',
+					url: '/v1/chat/completions',
+					payload: { model: 'test', messages: [] }
+				})
+			).statusCode
+		).toBe(403);
+		await app.close();
 	});
 
 	it('routes to minimax and returns non-stream response with headers', async () => {
@@ -91,7 +99,7 @@ describe('routes-openai', () => {
 		expect(response.headers['x-request-id']).toBeTruthy();
 		expect(response.headers['openai-processing-ms']).toBeTruthy();
 		expect(response.headers['openai-version']).toBe('2020-10-01');
-		expect(requestsRecordMock).toHaveBeenCalled();
+
 		await app.close();
 	});
 
@@ -155,7 +163,7 @@ describe('routes-openai', () => {
 		expect(response.json()).toEqual({ id: 'chatcmpl-ok', choices: [{ message: { content: 'done' } }] });
 		expect(response.headers['x-request-id']).toBeTruthy();
 		expect(response.headers['openai-version']).toBe('2020-10-01');
-		expect(requestsRecordMock).toHaveBeenCalled();
+
 		expect(proxyOpenAIRequestMock).toHaveBeenCalledWith(
 			expect.objectContaining({
 				model: 'gpt-up',
@@ -204,7 +212,7 @@ describe('routes-openai', () => {
 		expect(response.statusCode).toBe(200);
 		expect(response.json().object).toBe('chat.completion');
 		expect(response.headers['x-request-id']).toBeTruthy();
-		expect(requestsRecordMock).toHaveBeenCalled();
+
 		await app.close();
 	});
 
@@ -261,7 +269,7 @@ describe('routes-openai', () => {
 
 		expect(response.statusCode).toBe(502);
 		expect(response.json().error.message).toBe('HTTP 502');
-		expect(requestsRecordMock).toHaveBeenCalled();
+
 		await app.close();
 	});
 
@@ -370,7 +378,7 @@ describe('routes-openai', () => {
 		});
 
 		expect(response.statusCode).toBe(200);
-		expect(requestsRecordMock).toHaveBeenCalled();
+
 		await app.close();
 	});
 
@@ -396,7 +404,7 @@ describe('routes-openai', () => {
 
 		expect(response.statusCode).toBe(200);
 		expect(response.headers['content-type']).toContain('text/event-stream');
-		expect(requestsRecordMock).toHaveBeenCalled();
+
 		await app.close();
 	});
 

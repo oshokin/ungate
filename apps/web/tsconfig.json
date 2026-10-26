@@ -13,6 +13,6 @@
 		"verbatimModuleSyntax": true,
 		"noEmit": true
 	},
-	"include": ["src", "vite.config.ts", "svelte.config.js", "eslint.config.mjs"],
+	"include": ["src", "tests", "vite.config.ts", "vitest.config.ts", "svelte.config.js", "eslint.config.mjs"],
 	"exclude": ["node_modules", "dist"]
 }

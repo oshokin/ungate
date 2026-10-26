@@ -41,6 +41,36 @@ describe('VerifiedArtifact', () => {
 		expect(fs.readFileSync(destPath)).toEqual(PAYLOAD);
 	});
 
+	it('accepts exactly the size limit and verifies its checksum', async () => {
+		respondWith(PAYLOAD);
+		const target = path.join(stagingRoot, 'exact.bin');
+		await VerifiedArtifact.download({ url: 'https://example.invalid/exact', sha256: PAYLOAD_SHA256 }, target, PAYLOAD.length);
+		expect(fs.readFileSync(target)).toEqual(PAYLOAD);
+	});
+
+	it.each([undefined, '1'])('bounds streamed bytes with Content-Length=%s and cancels early (#69)', async (contentLength) => {
+		let pulls = 0;
+		const cancelled = vi.fn();
+		const body = new ReadableStream<Uint8Array>({
+			pull(controller) {
+				pulls++;
+				controller.enqueue(new Uint8Array(8));
+			},
+			cancel: cancelled
+		});
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(() => Promise.resolve(new Response(body, { headers: contentLength ? { 'Content-Length': contentLength } : {} })))
+		);
+		const target = path.join(stagingRoot, 'oversized.bin');
+		await expect(
+			VerifiedArtifact.download({ url: 'https://example.invalid/large', sha256: PAYLOAD_SHA256 }, target, 16)
+		).rejects.toThrow('size limit');
+		expect(fs.existsSync(target)).toBe(false);
+		expect(pulls).toBeLessThan(10);
+		expect(cancelled).toHaveBeenCalled();
+	});
+
 	it('rejects a one-byte modification and discards the staged file', async () => {
 		const tampered = Buffer.from(PAYLOAD);
 

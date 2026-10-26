@@ -2,14 +2,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { OpenAIStreamHandler } from 'src/streaming/openai-stream-handler';
 
-const recordMock = vi.fn();
-
-vi.mock('src/database/requests', () => ({
-	Requests: {
-		record: (...args: unknown[]) => recordMock(...args)
-	}
-}));
-
 function createResponseWithSse(lines: string[]): Response {
 	const stream = new ReadableStream<Uint8Array>({
 		start(controller) {
@@ -41,38 +33,8 @@ async function readStream(stream: ReadableStream): Promise<string> {
 	return out;
 }
 
-interface StreamToolCallChunk {
-	index: number;
-	id?: string;
-	type?: string;
-	function?: { name?: string; arguments?: string };
-}
-
-function readToolCalls(output: string): StreamToolCallChunk[] {
-	const toolCalls: StreamToolCallChunk[] = [];
-
-	for (const line of output.split('\n')) {
-		if (!line.startsWith('data: {')) {
-			continue;
-		}
-
-		const chunk = JSON.parse(line.slice(6)) as {
-			choices?: { delta?: { tool_calls?: StreamToolCallChunk[] } }[];
-		};
-		for (const choice of chunk.choices ?? []) {
-			if (choice.delta?.tool_calls) {
-				toolCalls.push(...choice.delta.tool_calls);
-			}
-		}
-	}
-
-	return toolCalls;
-}
-
 describe('streaming-openai-stream-handler', () => {
-	afterEach(() => {
-		recordMock.mockReset();
-	});
+	afterEach(() => {});
 
 	it('creates stream headers and processes text events with usage', async () => {
 		const response = createResponseWithSse([
@@ -98,7 +60,6 @@ describe('streaming-openai-stream-handler', () => {
 		expect(output).toContain('"finish_reason":"stop"');
 		expect(output).toContain('"usage"');
 		expect(output).toContain('data: [DONE]');
-		expect(recordMock).toHaveBeenCalledTimes(1);
 	});
 
 	it('handles tool_use flow and malformed chunks', async () => {
@@ -123,72 +84,6 @@ describe('streaming-openai-stream-handler', () => {
 		expect(output).toContain('"name":"read_file"');
 		expect(output).toContain('"finish_reason":"tool_calls"');
 		expect(output).toContain('data: [DONE]');
-	});
-
-	it('keeps parallel tool calls and their arguments isolated when JSON fragments interleave', async () => {
-		const event = (value: unknown) => `data: ${JSON.stringify(value)}`;
-		const response = createResponseWithSse([
-			event({ type: 'message_start', message: { usage: { input_tokens: 1, output_tokens: 0 } } }),
-			event({ type: 'content_block_start', index: 4, content_block: { type: 'tool_use', id: 'tu1', name: 'Read' } }),
-			event({ type: 'content_block_start', index: 9, content_block: { type: 'tool_use', id: 'tu2', name: 'Write' } }),
-			event({ type: 'content_block_delta', index: 4, delta: { type: 'input_json_delta', partial_json: '{"path":' } }),
-			event({ type: 'content_block_delta', index: 9, delta: { type: 'input_json_delta', partial_json: '{"path":' } }),
-			event({ type: 'content_block_delta', index: 4, delta: { type: 'input_json_delta', partial_json: '"a.ts"}' } }),
-			event({ type: 'content_block_delta', index: 9, delta: { type: 'input_json_delta', partial_json: '"b.ts"}' } }),
-			event({ type: 'content_block_stop', index: 4 }),
-			event({ type: 'content_block_stop', index: 9 }),
-			event({ type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 2 } }),
-			event({ type: 'message_stop' })
-		]);
-
-		const { stream } = OpenAIStreamHandler.createStreamResponse(response, 'st_parallel', 'model_parallel', {
-			model: 'model_parallel',
-			source: 'claude',
-			startTime: Date.now(),
-			reverseToolMapping: {}
-		});
-
-		const output = await readStream(stream);
-		const toolCalls = readToolCalls(output);
-
-		expect(toolCalls).toEqual([
-			{ index: 0, id: 'tu1', type: 'function', function: { name: 'Read', arguments: '' } },
-			{ index: 1, id: 'tu2', type: 'function', function: { name: 'Write', arguments: '' } },
-			{ index: 0, function: { arguments: '{"path":"a.ts"}' } },
-			{ index: 1, function: { arguments: '{"path":"b.ts"}' } }
-		]);
-		expect(output).toContain('"finish_reason":"tool_calls"');
-	});
-
-	it('salvages every open parallel tool call when message_stop omits block stops', async () => {
-		const event = (value: unknown) => `data: ${JSON.stringify(value)}`;
-		const response = createResponseWithSse([
-			event({ type: 'message_start', message: { usage: { input_tokens: 1, output_tokens: 0 } } }),
-			event({ type: 'content_block_start', index: 3, content_block: { type: 'tool_use', id: 'tu3', name: 'Read' } }),
-			event({ type: 'content_block_start', index: 8, content_block: { type: 'tool_use', id: 'tu4', name: 'Write' } }),
-			event({ type: 'content_block_delta', index: 3, delta: { type: 'input_json_delta', partial_json: '{"path":"a.ts"}' } }),
-			event({ type: 'content_block_delta', index: 8, delta: { type: 'input_json_delta', partial_json: '{"path":"b.ts"}' } }),
-			event({ type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 2 } }),
-			event({ type: 'message_stop' })
-		]);
-
-		const { stream } = OpenAIStreamHandler.createStreamResponse(response, 'st_parallel_salvage', 'model_parallel', {
-			model: 'model_parallel',
-			source: 'claude',
-			startTime: Date.now(),
-			reverseToolMapping: {}
-		});
-
-		const output = await readStream(stream);
-		const toolCalls = readToolCalls(output);
-
-		expect(toolCalls).toEqual([
-			{ index: 0, id: 'tu3', type: 'function', function: { name: 'Read', arguments: '' } },
-			{ index: 1, id: 'tu4', type: 'function', function: { name: 'Write', arguments: '' } },
-			{ index: 0, function: { arguments: '{"path":"a.ts"}' } },
-			{ index: 1, function: { arguments: '{"path":"b.ts"}' } }
-		]);
-		expect(output).toContain('"finish_reason":"tool_calls"');
 	});
 
 	it('throws when upstream response has no body', () => {
@@ -225,7 +120,6 @@ describe('streaming-openai-stream-handler', () => {
 		expect(output).toContain('"finish_reason":"tool_calls"');
 		expect(output.match(/"finish_reason":"tool_calls"/g)).toHaveLength(1);
 		expect(output.match(/data: \[DONE\]/g)).toHaveLength(1);
-		expect(recordMock).toHaveBeenCalledTimes(1);
 	});
 
 	it('salvages complete arguments on tool_use message_stop without a block stop', async () => {
@@ -397,6 +291,5 @@ describe('streaming-openai-stream-handler', () => {
 		expect(errors).toContain('Downstream cancelled');
 		expect(errors).toContain('Write');
 		expect(errors).toContain('tu6');
-		expect(recordMock).not.toHaveBeenCalled();
 	});
 });

@@ -6,19 +6,24 @@ import IconLogOut from 'virtual:icons/lucide/log-out';
 import IconRotateCcw from 'virtual:icons/lucide/rotate-ccw';
 
 import { Api } from '$shared/api';
+import { createToastWatcher } from '$shared/toast.svelte';
 import { postExtensionMessage } from '$shared/vscode';
 
 interface Props {
 	onAuthStatusChange?: () => void;
+	onConnected?: () => void | Promise<void>;
 }
 
-let { onAuthStatusChange }: Props = $props();
+let { onAuthStatusChange, onConnected }: Props = $props();
 
 let authenticated = $state(false);
 let email = $state<string | undefined>(undefined);
 let loading = $state(true);
 let checking = $state(false);
 let error = $state<string | null>(null);
+const watchError = createToastWatcher();
+
+$effect(() => watchError(error, 'error'));
 let pollingTimer = $state<ReturnType<typeof setInterval> | null>(null);
 let timeoutAbort: AbortController | null = null;
 let lastAction = $state('');
@@ -77,6 +82,7 @@ async function handleLogin() {
 						checking = false;
 						lastAction = 'Authorization completed';
 						onAuthStatusChange?.();
+						await onConnected?.();
 					}
 				} catch (e) {
 					error = e instanceof Error ? e.message : String(e);
@@ -196,12 +202,6 @@ async function handleLogout() {
 			onclick={handleLogin}>
 			Connect ChatGPT
 		</button>
-	{/if}
-
-	{#if error}
-		<div class="card preset-tonal-error p-3 text-sm">
-			{error}
-		</div>
 	{/if}
 
 	{#if lastAction}

@@ -1,9 +1,8 @@
 import { AnthropicToOpenai } from 'src/adapter/anthropic-to-openai';
 import { HeadersExtractor } from 'src/handlers/headers-extractor';
-import { CompletionRequestTelemetry } from 'src/metrics';
+import { ProxyResponseHeaders } from 'src/metrics';
 import { CompletionErrorMapper, CompletionModelRouting, CompletionStreamingGateway } from 'src/orchestration/openai';
 import { proxyRequest } from 'src/proxy/anthropic-client';
-import { logger } from 'src/utils/logger';
 
 import type { ModelMappingConfig } from '@ungate/shared';
 import type { FastifyReply, FastifyRequest } from 'fastify';
@@ -27,15 +26,7 @@ export class ClaudeChatHandler {
 			const payload = CompletionErrorMapper.claudeApiErrorPayload(errorJson);
 			const errorLatencyMs = Date.now() - context.startTime;
 
-			CompletionRequestTelemetry.recordAndApplyProxyHeaders(reply, errorLatencyMs, {
-				model: context.model,
-				source: context.source,
-				inputTokens: 0,
-				outputTokens: 0,
-				stream: false,
-				latencyMs: errorLatencyMs,
-				error: payload.message
-			});
+			ProxyResponseHeaders.apply(reply, errorLatencyMs);
 
 			const body: { error: { message: string; type?: string } } = {
 				error: { message: payload.message }
@@ -58,20 +49,7 @@ export class ClaudeChatHandler {
 		const openaiResponse = AnthropicToOpenai.convert(anthropicResponse, openaiBody.model);
 		const latencyMs = Date.now() - context.startTime;
 
-		CompletionRequestTelemetry.record({
-			model: context.model,
-			source: context.source,
-			inputTokens: context.inputTokens ?? 0,
-			outputTokens: context.outputTokens ?? 0,
-			stream: false,
-			latencyMs
-		});
-
-		logger.log(
-			`Recorded non-streaming request: ${context.model} | ${context.inputTokens ?? 0} in / ${context.outputTokens ?? 0} out`
-		);
-
-		CompletionRequestTelemetry.applyProxyHeaders(reply, latencyMs);
+		ProxyResponseHeaders.apply(reply, latencyMs);
 
 		return reply.send(openaiResponse);
 	}

@@ -1,5 +1,5 @@
+import { runDashboardAction } from '$shared/actions.svelte';
 import { Api } from '$shared/api';
-import { postExtensionMessage } from '$shared/vscode';
 
 import type { AppSettings } from '@ungate/shared/frontend';
 
@@ -26,7 +26,6 @@ let saved = $state(false);
 let restarting = $state(false);
 let statusMessage = $state<string | null>(null);
 let savedTimer: ReturnType<typeof setTimeout> | null = null;
-let restartTimer: ReturnType<typeof setTimeout> | null = null;
 
 function extractError(e: unknown): string {
 	if (e instanceof Error) {
@@ -84,15 +83,15 @@ async function saveAndRestart(update: Partial<AppSettings>): Promise<void> {
 
 	restarting = true;
 	statusMessage = 'Restarting server...';
-	postExtensionMessage({ type: 'restart-server' });
-
-	if (restartTimer) {
-		clearTimeout(restartTimer);
-	}
-
-	restartTimer = setTimeout(() => {
+	try {
+		await runDashboardAction('restart-services');
 		completeRestart();
-	}, 2500);
+	} catch (cause) {
+		error = extractError(cause);
+		statusMessage = 'Restart not completed';
+	} finally {
+		restarting = false;
+	}
 }
 
 function resetStatus(): void {

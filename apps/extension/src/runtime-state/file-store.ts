@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 
 import { type RuntimeState } from '@ungate/shared/frontend';
@@ -31,9 +32,13 @@ export class RuntimeStateFileStore {
 
 	public static write(next: RuntimeState): void {
 		this.ensureStorage();
-		const temp = `${config.paths.stateFilePath}.tmp`;
-		fs.writeFileSync(temp, JSON.stringify(next, null, 2), 'utf8');
-		fs.renameSync(temp, config.paths.stateFilePath);
+		const temp = `${config.paths.stateFilePath}.${process.pid}.${randomUUID()}.tmp`;
+		try {
+			fs.writeFileSync(temp, JSON.stringify(next, null, 2), { mode: 0o600, flag: 'wx' });
+			fs.renameSync(temp, config.paths.stateFilePath);
+		} finally {
+			fs.rmSync(temp, { force: true });
+		}
 	}
 
 	public static async mutate(mutator: (current: RuntimeState) => RuntimeState): Promise<RuntimeState> {

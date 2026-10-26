@@ -7,6 +7,7 @@ import { ProviderSettings } from '../database/provider-settings';
 import { ResponsesBodyBuilder } from './responses-input-normalizer/build-body';
 import { ResponsesModelResolver } from './responses-input-normalizer/resolve-model';
 import { ResponsesSseProcessor, StreamDiagnostics, StreamStateFactory } from './responses-stream-mapper';
+import { StreamChunkMapper } from './responses-stream-mapper/stream-openai-chunks';
 
 import type { OpenAIChatRequest } from '../types/openai';
 import type { RequestContext } from '../types/proxy';
@@ -169,30 +170,40 @@ export class OpenAiClient {
 		const reader = response.body!.getReader();
 		const decoder = new TextDecoder();
 
+		let cancelled = false;
+		const encoder = new TextEncoder();
 		const streamBody = new ReadableStream({
 			async start(controller) {
-				while (true) {
-					const { done, value } = await reader.read();
-
-					if (done) {
-						break;
-					}
-
-					const text = decoder.decode(value, { stream: true });
-					const results = ResponsesSseProcessor.process(state, text);
-
-					for (const result of results) {
-						if (result.type === 'chunk') {
-							controller.enqueue(`data: ${JSON.stringify(result.data)}\n\n`);
-						} else if (result.type === 'done') {
-							controller.enqueue('data: [DONE]\n\n');
+				try {
+					while (!cancelled && !state.completed) {
+						const { done, value } = await reader.read();
+						if (done || cancelled) break;
+						for (const result of ResponsesSseProcessor.process(state, decoder.decode(value, { stream: true }))) {
+							controller.enqueue(
+								encoder.encode(result.type === 'done' ? 'data: [DONE]\n\n' : `data: ${JSON.stringify(result.data)}\n\n`)
+							);
 						}
 					}
+				} catch (error) {
+					if (!cancelled) logger.error(`Codex stream interrupted: ${String(error)}`);
+				} finally {
+					if (!cancelled) {
+						if (!state.completed) {
+							state.pendingFunctionCalls.clear();
+							controller.enqueue(encoder.encode(`data: ${JSON.stringify(StreamChunkMapper.chunk(state, {}, 'length'))}\n\n`));
+							controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+						}
+						controller.close();
+					}
+					await reader.cancel().catch(() => {});
+					reader.releaseLock();
+					StreamDiagnostics.logFinished(state, 'stream');
 				}
+			},
+			cancel(reason) {
+				cancelled = true;
 
-				reader.releaseLock();
-				StreamDiagnostics.logFinished(state, 'stream');
-				controller.close();
+				return reader.cancel(reason);
 			}
 		});
 
@@ -254,7 +265,7 @@ export class OpenAiClient {
 				created: state.created,
 				model: normalizedModel,
 				choices: [{ index: 0, message: { role: 'assistant', content: fullContent || null }, finish_reason: 'stop' }],
-				usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
+				...(state.usage ? { usage: state.usage } : {})
 			}),
 			{
 				status: 200,

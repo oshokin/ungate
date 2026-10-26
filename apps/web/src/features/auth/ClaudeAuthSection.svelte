@@ -5,15 +5,17 @@ import IconLoader from 'virtual:icons/lucide/loader-circle';
 import IconLogOut from 'virtual:icons/lucide/log-out';
 
 import { Api } from '$shared/api';
+import { createToastWatcher } from '$shared/toast.svelte';
 import { postExtensionMessage } from '$shared/vscode';
 
 type Phase = 'idle' | 'pending-code' | 'completing';
 
 interface Props {
 	onAuthStatusChange?: () => void;
+	onConnected?: () => void | Promise<void>;
 }
 
-let { onAuthStatusChange }: Props = $props();
+let { onAuthStatusChange, onConnected }: Props = $props();
 
 let authenticated = $state(false);
 let email = $state<string | undefined>(undefined);
@@ -23,7 +25,9 @@ let authUrl = $state('');
 let sessionId = $state('');
 let codeInput = $state('');
 let error = $state<string | null>(null);
+const watchError = createToastWatcher();
 
+$effect(() => watchError(error, 'error'));
 $effect(() => {
 	void loadStatus();
 });
@@ -80,6 +84,7 @@ async function handleComplete() {
 		authUrl = '';
 		sessionId = '';
 		onAuthStatusChange?.();
+		await onConnected?.();
 	} catch (e) {
 		error = e instanceof Error ? e.message : String(e);
 		phase = 'pending-code';
@@ -174,12 +179,6 @@ function handleCancelLogin() {
 					Cancel
 				</button>
 			</div>
-		</div>
-	{/if}
-
-	{#if error}
-		<div class="card preset-tonal-error p-3 text-sm">
-			{error}
 		</div>
 	{/if}
 </div>

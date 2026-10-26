@@ -1,1 +1,1 @@
-export * from './completion-request-telemetry';
+export * from './response-headers';

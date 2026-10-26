@@ -1,11 +1,12 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import * as fs from 'node:fs';
 import { Readable } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
+import { finished, pipeline } from 'node:stream/promises';
 
 const USER_AGENT = 'ungate-extension';
 const SHA256_HEX_LENGTH = 64;
 const STAMP_SUFFIX = '.sha256';
+export const MAX_ARTIFACT_BYTES = 128 * 1024 * 1024;
 
 export interface PinnedArtifact {
 	/** Absolute upstream release URL. Must point at an immutable, versioned artifact. */
@@ -25,11 +26,12 @@ export class VerifiedArtifact {
 	 * On any failure the partial file is removed and the error is rethrown, so a
 	 * rejected download can never leave a usable file behind.
 	 */
-	static async download(artifact: PinnedArtifact, destPath: string): Promise<void> {
+	static async download(artifact: PinnedArtifact, destPath: string, maxBytes = MAX_ARTIFACT_BYTES): Promise<void> {
 		const expected = this.parseDigest(artifact.sha256);
 		const response = await fetch(artifact.url, {
 			headers: { 'User-Agent': USER_AGENT },
-			redirect: 'follow'
+			redirect: 'follow',
+			signal: AbortSignal.timeout(120000)
 		});
 
 		if (!response.ok) {
@@ -41,17 +43,21 @@ export class VerifiedArtifact {
 		}
 
 		const hash = createHash('sha256');
+		let received = 0;
+		const destination = fs.createWriteStream(destPath);
 
 		try {
 			await pipeline(
 				Readable.fromWeb(response.body),
 				async function* (source: AsyncIterable<Uint8Array>) {
 					for await (const chunk of source) {
+						received += chunk.byteLength;
+						if (received > maxBytes) throw new Error(`Installer download exceeds ${maxBytes}-byte size limit`);
 						hash.update(chunk);
 						yield chunk;
 					}
 				},
-				fs.createWriteStream(destPath)
+				destination
 			);
 
 			const actual = hash.digest();
@@ -63,6 +69,8 @@ export class VerifiedArtifact {
 				);
 			}
 		} catch (error) {
+			destination.destroy();
+			await finished(destination).catch(() => {});
 			fs.rmSync(destPath, { force: true });
 			throw error;
 		}

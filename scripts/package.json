@@ -4,20 +4,24 @@
 	"type": "module",
 	"scripts": {
 		"tunnel": "tsx tunnel/main.ts",
-		"build-package": "sh build-package/run.sh",
+		"build-package": "node --import tsx build-package/main.ts package",
 		"check-tunnels": "sh check-tunnels/run.sh",
 		"reset-sqlite-binary": "sh reset-sqlite-binary/run.sh",
 		"update-node-version": "sh update-node-version/run.sh",
 		"lint": "eslint .",
-		"lint:fix": "eslint . --fix"
+		"lint:fix": "eslint . --fix",
+		"test:dashboard": "node --import tsx tests/dashboard-browser.ts"
 	},
 	"dependencies": {
 		"cloudflared": "~0.7.1"
 	},
 	"devDependencies": {
 		"@types/node": "~22.15.35",
+		"@types/yauzl": "^3.4.0",
 		"@ungate/dev-kit": "workspace:*",
+		"playwright": "1.62.1",
 		"tsx": "~4.21.0",
-		"typescript": "~5.7.0"
+		"typescript": "~5.7.0",
+		"yauzl": "3.4.0"
 	}
 }

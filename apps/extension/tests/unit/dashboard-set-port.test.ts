@@ -11,6 +11,12 @@ const sharedLogs = {
 	tunnel: [] as { timestamp: number; level: 'info' | 'warn' | 'error'; message: string }[]
 };
 
+vi.mock('@ungate/shared', async (original) => {
+	const actual = await original<typeof import('@ungate/shared')>();
+
+	return { ...actual, getAdminToken: () => 'test-admin' };
+});
+
 vi.mock('node:fs', () => {
 	return {
 		readFileSync: vi.fn(() => '<html><head></head><body></body></html>')
@@ -51,7 +57,8 @@ vi.mock('vscode', () => {
 			createWebviewPanel: createWebviewPanelMock
 		},
 		ViewColumn: {
-			One: 1
+			One: 1,
+			Active: -1
 		},
 		Uri: {
 			file: fileUriMock
@@ -109,15 +116,15 @@ describe('Dashboard.setPort', () => {
 		);
 		dashboard.show();
 
-		const rebuildSpy = vi.spyOn(dashboard as unknown as { rebuildHtml(): void }, 'rebuildHtml');
+		const originalHtml = panel.webview.html;
 
 		dashboard.setPort(4783);
-		rebuildSpy.mockClear();
+
 		panel.webview.postMessage.mockClear();
 
 		dashboard.setPort(4783);
 
-		expect(rebuildSpy).not.toHaveBeenCalled();
+		expect(panel.webview.html).toBe(originalHtml);
 		expect(panel.webview.postMessage).not.toHaveBeenCalled();
 	});
 
@@ -140,29 +147,18 @@ describe('Dashboard.setPort', () => {
 		expect(panel.webview.postMessage).toHaveBeenCalledWith({ type: 'port', port: 4783 });
 	});
 
-	it('maps the api port into the webview when the panel opens', () => {
+	it('keeps HTTP and administrative capability outside the webview', () => {
 		const panel = createPanel();
 		createWebviewPanelMock.mockReturnValue(panel);
-		const dashboard = new Dashboard(
-			{
-				extensionMode: 1,
-				extensionPath: '/tmp/ungate-extension'
-			} as never,
-			() => {}
-		);
-		dashboard.setPort(4783);
-
+		const dashboard = new Dashboard({ extensionMode: 1, extensionPath: '/tmp/ungate-extension' } as never, () => {});
 		dashboard.show();
-
-		expect(createWebviewPanelMock).toHaveBeenCalledWith(
-			'ungate',
-			'Ungate',
-			1,
-			expect.objectContaining({
-				enableScripts: true,
-				portMapping: [{ webviewPort: 4783, extensionHostPort: 4783 }]
-			})
-		);
+		const html = panel.webview.html;
+		dashboard.setPort(47821);
+		expect(panel.webview.options.portMapping).toBeUndefined();
+		expect(panel.webview.html).toBe(html);
+		expect(html).toContain("connect-src 'none'");
+		expect(html).not.toContain('__ADMIN_TOKEN__');
+		expect(html).not.toContain('test-admin');
 	});
 
 	it('opens the panel without a port mapping while the api port is unknown', () => {
@@ -178,10 +174,15 @@ describe('Dashboard.setPort', () => {
 
 		dashboard.show();
 
-		expect(createWebviewPanelMock).toHaveBeenCalledWith('ungate', 'Ungate', 1, expect.objectContaining({ portMapping: [] }));
+		expect(createWebviewPanelMock).toHaveBeenCalledWith(
+			'ungate',
+			'Ungate',
+			-1,
+			expect.objectContaining({ enableScripts: true, retainContextWhenHidden: true })
+		);
 	});
 
-	it('updates the port mapping of an open panel when the api port changes', () => {
+	it('updates the current port without reloading an open panel', () => {
 		const panel = createPanel();
 		createWebviewPanelMock.mockReturnValue(panel);
 		const dashboard = new Dashboard(
@@ -196,12 +197,7 @@ describe('Dashboard.setPort', () => {
 
 		dashboard.setPort(4790);
 
-		expect(panel.webview.options).toEqual(
-			expect.objectContaining({
-				enableScripts: true,
-				portMapping: [{ webviewPort: 4790, extensionHostPort: 4790 }]
-			})
-		);
+		expect(panel.webview.options).toEqual({});
 		expect(panel.webview.postMessage).toHaveBeenCalledWith({ type: 'port', port: 4790 });
 	});
 

@@ -51,10 +51,18 @@ export interface OpenAIChatRequest {
 	service_tier?: 'default' | 'priority';
 	tools?: OpenAITool[];
 	tool_choice?: 'none' | 'auto' | 'required' | { type: 'function'; function: { name: string } };
-	reasoning_effort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+	reasoning_effort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra' | 'persistent';
 	reasoning?: {
-		effort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+		effort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra' | 'persistent';
 	};
+}
+
+export interface ChatCompletionUsage {
+	prompt_tokens: number;
+	completion_tokens: number;
+	total_tokens: number;
+	prompt_tokens_details?: { cached_tokens: number };
+	completion_tokens_details?: { reasoning_tokens: number };
 }
 
 export interface OpenAIChatResponse {

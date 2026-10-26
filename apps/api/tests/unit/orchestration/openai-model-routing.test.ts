@@ -4,7 +4,9 @@ import { CompletionModelRouting } from 'src/orchestration/openai';
 
 import type { ModelMappingConfig } from '@ungate/shared';
 
-function mapping(partial: Partial<ModelMappingConfig> & Pick<ModelMappingConfig, 'provider' | 'upstreamModel'>): ModelMappingConfig {
+function mapping(
+	partial: Partial<ModelMappingConfig> & Pick<ModelMappingConfig, 'provider' | 'upstreamModel'>
+): ModelMappingConfig {
 	return {
 		id: partial.id ?? 'id',
 		label: partial.label ?? 'label',
@@ -17,6 +19,23 @@ function mapping(partial: Partial<ModelMappingConfig> & Pick<ModelMappingConfig,
 }
 
 describe('CompletionModelRouting', () => {
+	it('preserves explicit client effort over the saved default, including none and minimal', () => {
+		const config = mapping({ provider: 'openai', upstreamModel: 'gpt-real', reasoningBudget: 'high', serviceTier: 'priority' });
+		for (const effort of ['none', 'minimal', 'low', 'max'] as const) {
+			const body = CompletionModelRouting.buildOpenAiUpstreamBody(
+				{ model: 'alias', messages: [], reasoning: { effort } },
+				config
+			);
+			expect(body.reasoning?.effort).toBe(effort);
+			expect(body.service_tier).toBe('priority');
+		}
+		const flat = CompletionModelRouting.buildOpenAiUpstreamBody(
+			{ model: 'alias', messages: [], reasoning_effort: 'low' },
+			config
+		);
+		expect(flat.reasoning).toBeUndefined();
+		expect(flat.reasoning_effort).toBe('low');
+	});
 	it('detects minimax model prefixes case-insensitively', () => {
 		expect(CompletionModelRouting.isMiniMaxModel('MiniMax-x')).toBe(true);
 		expect(CompletionModelRouting.isMiniMaxModel('  mini-max-1  ')).toBe(true);

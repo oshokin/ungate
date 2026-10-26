@@ -1,84 +1,70 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { spawnSync } from 'node:child_process';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 
-const { mkdirSyncMock, writeFileSyncMock, rmSyncMock, rmdirSyncMock, existsSyncMock, readFileSyncMock, sleepMock, killMock } =
-	vi.hoisted(() => {
-		const mkdirSyncMock = vi.fn();
-		const writeFileSyncMock = vi.fn();
-		const rmSyncMock = vi.fn();
-		const rmdirSyncMock = vi.fn();
-		const existsSyncMock = vi.fn();
-		const readFileSyncMock = vi.fn();
-		const sleepMock = vi.fn<(ms: number) => Promise<void>>();
-		const killMock = vi.fn();
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-		return {
-			mkdirSyncMock,
-			writeFileSyncMock,
-			rmSyncMock,
-			rmdirSyncMock,
-			existsSyncMock,
-			readFileSyncMock,
-			sleepMock,
-			killMock
-		};
-	});
-
-vi.mock('node:fs', () => {
-	return {
-		mkdirSync: (...args: unknown[]) => mkdirSyncMock(...args),
-		writeFileSync: (...args: unknown[]) => writeFileSyncMock(...args),
-		rmSync: (...args: unknown[]) => rmSyncMock(...args),
-		rmdirSync: (...args: unknown[]) => rmdirSyncMock(...args),
-		existsSync: (...args: unknown[]) => existsSyncMock(...args),
-		readFileSync: (...args: unknown[]) => readFileSyncMock(...args)
-	};
-});
-
-vi.mock('@ungate/shared', () => {
-	return {
-		sleep: sleepMock
-	};
-});
-
+import { config } from '../../src/runtime-state/config';
 import { CrossProcessLock } from '../../src/utils/cross-process-lock';
 
-describe('CrossProcessLock', () => {
-	beforeEach(() => {
-		mkdirSyncMock.mockReset();
-		writeFileSyncMock.mockReset();
-		rmSyncMock.mockReset();
-		rmdirSyncMock.mockReset();
-		existsSyncMock.mockReset();
-		readFileSyncMock.mockReset();
-		sleepMock.mockReset();
-		killMock.mockReset();
-		vi.useRealTimers();
+const original = config.baseDir;
+let temporary: string;
+beforeEach(() => {
+	temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'ungate-lock-'));
+	config.baseDir = temporary;
+});
+afterEach(() => {
+	config.baseDir = original;
+	fs.rmSync(temporary, { recursive: true, force: true });
+});
+
+describe('CrossProcessLock on the real filesystem', () => {
+	it('serializes competing asynchronous operations without losing updates', async () => {
+		let inCriticalSection = 0;
+		let counter = 0;
+		await Promise.all(
+			Array.from({ length: 30 }, async () => {
+				const release = await CrossProcessLock.acquire('state.lock', 5000);
+				try {
+					expect(inCriticalSection++).toBe(0);
+					const previous = counter;
+					await new Promise((resolve) => setTimeout(resolve, 1));
+					counter = previous + 1;
+					inCriticalSection--;
+				} finally {
+					release();
+					release();
+				}
+			})
+		);
+		expect(counter).toBe(30);
+		expect(fs.readdirSync(temporary)).toEqual([]);
 	});
 
-	it('does not steal a lock while the current holder is alive', async () => {
-		let attempts = 0;
-		mkdirSyncMock.mockImplementation(() => {
-			attempts += 1;
+	it('times out without stealing a live lock', async () => {
+		const release = await CrossProcessLock.acquire('state.lock');
+		try {
+			await expect(CrossProcessLock.acquire('state.lock', 30)).rejects.toThrow('Timed out');
+		} finally {
+			release();
+		}
+	});
 
-			if (attempts === 1) {
-				const error = new Error('exists') as NodeJS.ErrnoException;
-				error.code = 'EEXIST';
-				throw error;
-			}
-		});
-		existsSyncMock.mockReturnValue(true);
-		readFileSyncMock.mockReturnValue('1234');
-		sleepMock.mockImplementation(() => Promise.resolve());
-		vi.spyOn(Date, 'now').mockReturnValueOnce(1000).mockReturnValueOnce(2600).mockReturnValueOnce(2601);
-		vi.stubGlobal('process', { ...process, kill: (...args: unknown[]) => killMock(...args) });
-		killMock.mockImplementation(() => {});
-
-		const release = await CrossProcessLock.acquire('runtime-state.lock', 1500);
-
-		expect(killMock).toHaveBeenCalledWith(1234, 0);
-		expect(rmSyncMock).not.toHaveBeenCalled();
-		expect(writeFileSyncMock).toHaveBeenCalledTimes(1);
-
+	it('recovers a dead owner and never deletes a successor from an old release callback', async () => {
+		const dead = spawnSync(process.execPath, ['-e', '']);
+		const target = path.join(temporary, 'state.lock');
+		fs.writeFileSync(target, JSON.stringify({ pid: dead.pid, token: 'dead' }));
+		const release = await CrossProcessLock.acquire('state.lock');
+		fs.unlinkSync(target);
+		fs.writeFileSync(target, JSON.stringify({ pid: process.pid, token: 'successor' }));
 		release();
+		const successor = JSON.parse(fs.readFileSync(target, 'utf8')) as { token: string };
+		expect(successor.token).toBe('successor');
+	});
+
+	it('does not steal an incomplete legacy lock whose owner is unknown', async () => {
+		fs.mkdirSync(path.join(temporary, 'state.lock'));
+		await expect(CrossProcessLock.acquire('state.lock', 30)).rejects.toThrow('Timed out');
 	});
 });

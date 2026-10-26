@@ -6,3 +6,5 @@ export * from './helpers/claude-cli';
 export * from './helpers/provider-labels';
 export * from './helpers/utils';
 export * from './schemas';
+export { getAdminToken } from './helpers/admin-token';
+export * from './service';

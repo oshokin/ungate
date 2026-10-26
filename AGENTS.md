@@ -31,10 +31,10 @@ Fastify v5 server, spawned by the extension as a child Node.js process. CORS is 
 **Entry points:**
 - `/v1/chat/completions` — OpenAI-compatible endpoint, accepts requests from Cursor
 - `/v1/messages` — Anthropic-compatible endpoint (direct proxy)
-- `/v1/analytics` — request statistics
-- `/v1/auth/*` — OAuth routes (Claude, ChatGPT)
+- `/usage`, `/usage/refresh` — normalized subscription snapshots (separate admin capability)
+- `/auth/*` — OAuth and provider management routes (admin capability)
 - `/v1/models` — model list
-- `/v1/settings` — settings
+- `/settings` — settings (admin capability)
 
 **Architecture:**
 - `src/server.ts` — Fastify initialization, plugin registration
@@ -44,7 +44,7 @@ Fastify v5 server, spawned by the extension as a child Node.js process. CORS is 
 **Routing (`src/routes/`):**
 - `openai.ts` — main router: determines provider by model (MiniMax → mapped → Claude). Branch order matters and must stay consistent.
 - `anthropic.ts` — direct proxy to Anthropic API with OAuth token
-- `analytics.ts`, `auth.ts`, `health.ts`, `models.ts`, `settings.ts`
+- `usage.ts`, `auth.ts`, `health.ts`, `models.ts`, `settings.ts`
 
 **Provider selection (`src/orchestration/openai/model-routing.ts`):**
 - MiniMax: model name prefix or `model_mappings` entry pointing to MiniMax upstream
@@ -86,7 +86,7 @@ Fastify v5 server, spawned by the extension as a child Node.js process. CORS is 
 
 **Database (`src/database/`):**
 - SQLite via Drizzle ORM + better-sqlite3
-- Tables: `app_settings` (port, apiKey, quiet, extraInstruction, claudeCliVersionMode, claudeCliVersionCustom), `provider_settings` (per-provider OAuth tokens, refresh tokens, expiry), `model_mappings` (id, label, provider, upstreamModel, reasoningBudget), `requests` (analytics)
+- Tables: `app_settings` (port, apiKey, quiet, extraInstruction, claudeCliVersionMode, claudeCliVersionCustom), `provider_settings` (per-provider OAuth tokens, refresh tokens, expiry), `model_mappings` (id, label, provider, upstreamModel, reasoningBudget)
 - Migrations: `apps/api/drizzle/` — idempotent (`CREATE TABLE IF NOT EXISTS`, `INSERT OR IGNORE`). Generated with `pnpm drizzle-kit generate --name <index>` (config: `prefix: 'none'`); files are named `_0000.sql`, `_0001.sql`, …
 - Model registry: `model_mappings` is the single source of truth for model routing. Default models are seeded by migration `_0002.sql` only — there are no runtime defaults in code.
 - Databases on disk: `~/.ungate/data.db` (production default) and `~/.ungate/data-dev.db` (used when `DB_PATH=$HOME/.ungate/data-dev.db` is set in dev). Always verify which database the running API process is using before debugging analytics or auth.
@@ -98,9 +98,7 @@ Fastify v5 server, spawned by the extension as a child Node.js process. CORS is 
 - `translator.ts` — tool name translation in responses
 - `normalizer.ts` — parameter normalization (string→array)
 
-**Metrics (`src/metrics/`):**
-- `completion-request-telemetry.ts` — request recording, response headers
-- `index.ts` — barrel export
+**Response headers (`src/metrics/`):** request identifiers and diagnostics only; no request persistence.
 
 **Auth (`src/auth/`):**
 - OAuth PKCE flow for Anthropic: `startLogin()` generates verifier/challenge, `completeLogin()` exchanges code for tokens. Manual `CODE#STATE` entry required (Anthropic rejects localhost redirect_uri for claude.ai OAuth).
@@ -110,45 +108,54 @@ Fastify v5 server, spawned by the extension as a child Node.js process. CORS is 
 User entry point. Manages the API server and tunnel lifecycle.
 
 - `extension.ts` — activate/deactivate
-- `extension-controller.ts` — main controller: manages API server, tunnel, WebView dashboard, OpenAI Key Fix, heartbeat, runtime state sync
+- `extension-controller.ts` — main controller: manages dashboard, typed actions, heartbeat and runtime state sync
 - `api-server.ts` — start/stop Node.js API as child process. Production: `cp.spawn(runtime, ['bundle/main.cjs'])`. Dev: `cp.spawn('node', ['-r', 'source-map-support/register', 'dist/main.js'])`. Port detected from stdout via `localhost:(\d+)` regex
 - `tunnel-manager.ts` — Cloudflare tunnel (cloudflared) management. Quick tunnel only, no named tunnel config (avoids 404 conflicts). Not auto-started, only on explicit user action. Auto-restarts on port change if already running
 - `dashboard.ts` — WebView dashboard (Svelte UI). Reads `index.html` from `web/dist/`, rewrites `/assets/` to `vscode-resource:` URIs, injects `window.__PORT__`. Handshake: frontend sends `webview-ready` before extension sends initial state
 - `extension-status-bar.ts` — status bar (API + tunnel state)
-- `extension-commands.ts` — command registration (openDashboard, copyTunnelUrl, restartTunnel, toggleKeyFix)
-- `openai-key-fix.ts` — auto-enable OpenAI API Key in Cursor settings. Uses `aiSettings.usingOpenAIKey.toggle` command. SQLite writes to `state.vscdb` do not work — Cursor does not re-read reactive storage
+- `extension-commands.ts`, shared `schemas/actions.ts` — action catalog, command IDs, allowlist and results
+- `shared-service-controller.ts` — serialized lifecycle actions in the requesting window, authenticated API replacement and same-port tunnel preservation
+- `local-api.ts` — release/protocol health checks; old APIs are rejected by the management bridge
+- `cursor-settings.ts` — capability-checked Models navigation, with explicit fallback; no routing setter or private storage access
 - `runtime-state/` — multi-window coordination via file-based state. Windows heartbeat, leader election, command queue
 
 **Native dependencies:**
 - better-sqlite3: prebuilt binary downloaded at first run from GitHub Releases matching host Node ABI (not Electron). VSIX ships only JS wrapper + bindings
 - cloudflared: binary downloaded to `~/.ungate/bin/`, managed by tsup bundling
-- sqlite3 CLI: `sqlite-tools` archive from sqlite.org, used only to read Cursor's `state.vscdb`
 - Every download goes through `utils/verified-artifact.ts`: one pinned upstream URL plus a SHA-256 allowlist per platform/arch (and per Node ABI for better-sqlite3). Bytes are hashed while streaming into a staging directory and compared with `timingSafeEqual`; nothing is extracted, copied, chmod-ed or executed before the digest matches, and staging is deleted on failure. Unknown platform/ABI tuples fail closed with an actionable error instead of falling back to a `latest` release
-- Pinned sets: better-sqlite3 12.11.1 for Node ABI 127/137/141/147 (Node 22/24/25/26) on glibc Linux, macOS and Windows; cloudflared 2026.8.2; sqlite-tools 3470200 (upstream publishes only `win-x64`, `linux-x64`, `osx-x64` — macOS arm64 and Linux arm64 must supply their own `sqlite3` on PATH)
-- Every binary Ungate installs carries a `<binary>.sha256` stamp written after verification: `~/.ungate/bin/` for cloudflared and the sqlite3 CLI, and `better_sqlite3.installed.node` in the API's `node_modules`. A managed binary without a matching stamp is treated as unverified — it is never loaded, executed or handed to the API child, and is replaced by a verified install. This retires binaries left behind by pre-pinning Ungate versions and by the `cloudflared` npm helper's `latest` install. The bundled/dev `better_sqlite3.node` binding shipped in the tree is still load-tested, since it is not a download
+- Pinned sets: better-sqlite3 12.11.1 for Node ABI 127/137/141/147 (Node 22/24/25/26) on glibc Linux, macOS and Windows; cloudflared 2026.8.2
+- Every binary Ungate installs carries a `<binary>.sha256` stamp written after verification: `~/.ungate/bin/` for cloudflared, and `better_sqlite3.installed.node` in the API's `node_modules`. A managed binary without a matching stamp is treated as unverified — it is never loaded, executed or handed to the API child, and is replaced by a verified install. This retires binaries left behind by pre-pinning Ungate versions and by the `cloudflared` npm helper's `latest` install. The bundled/dev `better_sqlite3.node` binding shipped in the tree is still load-tested, since it is not a download
 - There is no manual drop-in override: on a platform with no pinned artifact the unsupported error says the feature cannot start, rather than pointing at a directory whose unstamped contents would be rejected anyway
 
 **Logs:**
 - Two ring buffers (500 entries each): API (stdout/stderr) and tunnel (stderr)
 - Health check against `/health` every second, three states: running, stopped, error
 
+## Dashboard transport and packaging
+
+The dashboard communicates through a validated postMessage bridge (`dashboard-api-bridge.ts`), which sends allowlisted operations to IPv4 loopback from the local extension host. The webview does not receive the administrative token and has `connect-src 'none'`. Do not restore browser localhost fetches or general URL forwarding. CORS is registered before administration auth, so legitimate preflight is answered while actual management requests still require the capability.
+
+Analytics, estimated prices and request persistence were removed. `_0010.sql` drops only the old request-history table. Protocol usage fields remain for compatible model responses. Subscription snapshots are memory-only, account-bound, and must display absent, failed or unsupported data explicitly.
+
+Use Node 24 and `corepack pnpm` for development. `task setup`, `task check`, and `task package` delegate to package scripts. The normal package pipeline validates types, lint, tests, HTTP/process/browser regressions, then stages and checks actual VSIX bytes. Only an explicitly requested install command invokes Cursor. Build and package commands are sequential, not parallel Task dependencies.
+
 ## apps/web — Svelte Web UI
 
 Dashboard for managing providers, tunnel, settings.
 
 - Svelte 5 (runes), SvelteKit-like structure
-- `src/shared/api.ts` — HTTP client to API
+- `src/shared/api.ts`, `dashboard-client.ts` — typed client over extension messages
 - `src/shared/vscode.ts` — `acquireVsCodeApi()` singleton
 - `src/features/settings/` — settings and providers (settings-store, settings-ui-store, provider-store)
 - `src/features/tunnel/` — tunnel management (tunnel-store)
-- `src/features/analytics/` — request statistics (analytics-store)
+- `src/features/usage/` — account subscription windows; no local token/cost analytics
 - `src/features/logs/` — log viewer (logs-store)
 
 ## packages/shared — shared library
 
 Types, constants, Zod schemas, helpers.
 
-- `src/types/` — `settings.ts`, `runtime.ts`, `tunnel.ts`, `analytics.ts`, `log.ts`
+- `src/types/` — `settings.ts`, `runtime.ts`, `tunnel.ts`,  `log.ts`
 - `src/constants/` — `routes.ts`
 - `src/enums/` — `common.ts`
 - `src/helpers/` — `claude-cli.ts` (`ClaudeCliVersion`), `model-provider.ts`, `provider-labels.ts`, `utils.ts`
@@ -164,9 +171,11 @@ Types, constants, Zod schemas, helpers.
 
 **Tool mapping:** Cursor tool names (Shell, LS, StrReplace) are mapped to Claude Code names (Bash, Glob, Edit) on outbound requests and reverse-mapped in responses. Required for Anthropic OAuth whitelist — Anthropic validates tool names server-side and only allows standard Claude Code names. Mapping covers: Bash↔Shell, Read↔Read, Write↔Write, Edit↔StrReplace, Edit↔Delete, Glob↔LS, Grep↔Grep, WebFetch↔WebFetch, WebSearch↔WebSearch.
 
-**Multi-window:** multiple Cursor windows sync via a file-based runtime state in `~/.ungate/`. One window is the leader (runs the API), others read state. Heartbeat-based liveness, command queue for coordinated actions (start/restart/stop tunnel, restart API). Tunnel owner window handles tunnel lifecycle.
+**Multi-window:** multiple Cursor windows sync via a file-based runtime state in `~/.ungate/`. One window is the leader (monitors shared services), others read state. Detached API and verified tunnel survive window changes; Stop Shared API and Tunnel is explicit. The extension is local UI-only, including Remote SSH windows. Heartbeat-based liveness, command queue for coordinated actions (start/restart/stop tunnel, restart API). Tunnel identity is persisted as PID, executable and unique log marker; lifecycle operations are serialized.
 
-**OpenAI Key Fix:** Cursor periodically resets the OpenAI API Key field in settings. Ungate automatically restores it via `aiSettings.usingOpenAIKey.toggle` command. Direct SQLite writes to `state.vscdb` do not work — Cursor never re-reads reactive storage. Only the leader window runs the fix loop, state is shared via runtime state file.
+**Cursor navigation:** The old key-fix and routing mode commands were removed. Do not read/write Cursor SQLite or call its key toggle. The legacy runtime `keyFix.enabled` field remains only for old-window compatibility and is set false on bootstrap. Models navigation checks the runtime command registry and calls `aiSettings.action.open` with `models` when available; this is a private Cursor integration, not a stable setter contract.
+
+**API upgrades:** `/health` exposes release and protocol identity. The webview bridge rejects incompatible APIs before management HTTP requests. Recovery actions remain available without a healthy API. Explicit replacement runs from the requesting extension bundle under `commands.lock` and `api-start.lock`; it must not downgrade a newer service or restart a same-port cloudflared process. Stop all suppresses auto-start before shutdown and remains effective on reload.
 
 **Codex streaming variants:** ChatGPT Codex `/responses` has two tool streaming formats — classic `function_call` + `response.function_call_arguments.*` and extended `custom_tool_call` + `response.custom_tool_call_input.*`. Both must be mapped to OpenAI `tool_calls`. Stream mapper processes both. OmniRoute only handles `function_call` — `custom_tool_call` is Ungate-specific.
 

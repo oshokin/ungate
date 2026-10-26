@@ -1,3 +1,5 @@
+import type { ChatCompletionUsage } from 'src/types/openai';
+
 export interface StreamProcessResult {
 	type: 'chunk' | 'done';
 	data?: Record<string, unknown>;
@@ -8,10 +10,14 @@ export interface PendingFunctionCallState {
 	openAiIndex: number;
 	argsBuffer: string;
 	deferred: boolean;
+	name?: string;
 }
 
 export interface StreamState {
+	usage?: ChatCompletionUsage;
 	buffer: string;
+	completed?: boolean;
+	successfulCompletion?: boolean;
 	id: string;
 	model: string;
 	created: number;

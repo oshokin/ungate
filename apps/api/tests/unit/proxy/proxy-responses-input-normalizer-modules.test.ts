@@ -35,6 +35,18 @@ describe('proxy-responses-input-normalizer-modules', () => {
 			model: 'gpt-5.6-sol',
 			reasoningEffort: 'max'
 		});
+		expect(ResponsesModelResolver.resolveModel('gpt-next-minimal')).toEqual({
+			model: 'gpt-next',
+			reasoningEffort: 'minimal'
+		});
+		expect(ResponsesModelResolver.resolveModel('gpt-next-ultra')).toEqual({
+			model: 'gpt-next',
+			reasoningEffort: 'ultra'
+		});
+		expect(ResponsesModelResolver.resolveModel('gpt-next-persistent')).toEqual({
+			model: 'gpt-next',
+			reasoningEffort: 'persistent'
+		});
 	});
 
 	it('maps function tool_choice and keeps passthrough object', () => {
@@ -67,7 +79,7 @@ describe('proxy-responses-input-normalizer-modules', () => {
 			{ instructionsFallback: 'fallback' }
 		);
 
-		const filtered = payload.input as Array<Record<string, unknown>>;
+		const filtered = payload.input as Record<string, unknown>[];
 
 		expect(filtered).toHaveLength(2);
 		expect(filtered[0]).toMatchObject({ type: 'function_call' });
