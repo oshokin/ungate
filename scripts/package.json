@@ -13,15 +13,15 @@
 		"test:dashboard": "node --import tsx tests/dashboard-browser.ts"
 	},
 	"dependencies": {
-		"cloudflared": "~0.7.1"
+		"cloudflared": "~0.7.3"
 	},
 	"devDependencies": {
-		"@types/node": "~22.15.35",
+		"@types/node": "~24.19.2",
 		"@types/yauzl": "^3.4.0",
 		"@ungate/dev-kit": "workspace:*",
-		"playwright": "1.62.1",
-		"tsx": "~4.21.0",
-		"typescript": "~5.7.0",
+		"playwright": "1.64.1",
+		"tsx": "~4.23.15",
+		"typescript": "~6.0.3",
 		"yauzl": "3.4.0"
 	}
 }

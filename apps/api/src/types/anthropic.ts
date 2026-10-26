@@ -78,13 +78,7 @@ export interface ToolChoice {
 }
 
 export type AnthropicStopReason =
-	| 'end_turn'
-	| 'max_tokens'
-	| 'stop_sequence'
-	| 'tool_use'
-	| 'pause_turn'
-	| 'refusal'
-	| 'model_context_window_exceeded';
+	'end_turn' | 'max_tokens' | 'stop_sequence' | 'tool_use' | 'pause_turn' | 'refusal' | 'model_context_window_exceeded';
 
 export interface AnthropicResponse {
 	id: string;

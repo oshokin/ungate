@@ -35,11 +35,11 @@ DB_PATH=$HOME/.ungate/data-dev.db PORT=4784 node dist/main.js
 
 ## Prerequisites
 
-- **Node.js 22, 24, 25, or 26**: supported by the extension's Node resolver. If the API child fails to start with `No prebuilt binary for ABI ...`, check both the Node ABI and whether a pinned `better-sqlite3` build is available for your OS and architecture.
+- **Node.js 22, 24, 25, or 26**: supported by the extension's Node resolver. `better-sqlite3` 13 uses the N-API prebuild packaged for the runtime's platform/libc/architecture.
 - **pnpm** — the repo is a pnpm workspace.
 - **Cursor** with custom OpenAI provider support enabled.
 
-`better-sqlite3`, `cloudflared`, and the `sqlite3` CLI are downloaded and verified automatically on first run through `utils/verified-artifact.ts` with SHA-256 allowlists per platform and Node ABI. You do not need to install them manually.
+The VSIX includes `better-sqlite3` and all supported N-API prebuilds. Only `cloudflared` is downloaded on first use; `utils/verified-artifact.ts` verifies it against a pinned SHA-256 allowlist. Cursor database reading and the standalone `sqlite3` CLI are not part of Ungate.
 
 ## Repo structure
 
@@ -61,14 +61,14 @@ Data flow: Cursor sends a request from its backend, the request is forwarded thr
 
 - **API logs** live in two ring buffers of 500 entries each (API stdout/stderr and tunnel stderr), surfaced from the dashboard's Logs tab.
 - **Databases**: `~/.ungate/data.db` is the production default; `~/.ungate/data-dev.db` is used when `DB_PATH` is set. Always check which one the running process is using before debugging analytics or auth issues.
-- **Native binaries** (`better-sqlite3`, `cloudflared`, `sqlite3` CLI) are stored in `~/.ungate/bin/` with a `<binary>.sha256` stamp. A managed binary without a matching stamp is treated as unverified and re-downloaded.
+- **Native binaries**: packaged `better-sqlite3` prebuilds live inside the extension. Downloaded `cloudflared` is stored in `~/.ungate/bin/` with a `<binary>.sha256` stamp; an unstamped or mismatched binary is replaced.
 
 ## Things the linter can't catch
 
 ESLint and Prettier configs live in `packages/dev-kit`. The pre-commit hook runs `lint:fix`, but hooks can be skipped and CI does not currently enforce these checks. A few things the linter will not catch that we care about:
 
 - **Don't bypass `VerifiedArtifact`** when adding or updating a downloaded binary. Pin the URL and add the SHA-256 to the allowlist. Do not introduce fallbacks to `latest` releases.
-- **Don't write to `state.vscdb` directly** for the OpenAI Key Fix. Cursor ignores reactive storage writes; use `aiSettings.usingOpenAIKey.toggle`.
+- **Don't introduce reads or writes to Cursor's `state.vscdb`.** Ungate's storage is independent and the extension must use supported/capability-checked Cursor commands.
 - **Add bidirectional entries to `src/proxy/tool-mapper.ts`** for any tool you support. Claude OAuth rejects unknown tool names server-side.
 - **Don't drop the model-routing branch order** in `src/routes/openai.ts`. MiniMax → mapped → Claude, in that order. Reordering routes MiniMax traffic to Claude and breaks OAuth.
 

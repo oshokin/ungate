@@ -32,7 +32,7 @@ function readWebviewState(): WebviewState {
 		return {};
 	}
 
-	return state as WebviewState;
+	return state;
 }
 
 function updateWebviewState(update: Partial<WebviewState>): void {

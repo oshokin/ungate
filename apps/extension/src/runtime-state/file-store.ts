@@ -61,6 +61,7 @@ export class RuntimeStateFileStore {
 	}
 
 	private static ensureStorage(): void {
-		fs.mkdirSync(config.baseDir, { recursive: true });
+		fs.mkdirSync(config.baseDir, { recursive: true, mode: 0o700 });
+		if (process.platform !== 'win32') fs.chmodSync(config.baseDir, 0o700);
 	}
 }

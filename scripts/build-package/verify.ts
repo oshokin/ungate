@@ -68,8 +68,8 @@ export async function verifyPackage(file: string): Promise<void> {
 		'extension/bundled/api/drizzle/_0010.sql',
 		'extension/bundled/web/dist/index.html',
 		'extension/bundled/api/node_modules/better-sqlite3/lib/database.js',
-		'extension/bundled/api/node_modules/bindings/bindings.js',
-		'extension/bundled/api/node_modules/file-uri-to-path/index.js',
+		'extension/bundled/api/node_modules/better-sqlite3/prebuilds/linux-x64.node',
+		'extension/bundled/api/node_modules/node-addon-api/package.json',
 		'extension/readme.md',
 		'extension/changelog.md'
 	]) {
@@ -80,7 +80,10 @@ export async function verifyPackage(file: string): Promise<void> {
 	if (!license?.equals(readFileSync(join(repoDir, 'LICENSE')))) throw new Error('Packaged license does not match source');
 	for (const name of entries.keys())
 		if (
-			/\.(?:node|db|sqlite|pem)$/.test(name) ||
+			(/\.(?:node|db|sqlite|pem)$/.test(name) &&
+				!/^extension\/bundled\/api\/node_modules\/better-sqlite3\/prebuilds\/(?:darwin|linux|linuxmusl|win32)-(?:arm64|x64)\.node$/.test(
+					name
+				)) ||
 			/(?:^|\/)\.env(?:$|\.)/.test(name) ||
 			name.includes('/src/') ||
 			name.includes('/tests/')

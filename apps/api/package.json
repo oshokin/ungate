@@ -17,31 +17,30 @@
 		"db:migrate": "drizzle-kit migrate"
 	},
 	"dependencies": {
-		"@fastify/cors": "~11.2.0",
+		"@fastify/cors": "~11.3.1",
 		"@ungate/shared": "workspace:*",
-		"better-sqlite3": "12.11.1",
-		"date-fns": "~4.1.0",
-		"drizzle-orm": "~0.43.1",
-		"fastify": "~5.8.5",
+		"better-sqlite3": "13.0.3",
+		"date-fns": "~4.4.0",
+		"drizzle-orm": "~0.45.4",
+		"fastify": "~5.12.7",
 		"lodash-es": "~4.18.1",
 		"source-map-support": "~0.5.21",
 		"tslib": "~2.8.1",
-		"zod": "~4.3.6"
+		"zod": "~4.6.7"
 	},
 	"devDependencies": {
-		"@types/better-sqlite3": "~7.6.13",
+		"@types/better-sqlite3": "~9.6.0",
 		"@types/lodash-es": "~4.17.12",
-		"@types/node": "~22.15.35",
+		"@types/node": "~24.19.2",
 		"@ungate/dev-kit": "workspace:*",
-		"@vitest/coverage-v8": "~4.0.18",
-		"drizzle-kit": "~0.31.10",
-		"esbuild": "~0.27.4",
-		"tsc-alias": "~1.8.16",
-		"tsc-watch": "~6.2.1",
-		"tsup": "~8.5.1",
-		"typescript": "~5.7.0",
-		"vite": "~8.0.0",
-		"vite-tsconfig-paths": "~5.1.4",
-		"vitest": "~4.0.18"
+		"@vitest/coverage-v8": "~5.0.5",
+		"drizzle-kit": "~0.31.11",
+		"esbuild": "~0.28.2",
+		"tsc-alias": "~1.9.9",
+		"tsc-watch": "~7.2.1",
+		"tsup": "~9.0.0",
+		"typescript": "~6.0.3",
+		"vite": "~8.3.5",
+		"vitest": "~5.0.5"
 	}
 }

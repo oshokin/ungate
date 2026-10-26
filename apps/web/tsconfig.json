@@ -1,13 +1,12 @@
 {
 	"extends": "@ungate/dev-kit/tsconfig-base",
 	"compilerOptions": {
-		"baseUrl": "./",
 		"paths": {
-			"$shared/*": ["src/shared/*"],
-			"$components/*": ["src/components/*"],
-			"$features/*": ["src/features/*"],
-			"$layouts/*": ["src/layouts/*"],
-			"$src/*": ["src/*"]
+			"$shared/*": ["./src/shared/*"],
+			"$components/*": ["./src/components/*"],
+			"$features/*": ["./src/features/*"],
+			"$layouts/*": ["./src/layouts/*"],
+			"$src/*": ["./src/*"]
 		},
 		"types": ["node", "vite/client"],
 		"verbatimModuleSyntax": true,

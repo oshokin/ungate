@@ -1,6 +1,19 @@
-# Ungate — oshokin fork based on 1.7.14
+# Ungate — my fork based on 1.7.14
 
-Use connected Claude, ChatGPT/Codex and MiniMax accounts in Cursor's native chat through a local proxy and a public tunnel. This is an unpublished local build of [orchidfiles/ungate](https://github.com/orchidfiles/ungate), not an official Marketplace release.
+Use connected Claude, ChatGPT/Codex and MiniMax accounts in Cursor's native chat through a local proxy and a public tunnel. This is my fork of [orchidfiles/ungate](https://github.com/orchidfiles/ungate), not an official Marketplace release.
+
+## Why this fork
+
+The original extension worked unreliably in my setup, and its routing, process lifecycle and interaction with Cursor were difficult to understand and troubleshoot. I audited and refactored the project, fixed the failures I encountered, and added the behavior, diagnostics and safeguards I considered missing.
+
+The main changes in this fork are:
+
+- Reworked API and tunnel lifecycle management so local and Remote SSH windows share state safely without unexpectedly stopping active services.
+- Corrected provider routing and request/stream conversion for Claude, ChatGPT/Codex and MiniMax, including tool calls and reasoning variants.
+- Simplified and hardened the Cursor integration by removing unsupported key/database manipulation and making model configuration explicit.
+- Redesigned the dashboard around connection management, subscription usage and actionable logs; removed request tracking, price estimates and speculative analytics.
+- Hardened credentials, local storage, artifact downloads and native dependency packaging, including verified cross-platform `better-sqlite3` prebuilds.
+- Modernized the dependencies, build and packaging pipeline, and added broader unit, integration, process and browser regression coverage.
 
 The dashboard contains **Connection**, **Usage** and **Logs**. Analytics, request history, hypothetical savings and model-price calculations have been removed.
 

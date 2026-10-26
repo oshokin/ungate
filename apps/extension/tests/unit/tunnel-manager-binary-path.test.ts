@@ -9,8 +9,10 @@ import { config } from '../../src/runtime-state/config';
 import { RuntimeStateDefaults } from '../../src/runtime-state/default-state';
 import { getCloudflaredBinPath, TunnelManager } from '../../src/tunnel-manager';
 
+import type { RuntimeState } from '@ungate/shared/frontend';
+
 const mocks = vi.hoisted(() => ({
-	state: undefined as unknown,
+	state: undefined as RuntimeState | undefined,
 	alive: false,
 	installed: false,
 	install: vi.fn(),
@@ -21,7 +23,8 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../../src/runtime-state', () => ({
 	RuntimeStateStore: {
 		read: () => mocks.state,
-		mutate: (fn: (state: unknown) => unknown) => {
+		mutate: (fn: (state: RuntimeState) => RuntimeState) => {
+			if (!mocks.state) throw new Error('Runtime state was not initialized.');
 			mocks.state = fn(mocks.state);
 
 			return Promise.resolve(mocks.state);

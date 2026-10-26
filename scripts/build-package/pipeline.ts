@@ -59,12 +59,10 @@ export async function packageVsix(): Promise<string> {
 		cpSync(join(repoDir, 'apps/web/dist'), join(stage, 'bundled/web/dist'), { recursive: true });
 		const requireApi = createRequire(join(repoDir, 'apps/api/package.json'));
 		const native = dirname(requireApi.resolve('better-sqlite3/package.json'));
-		const bindings = dirname(createRequire(join(native, 'package.json')).resolve('bindings/package.json'));
-		const uri = dirname(createRequire(join(bindings, 'package.json')).resolve('file-uri-to-path/package.json'));
+		const addonApi = dirname(createRequire(join(native, 'package.json')).resolve('node-addon-api/package.json'));
 		for (const [name, source] of [
 			['better-sqlite3', native],
-			['bindings', bindings],
-			['file-uri-to-path', uri]
+			['node-addon-api', addonApi]
 		]) {
 			const target = join(stage, 'bundled/api/node_modules', name);
 			cpSync(source, target, { recursive: true, dereference: true });
@@ -80,7 +78,7 @@ export async function packageVsix(): Promise<string> {
 		const vsce = JSON.parse(readFileSync(join(vsceRoot, 'package.json'), 'utf8')) as { bin: { vsce: string } };
 		runNode([join(vsceRoot, vsce.bin.vsce), 'package', '--no-dependencies', '--out', candidate], stage);
 		await verifyPackage(candidate);
-		const binding = requireApi.resolve('better-sqlite3/build/Release/better_sqlite3.node');
+		const binding = join(native, 'prebuilds', `${process.platform}-${process.arch}.node`);
 		runNode(['apps/api/tests/runtime-smoke.mjs'], repoDir, {
 			UNGATE_SMOKE_ENTRY: join(stage, 'bundled/api/bundle/main.cjs'),
 			UNGATE_BETTER_SQLITE3_NATIVE_BINDING: binding,

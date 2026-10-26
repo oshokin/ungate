@@ -44,15 +44,11 @@ The proxy sits between Cursor (which calls from `api2.cursor.sh`) and three upst
 ### Credentials stored locally
 
 | Asset | Where | Notes |
-|---|---|---|
+| --- | --- | --- |
 | OAuth access and refresh tokens | `~/.ungate/data.db`, table `provider_settings` | Refresh tokens are long-lived. Compromising the SQLite file is equivalent to owning the subscription. |
 | Proxy API key | `~/.ungate/data.db`, table `app_settings.apiKey` | Anyone with the tunnel URL **and** this key can send requests through your proxy and incur provider usage. |
-| Tunnel URL | `~/.ungate/data.db` and Cloudflare's quick-tunnel subdomain | Treat as a secret. Rotating the tunnel from the dashboard invalidates the old URL. |
+| Tunnel URL | `~/.ungate/runtime-state.json` and Cloudflare's quick-tunnel subdomain | Treat as a secret. Rotating the tunnel from the dashboard invalidates the old URL. |
 | User OAuth flow secrets | `apps/api/src/auth/` | PKCE verifier/challenge during login; never written to disk. |
-
-### Cursor's OpenAI API Key
-
-Cursor periodically turns off its `OpenAI API Key` setting. Ungate restores it via the `aiSettings.usingOpenAIKey.toggle` command. Direct SQLite writes to Cursor's `state.vscdb` do not work — Cursor ignores reactive storage writes — so Ungate only uses the command path. This is a Cursor behavior Ungate works around, not a Ungate credential.
 
 ### Tunnel and proxy
 
@@ -62,16 +58,18 @@ Cursor periodically turns off its `OpenAI API Key` setting. Ungate restores it v
 
 ### Native binaries
 
-Three binaries are downloaded on first run: `better-sqlite3`, `cloudflared`, and the `sqlite3` CLI. All three go through `utils/verified-artifact.ts`:
+`better-sqlite3` 13.0.3 and its eight N-API prebuilds for x64/arm64 on glibc Linux, musl Linux, macOS, and Windows are packaged inside the VSIX. Ungate selects the prebuild for the spawned Node runtime's platform/libc/architecture and load-tests it before starting the API. It does not download or compile SQLite code at runtime.
 
-- Pinned upstream URL per platform and (for `better-sqlite3`) Node ABI.
-- SHA-256 allowlist per platform/arch/ABI.
+`cloudflared` is the only native executable downloaded on first run. It goes through `utils/verified-artifact.ts`:
+
+- Pinned upstream URL per platform.
+- SHA-256 allowlist per platform/architecture.
 - Bytes are hashed while streaming into a staging directory and compared with `timingSafeEqual` before anything is extracted, copied, chmod-ed, or executed.
-- Staging is deleted on failure. Unknown platform/ABI tuples fail closed — there is no fallback to `latest`.
+- Staging is deleted on failure. Unknown platform tuples fail closed — there is no fallback to `latest`.
 - Each managed binary carries a `<binary>.sha256` stamp. A managed binary without a matching stamp is treated as unverified and replaced.
 - There is no manual drop-in override — a directory whose contents are not stamped would be rejected anyway.
 
-This is the only attack surface where Ungate pulls code from the internet. Adding a new binary, a new platform, or a new Node ABI requires both a pinned URL and a SHA-256 entry in the allowlist. The verified-artifact code path is covered by unit tests; a PR that adds a new binary or platform without a corresponding vitest case will be asked to add one.
+This is the only attack surface where Ungate pulls executable code from the internet at runtime. Adding a new downloaded binary or platform requires both a pinned URL and a SHA-256 entry in the allowlist. The verified-artifact code path is covered by unit tests.
 
 ### Multi-window coordination
 
@@ -83,7 +81,7 @@ A few things look like bugs but are requirements of the providers we integrate w
 
 - **Anthropic OAuth fingerprint.** The Anthropic OAuth client must match Claude Code’s expected fingerprint: `?beta=true` on the URL, `User-Agent: claude-cli/<version> (external, claude-vscode, agent-sdk/0.2.7)` where `<version>` comes from dashboard settings (`stable`, `latest`, or custom `X.Y.Z` in `app_settings`), the full `x-stainless-*` header set, `anthropic-dangerous-direct-browser-access: true`, and three `anthropic-beta` feature flags. Beta flag values and most header fields are fixed; changing them makes Anthropic reject the request. Only the `claude-cli/<version>` segment is user-configurable. See `apps/api/src/config.ts`, `RequestBuilder.getClaudeOAuthHeaders()`, and `packages/shared` (`ClaudeCliVersion`, `CLAUDE_CLI_*` constants).
 - **Cursor backend cannot reach `localhost`.** All requests must go through the tunnel. This is why Ungate ships one.
-- **`better-sqlite3` is matched against the host Node ABI**, not against Electron's. Supported Node versions are 22, 24, and 26.
+- **`better-sqlite3` runs in the spawned Node process**, not Electron. Version 13 uses N-API prebuilds and supports Node 22 or newer on packaged platform tuples.
 
 ## Severity classification
 
@@ -102,7 +100,7 @@ These are documented in [README.md](README.md) and listed here so they are not r
 
 - **Built-in Cursor model IDs bypass the custom base URL.** Ungate can only route model IDs that the user has added as custom models in Cursor.
 - **`localhost` does not work as `OpenAI Base URL`.** Cursor's backend cannot reach it. A public tunnel is required.
-- **`better-sqlite3` binary is matched against the host Node ABI**, not against Electron's. Mismatched Node versions cause `No prebuilt binary for ABI ...`.
+- **`better-sqlite3` prebuild selection is platform/libc/architecture based.** Unsupported tuples fail before the API starts.
 - **Quick tunnels** use random Cloudflare subdomains. They are reachable to anyone who learns the URL.
 - The proxy has **no per-request rate limit** on the extension side. Providers still enforce their own limits, but a leaked key can drive sustained usage.
 

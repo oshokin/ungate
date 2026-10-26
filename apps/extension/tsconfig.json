@@ -1,11 +1,12 @@
 {
 	"extends": "@ungate/dev-kit/tsconfig-base",
 	"compilerOptions": {
-		"module": "commonjs",
+		"module": "ESNext",
 		"lib": [
 			"ES2022"
 		],
-		"moduleResolution": "node",
+		"moduleResolution": "Bundler",
+		"types": ["node", "vscode"],
 		"importHelpers": false,
 		"noEmit": true
 	},

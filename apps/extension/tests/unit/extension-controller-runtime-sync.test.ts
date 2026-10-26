@@ -54,6 +54,7 @@ const createStatusBarItemMock = vi.fn(() => {
 		dispose: vi.fn()
 	};
 });
+type MockStatusBarItem = ReturnType<typeof createStatusBarItemMock>;
 const registerCommandMock = vi.fn(() => {
 	return {
 		dispose: vi.fn()
@@ -405,6 +406,11 @@ describe('ExtensionController', () => {
 		});
 
 		controller.activate();
+		const activatedStatusBar = createStatusBarItemMock.mock.results[0]?.value as MockStatusBarItem | undefined;
+
+		expect(createStatusBarItemMock).toHaveBeenCalledWith('ungate.connectionStatus', 1, 100);
+		expect(activatedStatusBar?.show).toHaveBeenCalledTimes(1);
+		expect(activatedStatusBar?.text).toBe('$(warning) Ungate: Offline');
 
 		await vi.waitFor(() => {
 			expect(apiServerStartMock).toHaveBeenCalledTimes(1);

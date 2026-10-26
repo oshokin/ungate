@@ -29,6 +29,7 @@ Cursor → Cloudflare Tunnel → Ungate API → Provider API. Cursor cannot call
 Fastify v5 server, spawned by the extension as a child Node.js process. CORS is handled globally via `@fastify/cors`. Both the extension and the API are bundled with `tsup` (CJS) — production entry point is `bundle/main.cjs`, dev entry point is `dist/main.js`.
 
 **Entry points:**
+
 - `/v1/chat/completions` — OpenAI-compatible endpoint, accepts requests from Cursor
 - `/v1/messages` — Anthropic-compatible endpoint (direct proxy)
 - `/usage`, `/usage/refresh` — normalized subscription snapshots (separate admin capability)
@@ -37,22 +38,26 @@ Fastify v5 server, spawned by the extension as a child Node.js process. CORS is 
 - `/settings` — settings (admin capability)
 
 **Architecture:**
+
 - `src/server.ts` — Fastify initialization, plugin registration
 - `src/config.ts` — static configuration (URLs, OAuth, beta parameters)
 - `src/plugins/auth.ts` — preHandler for API-key authentication
 
 **Routing (`src/routes/`):**
+
 - `openai.ts` — main router: determines provider by model (MiniMax → mapped → Claude). Branch order matters and must stay consistent.
 - `anthropic.ts` — direct proxy to Anthropic API with OAuth token
 - `usage.ts`, `auth.ts`, `health.ts`, `models.ts`, `settings.ts`
 
 **Provider selection (`src/orchestration/openai/model-routing.ts`):**
+
 - MiniMax: model name prefix or `model_mappings` entry pointing to MiniMax upstream
 - OpenAI-mapped: `model_mappings` entry pointing to OpenAI (ChatGPT Codex)
 - Claude (Anthropic): default fallback path
 - Each model ID maps to one provider (configured per-row in `model_mappings`), not a global setting.
 
 **Proxy clients (`src/proxy/`):**
+
 - `anthropic-client.ts` — requests to Anthropic Claude Code API via OAuth. Tool name mapping (Cursor → Claude Code), 401 retry with token refresh, 400 error diagnostics, logging for rare `illegal value` errors
 - `openai-client.ts` — requests to ChatGPT Codex API (`/responses`). Streaming format converter for both `function_call` and `custom_tool_call` variants
 - `minimax-client.ts` — requests to MiniMax API
@@ -61,30 +66,36 @@ Fastify v5 server, spawned by the extension as a child Node.js process. CORS is 
 - `request-builder.ts` — request body preparation for Claude Code (headers, stainless headers, beta params)
 
 **OpenAI orchestration (`src/orchestration/openai/`):**
+
 - `model-routing.ts` — provider determination by model ID
 - `provider-handlers/` — handlers for Claude, OpenAI, MiniMax
 - `streaming-gateway.ts` — stream management
 - `error-mapper.ts`, `error-messages.ts` — error mapping to OpenAI format
 
 **Adapters (`src/adapter/`):**
+
 - `anthropic-to-openai.ts` — Anthropic response → OpenAI format conversion (including streaming tool calls)
 - `openai-to-anthropic.ts` — OpenAI request → Anthropic conversion
 - `xml-tool-parser.ts` — XML tool use parsing
 
 **Streaming (`src/streaming/`):**
+
 - `openai-stream-handler.ts` — reverse tool name mapping in streams
 - `minimax-stream-handler.ts` — MiniMax streaming with `<think>`/`</think>` tag parsing (split tags across chunks via `pendingTag` state)
 
 **Codex responses (`src/proxy/responses-stream-mapper/`):**
+
 - SSE stream parsing from ChatGPT Codex `/responses` into OpenAI chat.completion.chunk
 - Handles both streaming variants: `function_call` + `response.function_call_arguments.*` and `custom_tool_call` + `response.custom_tool_call_input.*`
 - `stream-state.ts`, `stream-openai-chunks.ts`, `responses-event-router.ts`, `stream-assistant-text.ts`, `process-responses-chunk.ts`, `stream-diagnostics.ts`
 
 **Codex input normalization (`src/proxy/responses-input-normalizer/`):**
+
 - OpenAI chat completion → Codex `/responses` payload transformation
 - `input-shape.ts`, `build-body.ts`, `input-text.ts`, `resolve-model.ts`, `types.ts`
 
 **Database (`src/database/`):**
+
 - SQLite via Drizzle ORM + better-sqlite3
 - Tables: `app_settings` (port, apiKey, quiet, extraInstruction, claudeCliVersionMode, claudeCliVersionCustom), `provider_settings` (per-provider OAuth tokens, refresh tokens, expiry), `model_mappings` (id, label, provider, upstreamModel, reasoningBudget)
 - Migrations: `apps/api/drizzle/` — idempotent (`CREATE TABLE IF NOT EXISTS`, `INSERT OR IGNORE`). Generated with `pnpm drizzle-kit generate --name <index>` (config: `prefix: 'none'`); files are named `_0000.sql`, `_0001.sql`, …
@@ -92,15 +103,18 @@ Fastify v5 server, spawned by the extension as a child Node.js process. CORS is 
 - Databases on disk: `~/.ungate/data.db` (production default) and `~/.ungate/data-dev.db` (used when `DB_PATH=$HOME/.ungate/data-dev.db` is set in dev). Always verify which database the running API process is using before debugging analytics or auth.
 
 **Types (`src/types/`):**
+
 - `openai.ts`, `anthropic.ts`, `anthropic-stream.ts`, `proxy.ts`, `auth.ts`
 
 **Tools (`src/tools/`):**
+
 - `translator.ts` — tool name translation in responses
 - `normalizer.ts` — parameter normalization (string→array)
 
 **Response headers (`src/metrics/`):** request identifiers and diagnostics only; no request persistence.
 
 **Auth (`src/auth/`):**
+
 - OAuth PKCE flow for Anthropic: `startLogin()` generates verifier/challenge, `completeLogin()` exchanges code for tokens. Manual `CODE#STATE` entry required (Anthropic rejects localhost redirect_uri for claude.ai OAuth).
 
 ## apps/extension — VS Code extension
@@ -120,14 +134,15 @@ User entry point. Manages the API server and tunnel lifecycle.
 - `runtime-state/` — multi-window coordination via file-based state. Windows heartbeat, leader election, command queue
 
 **Native dependencies:**
-- better-sqlite3: prebuilt binary downloaded at first run from GitHub Releases matching host Node ABI (not Electron). VSIX ships only JS wrapper + bindings
+
 - cloudflared: binary downloaded to `~/.ungate/bin/`, managed by tsup bundling
-- Every download goes through `utils/verified-artifact.ts`: one pinned upstream URL plus a SHA-256 allowlist per platform/arch (and per Node ABI for better-sqlite3). Bytes are hashed while streaming into a staging directory and compared with `timingSafeEqual`; nothing is extracted, copied, chmod-ed or executed before the digest matches, and staging is deleted on failure. Unknown platform/ABI tuples fail closed with an actionable error instead of falling back to a `latest` release
-- Pinned sets: better-sqlite3 12.11.1 for Node ABI 127/137/141/147 (Node 22/24/25/26) on glibc Linux, macOS and Windows; cloudflared 2026.8.2
-- Every binary Ungate installs carries a `<binary>.sha256` stamp written after verification: `~/.ungate/bin/` for cloudflared, and `better_sqlite3.installed.node` in the API's `node_modules`. A managed binary without a matching stamp is treated as unverified — it is never loaded, executed or handed to the API child, and is replaced by a verified install. This retires binaries left behind by pre-pinning Ungate versions and by the `cloudflared` npm helper's `latest` install. The bundled/dev `better_sqlite3.node` binding shipped in the tree is still load-tested, since it is not a download
-- There is no manual drop-in override: on a platform with no pinned artifact the unsupported error says the feature cannot start, rather than pointing at a directory whose unstamped contents would be rejected anyway
+- Every standalone download goes through `utils/verified-artifact.ts`: one pinned upstream URL plus a SHA-256 allowlist per platform/arch. Bytes are hashed while streaming into a staging directory and compared with `timingSafeEqual`; nothing is copied, chmod-ed or executed before the digest matches, and staging is deleted on failure
+- better-sqlite3 13.0.3 ships N-API prebuilds inside its npm package for x64/arm64 on glibc Linux, musl Linux, macOS and Windows. Packaging includes all eight prebuilds; startup selects the target using the spawned Node runtime's platform/libc/arch and load-tests it. Unsupported tuples fail closed without downloading or compiling native code
+- cloudflared 2026.8.2 remains a standalone verified download. Its managed binary carries a `<binary>.sha256` stamp in `~/.ungate/bin/`; an unstamped or mismatched binary is never executed
+- There is no manual native-binary drop-in override
 
 **Logs:**
+
 - Two ring buffers (500 entries each): API (stdout/stderr) and tunnel (stderr)
 - Health check against `/health` every second, three states: running, stopped, error
 

@@ -1,7 +1,7 @@
 {
 	"extends": "@ungate/dev-kit/tsconfig-base",
 	"compilerOptions": {
-		"baseUrl": "./"
+		"types": ["node"]
 	},
 	"include": [
 		"src",

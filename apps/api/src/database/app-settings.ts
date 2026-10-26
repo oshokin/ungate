@@ -22,17 +22,16 @@ export class Settings {
 
 	static get(): AppSettings {
 		const db = getDb();
-		let row = db.select().from(appSettings).where(eq(appSettings.id, 1)).get();
-		if (!row) {
-			[row] = db
-				.insert(appSettings)
-				.values({
-					id: 1,
-					apiKey: this.generateApiKey()
-				})
-				.returning()
-				.all();
-		}
+		db.insert(appSettings)
+			.values({
+				id: 1,
+				apiKey: this.generateApiKey()
+			})
+			.onConflictDoNothing({ target: appSettings.id })
+			.run();
+		const row = db.select().from(appSettings).where(eq(appSettings.id, 1)).get();
+
+		if (!row) throw new Error('Failed to initialize application settings');
 
 		if (!row.apiKey?.trim()) {
 			row.apiKey = this.generateApiKey();

@@ -86,7 +86,7 @@ function convertContent(content: string | OpenAIContentPart[] | ContentBlock[]):
 						type: 'image',
 						source: {
 							type: 'base64',
-							media_type: match[1] as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp',
+							media_type: match[1],
 							data: match[2]
 						}
 					});

@@ -65,12 +65,7 @@ vi.mock('../../src/utils/better-sqlite3-installer', () => {
 	return {
 		BetterSqlite3Installer: {
 			ensureInstalled: (...args: unknown[]) => ensureInstalledMock(...args),
-			getInstalledBinaryPath: vi.fn(
-				() => '/tmp/ungate-extension/bundled/api/node_modules/better-sqlite3/build/Release/better_sqlite3.installed.node'
-			),
-			resolveBindingPath: vi.fn(
-				() => '/tmp/ungate-extension/bundled/api/node_modules/better-sqlite3/build/Release/better_sqlite3.installed.node'
-			)
+			resolveBindingPath: vi.fn(() => '/tmp/ungate-extension/bundled/api/node_modules/better-sqlite3/prebuilds/linux-x64.node')
 		}
 	};
 });
@@ -320,7 +315,7 @@ describe('ApiServer.runHealthCheckCycle', () => {
 			expect.any(Array),
 			expect.objectContaining({
 				env: expect.objectContaining({
-					UNGATE_BETTER_SQLITE3_NATIVE_BINDING: expect.stringContaining('better_sqlite3.installed.node')
+					UNGATE_BETTER_SQLITE3_NATIVE_BINDING: expect.stringContaining('prebuilds/linux-x64.node')
 				})
 			})
 		);

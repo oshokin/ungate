@@ -63,9 +63,15 @@ export class ExtensionController {
 		this.outputChannel = vscode.window.createOutputChannel('Ungate');
 		this.context.subscriptions.push(this.outputChannel);
 
-		this.statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+		// A Remote SSH window replaces its bootstrap local extension host after
+		// authority resolution. Keep a stable item identity so Cursor replaces
+		// the disposed bootstrap item instead of losing the recreated one.
+		this.statusBar = vscode.window.createStatusBarItem('ungate.connectionStatus', vscode.StatusBarAlignment.Right, 100);
 		this.statusBar.command = extensionCommands.openDashboard;
 		this.context.subscriptions.push(this.statusBar);
+		// Render immediately in every local and Remote SSH window. Runtime-state
+		// bootstrap is asynchronous and must not gate status-bar visibility.
+		this.updateStatusBar();
 
 		this.dashboard = new Dashboard(this.context, (message) => {
 			this.handleDashboardMessage(message);

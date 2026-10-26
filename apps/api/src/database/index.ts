@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs';
+import { chmodSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -16,6 +16,11 @@ let _db: DrizzleDb | null = null;
 let _sqlite: DatabaseType | null = null;
 let _dbPath: string | null = null;
 const nativeBindingPath = process.env.UNGATE_BETTER_SQLITE3_NATIVE_BINDING;
+const DATABASE_BUSY_TIMEOUT_MS = 5000;
+
+function protectPath(target: string, mode: number): void {
+	if (process.platform !== 'win32') chmodSync(target, mode);
+}
 
 function resolveDbPath(): string {
 	return process.env.DB_PATH ?? join(homedir(), '.ungate', 'data.db');
@@ -29,10 +34,14 @@ export function getDb(): DrizzleDb {
 	const dbPath = resolveDbPath();
 
 	if (!_db) {
-		mkdirSync(dirname(dbPath), { recursive: true });
+		const dbDirectory = dirname(dbPath);
+		mkdirSync(dbDirectory, { recursive: true, mode: 0o700 });
+		if (dbDirectory === join(homedir(), '.ungate')) protectPath(dbDirectory, 0o700);
 		const sqliteOptions = nativeBindingPath ? { nativeBinding: nativeBindingPath } : undefined;
 
 		_sqlite = new BetterSqlite3(dbPath, sqliteOptions);
+		protectPath(dbPath, 0o600);
+		_sqlite.pragma(`busy_timeout = ${DATABASE_BUSY_TIMEOUT_MS}`);
 		_sqlite.pragma('journal_mode = WAL');
 
 		_db = drizzle(_sqlite, { schema, casing: 'snake_case' });

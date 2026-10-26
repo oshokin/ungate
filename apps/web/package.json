@@ -13,24 +13,24 @@
 	},
 	"dependencies": {
 		"@ungate/shared": "workspace:*",
-		"date-fns": "~4.1.0"
+		"date-fns": "~4.4.0"
 	},
 	"devDependencies": {
-		"@iconify-json/lucide": "~1.2.102",
-		"@iconify-json/simple-icons": "~1.2.100",
-		"@skeletonlabs/skeleton": "~4.15.2",
-		"@skeletonlabs/skeleton-svelte": "~4.15.2",
-		"@sveltejs/vite-plugin-svelte": "~7.0.0",
-		"@tailwindcss/vite": "~4.2.4",
+		"@iconify-json/lucide": "~1.2.147",
+		"@iconify-json/simple-icons": "~1.2.101",
+		"@skeletonlabs/skeleton": "~5.0.1",
+		"@skeletonlabs/skeleton-svelte": "~5.0.1",
+		"@sveltejs/vite-plugin-svelte": "~7.3.1",
+		"@tailwindcss/vite": "~4.3.3",
 		"@tsconfig/svelte": "~5.0.8",
-		"@types/node": "~22.15.35",
+		"@types/node": "~24.19.2",
 		"@ungate/dev-kit": "workspace:*",
-		"svelte": "~5.55.4",
-		"svelte-check": "~4.4.6",
-		"tailwindcss": "~4.2.4",
-		"typescript": "~5.7.0",
-		"unplugin-icons": "~23.0.1",
-		"vite": "~8.0.9",
-		"vitest": "~4.0.18"
+		"svelte": "~5.57.2",
+		"svelte-check": "~4.7.7",
+		"tailwindcss": "~4.3.3",
+		"typescript": "~6.0.3",
+		"unplugin-icons": "~24.0.0",
+		"vite": "~8.3.5",
+		"vitest": "~5.0.5"
 	}
 }
