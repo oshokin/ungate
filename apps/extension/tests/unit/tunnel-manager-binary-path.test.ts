@@ -265,7 +265,7 @@ describe('detached tunnel lifecycle', () => {
 			};
 			request.end = vi.fn(() => {
 				(callback as (response: EventEmitter) => void)(response);
-				response.emit('data', Buffer.from(JSON.stringify({ service: 'ungate', version: '1.7.14', protocolVersion: 3 })));
+				response.emit('data', Buffer.from(JSON.stringify({ status: 'ok', service: 'ungate' })));
 				response.emit('end');
 			});
 			request.destroy = vi.fn();

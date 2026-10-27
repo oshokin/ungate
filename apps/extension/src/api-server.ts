@@ -1,4 +1,6 @@
 import * as cp from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
@@ -14,8 +16,6 @@ import { CrossProcessLock } from './utils/cross-process-lock';
 import { ManagedProcess } from './utils/managed-process';
 import { NodeResolver } from './utils/node-resolver';
 
-const HEALTH_CHECK_URL = (port: number) => `http://127.0.0.1:${port}/health`;
-
 interface ApiServerCallbacks {
 	onLog(level: LogEntry['level'], message: string): void;
 	onPortDetected(port: number): void;
@@ -28,8 +28,10 @@ interface ApiServerCallbacks {
 export class ApiServer {
 	private process: cp.ChildProcess | null = null;
 	private healthCheckTimer: NodeJS.Timeout | null = null;
+	private healthCheckInFlight = false;
 	private stdoutBuffer = '';
-	private restartRequested = false;
+	private logPath: string | null = null;
+	private logOffset = 0;
 	private shutDownDeliberately = false;
 	private lastStatus: ServerStatus | null = null;
 	private port: number | null = null;
@@ -125,9 +127,12 @@ export class ApiServer {
 			if (!response.ok) throw new Error(`Cannot stop shared API: HTTP ${response.status}`);
 			const deadline = Date.now() + 10000;
 			while (true) {
-				const alive = await this.checkPortHealth(port);
+				const alive = await this.isPortListening(port);
 				if (!alive) break;
-				if (Date.now() > deadline) throw new Error('API shutdown timed out; no replacement started.');
+				if (Date.now() > deadline) {
+					await this.stopAuthenticatedApiProcess(port);
+					break;
+				}
 				await sleep(100);
 			}
 		} else {
@@ -141,6 +146,7 @@ export class ApiServer {
 		this.lastStatus = 'stopped';
 		this.attachedPid = null;
 		await this.writeRuntimeState('stopped', null);
+		this.rotateLogs();
 	}
 
 	getPort(): number | null {
@@ -176,6 +182,7 @@ export class ApiServer {
 		}
 
 		const runtimeState = RuntimeStateStore.read();
+		this.attachLog(runtimeState.api.logPath);
 		const existingPort = runtimeState.api.port;
 
 		if (existingPort) {
@@ -191,6 +198,7 @@ export class ApiServer {
 					await this.recordApiFailure(message);
 					throw error;
 				}
+				this.callbacks.onLog('info', `[process] attached to api pid=${this.attachedPid ?? 'unknown'} port=${existingPort}`);
 				await this.setStatus('running');
 				this.startHealthCheck();
 
@@ -212,6 +220,7 @@ export class ApiServer {
 			this.spawn();
 			const deadline = Date.now() + 30000;
 			while (true) {
+				this.pollLogs();
 				const healthy = this.port ? await this.checkPortHealth(this.port) : false;
 				if (healthy) break;
 				if (!this.process || Date.now() > deadline) throw new Error('Ungate API did not become ready within 30 seconds.');
@@ -248,6 +257,9 @@ export class ApiServer {
 
 		const cwd = this.getServerCwd();
 		this.stdoutBuffer = '';
+		const logPath = path.join(config.baseDir, `api-${randomUUID()}.log`);
+		const logFd = fs.openSync(logPath, 'ax', 0o600);
+		this.attachLog(logPath);
 
 		const isDev = this.context.extensionMode === vscode.ExtensionMode.Development;
 		const runtime = this.runtimePath || this.resolveRuntimePath(NodeResolver.resolve(process.env.UNGATE_NODE_BIN));
@@ -264,17 +276,15 @@ export class ApiServer {
 
 		this.callbacks.onLog('info', `[process] starting api via ${runtime}`);
 
-		this.process = cp.spawn(runtime, nodeArgs, { cwd, env, stdio: 'pipe', detached: true });
+		try {
+			this.process = cp.spawn(runtime, nodeArgs, { cwd, env, stdio: ['ignore', logFd, logFd], detached: true });
+		} finally {
+			fs.closeSync(logFd);
+		}
 		this.process.unref();
 		void this.writeRuntimeState('starting', null).catch(() => {});
 
 		const child = this.process;
-		this.process.stdout?.on('data', (data: Buffer) => {
-			if (this.process === child) this.onStdout(data);
-		});
-		this.process.stderr?.on('data', (data: Buffer) => {
-			if (this.process === child) this.onStderr(data);
-		});
 		this.process.on('exit', (code, signal) => {
 			if (this.process === child) this.onExit(code, signal);
 		});
@@ -290,6 +300,10 @@ export class ApiServer {
 		this.stdoutBuffer = (this.stdoutBuffer + text).slice(-8192);
 
 		for (const line of text.split('\n').filter((l) => l.trim())) {
+			if (line.includes('EADDRINUSE')) {
+				const addressMatch = /port:\s*(\d+)/.exec(this.stdoutBuffer);
+				if (addressMatch) this.addressInUsePort = parseInt(addressMatch[1], 10);
+			}
 			this.callbacks.onLog(this.parseLogLevel(line), line);
 		}
 
@@ -305,57 +319,19 @@ export class ApiServer {
 		}
 	}
 
-	private onStderr(data: Buffer): void {
-		const text = data.toString();
-
-		for (const line of text.split('\n').filter((l) => l.trim())) {
-			if (line.includes('EADDRINUSE')) {
-				const match = /port:\s*(\d+)/.exec(this.stdoutBuffer + text);
-
-				if (match) {
-					this.addressInUsePort = parseInt(match[1], 10);
-				}
-			}
-
-			this.callbacks.onLog('error', line);
-		}
-	}
-
 	private onExit(code: number | null, signal: NodeJS.Signals | null): void {
 		this.process = null;
 		this.noClientsSince = null;
 
 		let level: LogEntry['level'];
 
-		if (this.restartRequested || code === 0) {
+		if (code === 0) {
 			level = 'info';
 		} else {
 			level = 'error';
 		}
 
 		this.callbacks.onLog(level, `[process] exit code=${code} signal=${signal}`);
-
-		if (this.restartRequested) {
-			this.shutDownDeliberately = false;
-			this.lastStatus = 'stopped';
-			void sleep(config.apiServer.restartDelayMs).then(async () => {
-				if (!this.shouldRespawn()) {
-					this.restartInProgress = false;
-					this.restartRequested = false;
-
-					return;
-				}
-
-				try {
-					await this.start();
-				} finally {
-					this.restartInProgress = false;
-					this.restartRequested = false;
-				}
-			});
-
-			return;
-		}
 
 		if (this.shutDownDeliberately) {
 			this.shutDownDeliberately = false;
@@ -422,11 +398,18 @@ export class ApiServer {
 		this.stopHealthCheck();
 
 		this.healthCheckTimer = setInterval(() => {
-			void this.runHealthCheckCycle().catch(() => {});
+			if (this.healthCheckInFlight) return;
+			this.healthCheckInFlight = true;
+			void this.runHealthCheckCycle()
+				.catch(() => {})
+				.finally(() => {
+					this.healthCheckInFlight = false;
+				});
 		}, config.apiServer.healthCheckIntervalMs);
 	}
 
 	private async runHealthCheckCycle(): Promise<void> {
+		this.pollLogs();
 		if (!this.callbacks.isLeaderWindow()) {
 			return;
 		}
@@ -459,16 +442,8 @@ export class ApiServer {
 		}
 
 		try {
-			const res = await fetch(HEALTH_CHECK_URL(this.port), {
-				signal: AbortSignal.timeout(config.apiServer.healthCheckRequestTimeoutMs)
-			});
-
-			if (res.ok) {
-				try {
-					await assertCompatibleApi(this.port);
-				} catch {
-					return;
-				}
+			try {
+				await assertCompatibleApi(this.port);
 				this.healthFailures = 0;
 				const wasDown = this.lastStatus !== 'running';
 
@@ -477,8 +452,9 @@ export class ApiServer {
 				if (wasDown) {
 					this.callbacks.onPortDetected(this.port);
 				}
-			} else {
-				await this.handleHealthFailure(`[process] health check failed with status ${res.status}`);
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				await this.handleHealthFailure(`[process] health check failed: ${message}`);
 			}
 		} catch {
 			await this.handleHealthFailure('[process] health check failed');
@@ -531,6 +507,7 @@ export class ApiServer {
 
 			current.api.pid = status === 'stopped' ? null : pid;
 			current.api.port = this.port;
+			current.api.logPath = status === 'stopped' ? undefined : (this.logPath ?? current.api.logPath);
 			current.api.status = status;
 			current.api.lastSeenAt = now;
 			current.api.lastError = errorMessage;
@@ -548,20 +525,54 @@ export class ApiServer {
 
 	private async checkPortHealth(port: number): Promise<boolean> {
 		try {
-			const response = await fetch(HEALTH_CHECK_URL(port), {
-				signal: AbortSignal.timeout(config.apiServer.portHealthRequestTimeoutMs)
-			});
-
-			if (!response.ok) return false;
-			const raw: unknown = await response.json();
-			const health = raw as { service?: string; pid?: number };
-
-			if (health.service !== 'ungate' || !Number.isInteger(health.pid)) return false;
-			this.attachedPid = health.pid ?? null;
+			const health = await readApiHealth(port, AbortSignal.timeout(config.apiServer.portHealthRequestTimeoutMs));
+			this.attachedPid = health.pid;
 
 			return true;
 		} catch {
 			return false;
+		}
+	}
+
+	private async isPortListening(port: number): Promise<boolean> {
+		try {
+			await fetch(`http://127.0.0.1:${port}/health`, {
+				signal: AbortSignal.timeout(config.apiServer.portHealthRequestTimeoutMs)
+			});
+
+			return true;
+		} catch {
+			return false;
+		}
+	}
+
+	private async stopAuthenticatedApiProcess(port: number): Promise<void> {
+		const health = await readApiHealth(port, AbortSignal.timeout(config.apiServer.portHealthRequestTimeoutMs));
+		const pid = health.pid;
+		this.callbacks.onLog('warn', `[process] graceful shutdown timed out; terminating authenticated api pid=${pid}`);
+		this.signalProcess(pid, 'SIGTERM');
+		const forceAt = Date.now() + 2000;
+		const deadline = Date.now() + 5000;
+		let forced = false;
+		let listening = await this.isPortListening(port);
+		while (listening) {
+			if (!forced && Date.now() >= forceAt) {
+				const current = await readApiHealth(port, AbortSignal.timeout(config.apiServer.portHealthRequestTimeoutMs));
+				if (current.pid !== pid) throw new Error('API PID changed during shutdown; refusing to terminate its replacement.');
+				this.signalProcess(pid, 'SIGKILL');
+				forced = true;
+			}
+			if (Date.now() >= deadline) throw new Error('API shutdown timed out; no replacement started.');
+			await sleep(100);
+			listening = await this.isPortListening(port);
+		}
+	}
+
+	private signalProcess(pid: number, signal: NodeJS.Signals): void {
+		try {
+			process.kill(pid, signal);
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
 		}
 	}
 
@@ -585,6 +596,43 @@ export class ApiServer {
 		}
 
 		return 'info';
+	}
+
+	private attachLog(logPath: string | undefined): void {
+		if (!logPath || this.logPath === logPath) return;
+		this.logPath = logPath;
+		this.logOffset = 0;
+		this.stdoutBuffer = '';
+	}
+
+	private pollLogs(): void {
+		if (!this.logPath) return;
+		try {
+			const size = fs.statSync(this.logPath).size;
+			const start = Math.max(this.logOffset, size - 65536);
+			const bytes = Buffer.alloc(Math.max(0, size - start));
+			const fd = fs.openSync(this.logPath, 'r');
+			try {
+				fs.readSync(fd, bytes, 0, bytes.length, start);
+			} finally {
+				fs.closeSync(fd);
+			}
+			this.logOffset = size;
+			if (bytes.length) this.onStdout(bytes);
+		} catch {
+			/* The process may not have written its log yet. */
+		}
+	}
+
+	private rotateLogs(): void {
+		const active = this.logPath;
+		const logs = fs
+			.readdirSync(config.baseDir)
+			.filter((name) => name.startsWith('api-') && name.endsWith('.log'))
+			.map((name) => path.join(config.baseDir, name))
+			.filter((file) => file !== active)
+			.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
+		for (const file of logs.slice(5)) fs.rmSync(file, { force: true });
 	}
 
 	private async ensureNativeDeps(): Promise<void> {

@@ -1,10 +1,4 @@
-import {
-	runtimeCommandSchema,
-	runtimeStateSchema,
-	type RuntimeClientEntry,
-	type RuntimeCommand,
-	type RuntimeState
-} from '@ungate/shared/frontend';
+import { runtimeStateSchema, type RuntimeClientEntry, type RuntimeState } from '@ungate/shared/frontend';
 import { z } from 'zod';
 
 import { config } from './config';
@@ -16,8 +10,9 @@ export class RuntimeStateNormalizer {
 		const now = Date.now();
 		const stateSchema = runtimeStateSchema as z.ZodType<Partial<RuntimeState>>;
 		const parsed = stateSchema.safeParse(raw);
+		if (!parsed.success) throw new Error(`Invalid runtime state: ${z.prettifyError(parsed.error)}`);
 
-		if (parsed.success && parsed.data.api) {
+		if (parsed.data.api) {
 			next.api = {
 				...next.api,
 				...parsed.data.api,
@@ -25,14 +20,14 @@ export class RuntimeStateNormalizer {
 			};
 		}
 
-		if (parsed.success && parsed.data.tunnel) {
+		if (parsed.data.tunnel) {
 			next.tunnel = {
 				...next.tunnel,
 				...parsed.data.tunnel
 			};
 		}
 
-		if (parsed.success && parsed.data.keyFix) {
+		if (parsed.data.keyFix) {
 			next.keyFix = {
 				...next.keyFix,
 				...parsed.data.keyFix
@@ -51,22 +46,7 @@ export class RuntimeStateNormalizer {
 			next.clients = this.filterLiveClients(raw.clients, now);
 		}
 
-		if (Array.isArray((raw as { commands?: unknown }).commands)) {
-			const queue = (raw as { commands: unknown[] }).commands;
-			next.commands = queue
-				.map((entry) => this.normalizeCommand(entry))
-				.filter((entry): entry is RuntimeCommand => entry !== null);
-		}
-
-		const legacyCommand = (raw as { command?: unknown }).command;
-
-		if (next.commands.length === 0 && legacyCommand && typeof legacyCommand === 'object') {
-			const legacy = this.normalizeCommand(legacyCommand);
-
-			if (legacy) {
-				next.commands = [legacy];
-			}
-		}
+		// Legacy command/commands fields are intentionally discarded.
 
 		return next;
 	}
@@ -85,16 +65,5 @@ export class RuntimeStateNormalizer {
 		}
 
 		return next;
-	}
-
-	private static normalizeCommand(raw: unknown): RuntimeCommand | null {
-		const commandSchema = runtimeCommandSchema as z.ZodType<RuntimeCommand>;
-		const parsed = commandSchema.safeParse(raw);
-
-		if (!parsed.success) {
-			return null;
-		}
-
-		return parsed.data;
 	}
 }

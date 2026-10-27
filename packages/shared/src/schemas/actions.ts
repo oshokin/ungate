@@ -27,4 +27,5 @@ export interface DashboardActionResult {
 	type: 'action-result';
 	id: string;
 	error?: string;
+	cancelled?: boolean;
 }

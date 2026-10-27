@@ -32,14 +32,17 @@ describe('anthropic-to-openai', () => {
 				],
 				usage: { input_tokens: 10, output_tokens: 5 }
 			},
-			'gpt-5.4'
+			'gpt-5.4',
+			{ Read: 'ReadFile' }
 		);
 
 		expect(converted.object).toBe('chat.completion');
 		expect(converted.model).toBe('gpt-5.4');
-		expect(converted.choices[0].finish_reason).toBe('length');
-		expect(converted.choices[0].message.content).toContain('Hello');
-		expect(converted.choices[0].message.content).toContain('[Tool: Read]');
+		expect(converted.choices[0].finish_reason).toBe('tool_calls');
+		expect(converted.choices[0].message.content).toBe('Hello world');
+		expect(converted.choices[0].message.tool_calls).toEqual([
+			{ id: 't1', type: 'function', function: { name: 'ReadFile', arguments: '{"path":"a.ts"}' } }
+		]);
 		expect(converted.usage).toEqual({
 			prompt_tokens: 10,
 			completion_tokens: 5,
@@ -110,7 +113,7 @@ describe('anthropic-to-openai', () => {
 		);
 
 		expect(converted.choices[0].finish_reason).toBe('stop');
-		expect(converted.choices[0].message.content).toBe('');
+		expect(converted.choices[0].message.content).toBeNull();
 		expect(converted.usage).toEqual({
 			prompt_tokens: 0,
 			completion_tokens: 0,

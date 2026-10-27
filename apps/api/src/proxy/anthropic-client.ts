@@ -3,12 +3,13 @@ import { logger } from 'src/utils/logger';
 import { OAuth } from '../auth/oauth';
 import { config } from '../config';
 import { ProviderSettings } from '../database/provider-settings';
+import { fetchWithHeaderTimeout } from '../security/outbound-request';
 
 import { RequestBuilder } from './request-builder';
 import { ToolMapper } from './tool-mapper';
 
-import type { RequestSource, AnthropicRequest, AnthropicError, ContentBlock, Tool } from '../types';
-import type { ProxyResult, ToolUseBlock } from '../types/proxy';
+import type { RequestSource, AnthropicRequest, AnthropicError, Tool } from '../types';
+import type { ProxyResult } from '../types/proxy';
 
 type RequestResult =
 	| { success: true; response: Response; source: RequestSource; reverseToolMapping: Record<string, string> }
@@ -17,7 +18,8 @@ type RequestResult =
 async function makeClaudeCodeRequest(
 	endpoint: string,
 	body: AnthropicRequest,
-	_headers: Record<string, string>
+	_headers: Record<string, string>,
+	signal?: AbortSignal
 ): Promise<RequestResult> {
 	const token = await OAuth.getValidToken();
 
@@ -37,11 +39,15 @@ async function makeClaudeCodeRequest(
 
 		const url = `${config.anthropic.apiUrl}${endpoint}?beta=true`;
 
-		const response = await fetch(url, {
-			method: 'POST',
-			headers: RequestBuilder.getClaudeOAuthHeaders(token.accessToken),
-			body: JSON.stringify(preparedBody)
-		});
+		const response = await fetchWithHeaderTimeout(
+			url,
+			{
+				method: 'POST',
+				headers: RequestBuilder.getClaudeOAuthHeaders(token.accessToken),
+				body: JSON.stringify(preparedBody)
+			},
+			signal
+		);
 
 		if (response.status === 429) {
 			logger.log('Claude Code rate limited');
@@ -60,11 +66,15 @@ async function makeClaudeCodeRequest(
 				const refreshed = await OAuth.refreshToken(row.refreshToken);
 
 				if (refreshed) {
-					const retryResponse = await fetch(url, {
-						method: 'POST',
-						headers: RequestBuilder.getClaudeOAuthHeaders(refreshed.accessToken),
-						body: JSON.stringify(preparedBody)
-					});
+					const retryResponse = await fetchWithHeaderTimeout(
+						url,
+						{
+							method: 'POST',
+							headers: RequestBuilder.getClaudeOAuthHeaders(refreshed.accessToken),
+							body: JSON.stringify(preparedBody)
+						},
+						signal
+					);
 
 					logger.log(`Retry after refresh: ${retryResponse.status}`);
 
@@ -91,32 +101,10 @@ async function makeClaudeCodeRequest(
 			const errorMessage = errorBody?.error?.message ?? '';
 			const errorType = errorBody?.error?.type ?? '';
 
-			logger.error(`API 400 Error: ${errorMessage} (type: ${errorType})`);
+			logger.error(`API 400 Error: type=${errorType || 'unknown'} messageLength=${errorMessage.length}`);
 
 			if (errorMessage.includes('illegal value') || errorMessage.includes('invalid') || errorMessage.includes('argument')) {
-				const toolSchemas =
-					preparedBody.tools?.map((tool: Tool) => ({
-						name: tool.name,
-						description: tool.description.substring(0, 200),
-						input_schema: tool.input_schema
-					})) ?? [];
-
-				let toolUseBlocks: ToolUseBlock[] = [];
-				if (preparedBody.messages && preparedBody.messages.length > 0) {
-					const lastMsg = preparedBody.messages[preparedBody.messages.length - 1];
-					if (Array.isArray(lastMsg.content)) {
-						toolUseBlocks = lastMsg.content
-							.filter((b: ContentBlock) => b.type === 'tool_use')
-							.map((b: ContentBlock) => ({
-								type: 'tool_use' as const,
-								name: b.name ?? '',
-								id: b.id ?? '',
-								input: b.input as Record<string, unknown>
-							}));
-					}
-				}
-
-				logger.rareError(errorMessage, {
+				logger.rareError(errorMessage.slice(0, 300), {
 					errorType,
 					requestBody: {
 						model: preparedBody.model,
@@ -124,9 +112,7 @@ async function makeClaudeCodeRequest(
 						toolsCount: preparedBody.tools?.length ?? 0,
 						stream: preparedBody.stream
 					},
-					toolSchemas,
-					toolUseBlocks,
-					fullRequestPreview: JSON.stringify(preparedBody, null, 2).substring(0, 3000)
+					toolNames: preparedBody.tools?.map((tool: Tool) => tool.name).slice(0, 100) ?? []
 				});
 			}
 
@@ -167,13 +153,14 @@ async function extractUsage(response: Response, stream: boolean): Promise<{ inpu
 export async function proxyRequest(
 	endpoint: string,
 	body: AnthropicRequest,
-	headers: Record<string, string>
+	headers: Record<string, string>,
+	signal?: AbortSignal
 ): Promise<ProxyResult> {
 	const startTime = Date.now();
 	const model = body.model;
 	const stream = body.stream ?? false;
 
-	const claudeResult = await makeClaudeCodeRequest(endpoint, body, headers);
+	const claudeResult = await makeClaudeCodeRequest(endpoint, body, headers, signal);
 
 	if (claudeResult.success) {
 		logger.log('✓ Request served via Claude Code');

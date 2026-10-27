@@ -91,13 +91,13 @@ function isValidPublicHealth(raw: unknown): boolean {
 		!!raw &&
 		typeof raw === 'object' &&
 		(raw as { service?: unknown }).service === 'ungate' &&
-		typeof (raw as { version?: unknown }).version === 'string' &&
-		typeof (raw as { protocolVersion?: unknown }).protocolVersion === 'number'
+		(raw as { status?: unknown }).status === 'ok'
 	);
 }
 
 export class TunnelManager {
 	private monitor: NodeJS.Timeout | null = null;
+	private monitorInFlight = false;
 	private logOffset = 0;
 	private observedLogPath: string | null = null;
 	private lastPublicProbeAt = 0;
@@ -162,8 +162,10 @@ export class TunnelManager {
 
 			return;
 		}
-		this.monitor ??= setInterval(() => this.pollLogs(), 1000);
-		void this.reconcile();
+		this.monitor ??= setInterval(() => {
+			void this.runMonitorCycle();
+		}, 1000);
+		void this.runMonitorCycle();
 	}
 
 	/** Drop a displayed tunnel whose process has exited or no longer matches its launch. */
@@ -216,6 +218,7 @@ export class TunnelManager {
 		}
 		await this.setState({ status: 'installing', url: null, error: null });
 		const binary = getCloudflaredBinPath();
+		let spawned: { pid: number; logPath: string } | null = null;
 		try {
 			if (!CloudflaredInstaller.isPinnedInstall(binary)) {
 				this.log(`Downloading cloudflared ${CLOUDFLARED_VERSION}...`);
@@ -245,6 +248,8 @@ export class TunnelManager {
 				child.once('spawn', resolve);
 				child.once('error', reject);
 			});
+			if (!child.pid) throw new Error('cloudflared did not report a process ID.');
+			spawned = { pid: child.pid, logPath };
 			child.unref();
 			await RuntimeStateStore.mutate((current) => {
 				current.tunnel = {
@@ -292,8 +297,26 @@ export class TunnelManager {
 		} catch (error) {
 			this.pollLogs();
 			const message = error instanceof Error ? error.message : String(error);
-			// Keep process identity for recovery; never hide a surviving process.
-			await this.setState({ status: 'error', url: null, error: message });
+			if (spawned && ManagedProcess.matches(spawned.pid, binary, spawned.logPath)) {
+				await this.stopVerifiedProcess(spawned.pid, spawned.logPath);
+			}
+			await RuntimeStateStore.mutate((current) => {
+				const stillAlive = spawned ? ManagedProcess.isAlive(spawned.pid) : false;
+				current.tunnel = {
+					status: 'error',
+					url: null,
+					publicStatus: 'unchecked',
+					publicCheckedAt: null,
+					publicError: null,
+					lastError: stillAlive ? `${message} The process remains alive and requires manual verification.` : message,
+					lastSeenAt: Date.now(),
+					ownerWindowId: null,
+					...(stillAlive && spawned ? { pid: spawned.pid, logPath: spawned.logPath, port, protocol } : {})
+				};
+
+				return current;
+			});
+			this.onStateChange(this.getState());
 			throw error;
 		}
 	}
@@ -319,6 +342,7 @@ export class TunnelManager {
 
 			return current;
 		});
+		this.rotateLogs();
 		this.onStateChange(this.getState());
 	}
 
@@ -365,9 +389,18 @@ export class TunnelManager {
 		}
 	}
 
+	private async runMonitorCycle(): Promise<void> {
+		if (this.monitorInFlight) return;
+		this.monitorInFlight = true;
+		try {
+			await this.reconcile();
+			this.pollLogs();
+		} finally {
+			this.monitorInFlight = false;
+		}
+	}
+
 	private pollLogs(): void {
-		void this.reconcile();
-		void this.probePublicHealth();
 		const logPath = RuntimeStateStore.read().tunnel.logPath;
 		if (!logPath) return;
 		if (this.observedLogPath !== logPath) {
@@ -452,10 +485,10 @@ export class TunnelManager {
 				current.tunnel.status !== 'running'
 			)
 				return current;
+			changed = current.tunnel.publicStatus !== publicStatus || current.tunnel.publicError !== error;
 			current.tunnel.publicStatus = publicStatus;
 			current.tunnel.publicCheckedAt = Date.now();
 			current.tunnel.publicError = error;
-			changed = true;
 
 			return current;
 		});
@@ -464,5 +497,16 @@ export class TunnelManager {
 
 	private log(message: string): void {
 		this.onLog({ timestamp: Date.now(), level: 'info', message });
+	}
+
+	private rotateLogs(): void {
+		const active = RuntimeStateStore.read().tunnel.logPath;
+		const logs = fs
+			.readdirSync(config.baseDir)
+			.filter((name) => name.startsWith('tunnel-') && name.endsWith('.log'))
+			.map((name) => path.join(config.baseDir, name))
+			.filter((file) => file !== active)
+			.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
+		for (const file of logs.slice(5)) fs.rmSync(file, { force: true });
 	}
 }

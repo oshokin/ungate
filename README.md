@@ -27,6 +27,8 @@ The dashboard contains **Connection**, **Usage** and **Logs**. Analytics, reques
 
 The model API key is mandatory. It authenticates model requests and is separate from provider credentials and the local administration capability.
 
+Provider credentials are stored as plaintext in the local SQLite database under `~/.ungate`, protected with owner-only filesystem permissions. This protects against other OS users, not compromise of the same local user account, malware running as that user, or privileged access.
+
 ## Cursor models and SSH
 
 To use built-in Cursor models, open **Cursor Models**, disable Cursor's Base URL override and select the built-in model. The misleading **Use Cursor Models**, **Use Ungate Models** and **Toggle OpenAI Key Fix** commands have been removed, together with the background SQLite reader and toggle loop. Automatic Base URL assignment and independent simultaneous routes are not implemented; no supported public setter/request-routing hook has been confirmed.

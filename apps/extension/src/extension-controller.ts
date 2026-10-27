@@ -24,7 +24,8 @@ import { RuntimeStateStore } from './runtime-state';
 import { config } from './runtime-state/config';
 import { SharedServiceController } from './shared-service-controller';
 import { TunnelManager } from './tunnel-manager';
-import { CrossProcessLock } from './utils/cross-process-lock';
+
+class ActionCancelledError extends Error {}
 
 export class ExtensionController {
 	private outputChannel!: vscode.OutputChannel;
@@ -128,6 +129,7 @@ export class ExtensionController {
 			this.context.subscriptions.push(
 				vscode.commands.registerCommand(definition.command, () =>
 					this.runAction(action as DashboardAction).catch((error: unknown) => {
+						if (error instanceof ActionCancelledError) return;
 						void vscode.window.showErrorMessage(`Ungate: ${this.formatError(error)}`);
 					})
 				)
@@ -141,14 +143,14 @@ export class ExtensionController {
 
 		this.context.subscriptions.push({
 			dispose: () => {
-				this.stopBackendServices();
+				void this.stopBackendServices();
 			}
 		});
 	}
 
-	public stopBackendServices(): void {
+	public async stopBackendServices(): Promise<void> {
+		if (!this.extensionHostActive) return;
 		this.extensionHostActive = false;
-		void RuntimeStateStore.removeClient(this.windowId).catch(() => {});
 
 		// Detached services survive an extension-host reload and a window closing.
 		// The next live window attaches to them instead of interrupting other chats.
@@ -179,6 +181,8 @@ export class ExtensionController {
 			this.runtimeStateWatcher.dispose();
 			this.runtimeStateWatcher = null;
 		}
+
+		await RuntimeStateStore.removeClient(this.windowId).catch(() => {});
 	}
 
 	private log(msg: string): void {
@@ -319,7 +323,7 @@ export class ExtensionController {
 					{ modal: true },
 					'Continue'
 				);
-				if (choice !== 'Continue') throw new Error('Action cancelled.');
+				if (choice !== 'Continue') throw new ActionCancelledError('Action cancelled.');
 			}
 			await this.services.run(action);
 			await this.syncFromRuntimeState();
@@ -332,7 +336,11 @@ export class ExtensionController {
 		if (message.type === 'dashboard-action') {
 			void this.runAction(message.action).then(
 				() => this.dashboard.sendActionResult(message.id),
-				(error: unknown) => this.dashboard.sendActionResult(message.id, this.formatError(error))
+				(error: unknown) =>
+					this.dashboard.sendActionResult(
+						message.id,
+						error instanceof ActionCancelledError ? { cancelled: true } : { error: this.formatError(error) }
+					)
 			);
 
 			return;
@@ -358,6 +366,7 @@ export class ExtensionController {
 		} as const;
 		if (message.type in legacyActions) {
 			void this.runAction(legacyActions[message.type as keyof typeof legacyActions]).catch((error: unknown) => {
+				if (error instanceof ActionCancelledError) return;
 				void vscode.window.showErrorMessage(`Ungate: ${this.formatError(error)}`);
 			});
 
@@ -455,7 +464,6 @@ export class ExtensionController {
 			this.tunnelManager.syncMonitor(this.isLeaderWindow(runtimeState));
 			this.startApiAsLeaderIfNeeded(runtimeState);
 			await this.updateServiceState(runtimeState);
-			await this.tryHandleCommand();
 		} finally {
 			this.syncing = false;
 		}
@@ -482,54 +490,6 @@ export class ExtensionController {
 		this.dashboard.setPort(this.currentPort);
 		this.dashboard.sendTunnelState(this.currentTunnelState);
 		this.updateStatusBar();
-	}
-
-	private async tryHandleCommand(): Promise<void> {
-		if (!this.isLeaderWindow() || !RuntimeStateStore.peekCommand()) return;
-		const release = await CrossProcessLock.acquire('commands.lock', 120000);
-		try {
-			if (!this.extensionHostActive || !this.isLeaderWindow()) return;
-			const command = RuntimeStateStore.peekCommand();
-			if (!command) return;
-			try {
-				const port = RuntimeStateStore.read().api.port;
-				switch (command.action) {
-					case 'stop-services':
-						await RuntimeStateStore.mutate((current) => {
-							current.api.startSuppressed = true;
-
-							return current;
-						});
-						await this.tunnelManager.stop();
-						await this.apiServer.stop();
-						break;
-					case 'restart-api':
-						await this.apiServer.restart();
-						break;
-					case 'start-tunnel':
-						if (!port) throw new Error('API is not ready. Wait for API: running.');
-						await this.tunnelManager.start(port);
-						break;
-					case 'restart-tunnel':
-						if (!port) throw new Error('API is not ready. Wait for API: running.');
-						await this.tunnelManager.restart(port);
-						break;
-					case 'stop-tunnel':
-						await this.tunnelManager.stop();
-						break;
-					case 'clear-logs':
-						if (command.payload?.logSource) this.dashboard.clearLogs(command.payload.logSource);
-				}
-			} catch (error) {
-				const message = `${command.action} failed: ${this.formatError(error)}`;
-				this.log(message);
-				this.dashboard.pushLog('api', { timestamp: Date.now(), level: 'error', message });
-				void vscode.window.showErrorMessage(`Ungate: ${message}`);
-			}
-			await RuntimeStateStore.removeCommand(command.id);
-		} finally {
-			release();
-		}
 	}
 
 	private isLeaderWindow(runtimeState?: RuntimeState): boolean {

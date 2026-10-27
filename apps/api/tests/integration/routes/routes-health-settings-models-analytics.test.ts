@@ -25,7 +25,10 @@ describe("routes: health/settings/models", () => {
 		const app = await withPlugin(healthPlugin);
 		const response = await app.inject({ method: "GET", url: "/health" });
 		expect(response.statusCode).toBe(200);
-		expect(response.json()).toEqual({
+		expect(response.json()).toEqual({ status: "ok", service: "ungate" });
+		const adminResponse = await app.inject({ method: "GET", url: "/admin/health" });
+		expect(adminResponse.statusCode).toBe(200);
+		expect(adminResponse.json()).toEqual({
 			status: "ok",
 			service: "ungate",
 			pid: process.pid,

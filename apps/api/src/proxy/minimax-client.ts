@@ -3,16 +3,21 @@ import { logger } from 'src/utils/logger';
 import { getProvider } from '../auth';
 import { config } from '../config';
 import { ProviderSettings } from '../database/provider-settings';
+import { validateMiniMaxBaseUrl } from '../security/minimax-url';
+import { fetchWithHeaderTimeout } from '../security/outbound-request';
 
 import type { OpenAIChatRequest } from '../types/openai';
 import type { RequestContext } from '../types/proxy';
 
-export async function proxyMiniMaxRequest(body: OpenAIChatRequest): Promise<{
+export async function proxyMiniMaxRequest(
+	body: OpenAIChatRequest,
+	signal?: AbortSignal
+): Promise<{
 	response: Response;
 	context: RequestContext;
 }> {
 	const creds = ProviderSettings.get('minimax');
-	const minimaxUrl = creds?.baseUrl ?? config.minimax.baseUrlGlobal;
+	const configuredUrl = creds?.baseUrl ?? config.minimax.baseUrlGlobal;
 	const provider = getProvider('minimax');
 	const authHeader = await provider.getAuthHeader();
 
@@ -58,14 +63,19 @@ export async function proxyMiniMaxRequest(body: OpenAIChatRequest): Promise<{
 	const startTime = Date.now();
 
 	try {
-		const response = await fetch(`${minimaxUrl}/v1/text/chatcompletion_v2`, {
-			method: 'POST',
-			headers: {
-				Authorization: authHeader,
-				'Content-Type': 'application/json'
+		const minimaxUrl = await validateMiniMaxBaseUrl(configuredUrl);
+		const response = await fetchWithHeaderTimeout(
+			`${minimaxUrl}/v1/text/chatcompletion_v2`,
+			{
+				method: 'POST',
+				headers: {
+					Authorization: authHeader,
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify(minimaxBody)
 			},
-			body: JSON.stringify(minimaxBody)
-		});
+			signal
+		);
 
 		logger.log(`✓ MiniMax request → ${response.status}`);
 
@@ -126,12 +136,12 @@ export async function proxyMiniMaxRequest(body: OpenAIChatRequest): Promise<{
 				outputTokens
 			}
 		};
-	} catch (error) {
-		logger.error(`MiniMax request failed: ${String(error)}`);
+	} catch {
+		logger.error('MiniMax request failed');
 
 		return {
-			response: new Response(JSON.stringify({ error: { message: String(error), type: 'api_error' } }), {
-				status: 500,
+			response: new Response(JSON.stringify({ error: { message: 'MiniMax upstream request failed', type: 'api_error' } }), {
+				status: 502,
 				headers: { 'Content-Type': 'application/json' }
 			}),
 			context: {

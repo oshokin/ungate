@@ -1,12 +1,14 @@
 import { logger } from 'src/utils/logger';
 
+import { OpenAIOAuthService } from '../auth/openai/openai-oauth-service';
 import { config } from '../config';
 import { Settings } from '../database/app-settings';
-import { ProviderSettings } from '../database/provider-settings';
+import { fetchWithHeaderTimeout } from '../security/outbound-request';
 
 import { ResponsesBodyBuilder } from './responses-input-normalizer/build-body';
 import { ResponsesModelResolver } from './responses-input-normalizer/resolve-model';
 import { ResponsesSseProcessor, StreamDiagnostics, StreamStateFactory } from './responses-stream-mapper';
+import { CompletionAccumulator } from './responses-stream-mapper/completion-accumulator';
 import { StreamChunkMapper } from './responses-stream-mapper/stream-openai-chunks';
 
 import type { OpenAIChatRequest } from '../types/openai';
@@ -24,12 +26,12 @@ interface ProxyOpenAiResult {
 }
 
 export class OpenAiClient {
-	static async proxy(body: OpenAIChatRequest): Promise<ProxyOpenAiResult> {
+	static async proxy(body: OpenAIChatRequest, signal?: AbortSignal): Promise<ProxyOpenAiResult> {
 		const startTime = Date.now();
 		const model = body.model;
 		const resolvedModel = ResponsesModelResolver.resolveModel(model);
 		const normalizedModel = resolvedModel.model;
-		const creds = ProviderSettings.get('openai');
+		const creds = await OpenAIOAuthService.getValidToken();
 
 		if (!creds?.accessToken) {
 			return this.authErrorResult(model, startTime, 'Not authenticated with OpenAI');
@@ -41,7 +43,20 @@ export class OpenAiClient {
 			return this.authErrorResult(model, startTime, 'ChatGPT account id missing. Re-login to refresh your ChatGPT token.');
 		}
 
-		const response = await this.fetchCodexResponses(body, model, normalizedModel, creds.accessToken, accountId);
+		let response = await this.fetchCodexResponses(body, model, normalizedModel, creds.accessToken, accountId, signal);
+		if (response.status === 401 && creds.refreshToken) {
+			const refreshed = await OpenAIOAuthService.refreshToken(creds.refreshToken);
+			if (refreshed?.accountId) {
+				response = await this.fetchCodexResponses(
+					body,
+					model,
+					normalizedModel,
+					refreshed.accessToken,
+					refreshed.accountId,
+					signal
+				);
+			}
+		}
 
 		if (!response.ok) {
 			return this.upstreamErrorResult(response, model, startTime);
@@ -67,7 +82,8 @@ export class OpenAiClient {
 		model: string,
 		normalizedModel: string,
 		accessToken: string,
-		accountId: string
+		accountId: string,
+		signal?: AbortSignal
 	): Promise<Response> {
 		const rawExtraInstruction = Settings.get().extraInstruction;
 		const extraInstruction = rawExtraInstruction ?? undefined;
@@ -85,22 +101,26 @@ export class OpenAiClient {
 
 		logger.log(`OpenAI Codex proxy: ${model} → ${normalizedModel} tools=${incomingToolCount} stream=${body.stream ?? false}`);
 
-		return fetch(`${config.openai.codexUrl}/responses`, {
-			method: 'POST',
-			headers: {
-				'content-type': 'application/json',
-				authorization: `Bearer ${accessToken}`,
-				'chatgpt-account-id': accountId,
-				originator: 'codex_cli_rs',
-				accept: 'text/event-stream'
+		return fetchWithHeaderTimeout(
+			`${config.openai.codexUrl}/responses`,
+			{
+				method: 'POST',
+				headers: {
+					'content-type': 'application/json',
+					authorization: `Bearer ${accessToken}`,
+					'chatgpt-account-id': accountId,
+					originator: 'codex_cli_rs',
+					accept: 'text/event-stream'
+				},
+				body: JSON.stringify(requestBody)
 			},
-			body: JSON.stringify(requestBody)
-		});
+			signal
+		);
 	}
 
 	private static async upstreamErrorResult(response: Response, model: string, startTime: number): Promise<ProxyOpenAiResult> {
 		const errorText = await response.text();
-		logger.error('ChatGPT Codex upstream error:', response.status, errorText);
+		logger.error(`ChatGPT Codex upstream error: status=${response.status} bodyBytes=${Buffer.byteLength(errorText, 'utf8')}`);
 		const errorMessage = this.parseUpstreamError(response.status, errorText);
 		const errorResponse = new Response(JSON.stringify({ error: { message: errorMessage, type: 'api_error' } }), {
 			status: response.status,
@@ -158,7 +178,7 @@ export class OpenAiClient {
 			};
 		}
 
-		const bufferedResponse = await this.bufferedResponse(response, state, normalizedModel);
+		const bufferedResponse = await this.bufferedResponse(response, state);
 
 		return {
 			response: bufferedResponse,
@@ -171,33 +191,44 @@ export class OpenAiClient {
 		const decoder = new TextDecoder();
 
 		let cancelled = false;
+		let finalized = false;
 		const encoder = new TextEncoder();
 		const streamBody = new ReadableStream({
-			async start(controller) {
+			async pull(controller) {
+				if (cancelled || finalized) return;
 				try {
-					while (!cancelled && !state.completed) {
-						const { done, value } = await reader.read();
-						if (done || cancelled) break;
-						for (const result of ResponsesSseProcessor.process(state, decoder.decode(value, { stream: true }))) {
-							controller.enqueue(
-								encoder.encode(result.type === 'done' ? 'data: [DONE]\n\n' : `data: ${JSON.stringify(result.data)}\n\n`)
-							);
+					let done = false;
+					let emitted = false;
+					while (!done && !emitted && !state.completed) {
+						const next = await reader.read();
+						done = next.done;
+						if (cancelled) return;
+						if (!done) {
+							for (const result of ResponsesSseProcessor.process(state, decoder.decode(next.value, { stream: true }))) {
+								emitted = true;
+								controller.enqueue(
+									encoder.encode(result.type === 'done' ? 'data: [DONE]\n\n' : `data: ${JSON.stringify(result.data)}\n\n`)
+								);
+							}
 						}
 					}
+					if (!done && !state.completed) return;
+					finalized = true;
+					if (!state.completed) {
+						state.pendingFunctionCalls.clear();
+						controller.enqueue(encoder.encode(`data: ${JSON.stringify(StreamChunkMapper.chunk(state, {}, 'length'))}\n\n`));
+						controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+					}
+					controller.close();
 				} catch (error) {
-					if (!cancelled) logger.error(`Codex stream interrupted: ${String(error)}`);
+					finalized = true;
+					if (!cancelled) controller.error(error);
 				} finally {
-					if (!cancelled) {
-						if (!state.completed) {
-							state.pendingFunctionCalls.clear();
-							controller.enqueue(encoder.encode(`data: ${JSON.stringify(StreamChunkMapper.chunk(state, {}, 'length'))}\n\n`));
-							controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-						}
-						controller.close();
+					if (finalized) {
+						await reader.cancel().catch(() => {});
+						reader.releaseLock();
+						StreamDiagnostics.logFinished(state, 'stream');
 					}
-					await reader.cancel().catch(() => {});
-					reader.releaseLock();
-					StreamDiagnostics.logFinished(state, 'stream');
 				}
 			},
 			cancel(reason) {
@@ -215,10 +246,9 @@ export class OpenAiClient {
 
 	private static async bufferedResponse(
 		response: Response,
-		state: ReturnType<typeof StreamStateFactory.create>,
-		normalizedModel: string
+		state: ReturnType<typeof StreamStateFactory.create>
 	): Promise<Response> {
-		let fullContent = '';
+		const accumulator = new CompletionAccumulator();
 		const reader = response.body!.getReader();
 		const decoder = new TextDecoder();
 
@@ -232,46 +262,18 @@ export class OpenAiClient {
 			const text = decoder.decode(value, { stream: true });
 			const results = ResponsesSseProcessor.process(state, text);
 
-			for (const result of results) {
-				if (result.type === 'chunk') {
-					const chunkData = result.data as
-						| {
-								choices?: {
-									delta?: {
-										content?: string | null;
-									};
-								}[];
-						  }
-						| undefined;
-
-					if (chunkData?.choices?.[0]?.delta) {
-						const delta = chunkData.choices[0].delta;
-
-						if (typeof delta.content === 'string') {
-							fullContent += delta.content;
-						}
-					}
-				}
-			}
+			accumulator.consume(results);
 		}
 
+		const trailing = decoder.decode();
+		if (trailing) accumulator.consume(ResponsesSseProcessor.process(state, trailing));
 		reader.releaseLock();
 		StreamDiagnostics.logFinished(state, 'buffer');
 
-		return new Response(
-			JSON.stringify({
-				id: state.id,
-				object: 'chat.completion',
-				created: state.created,
-				model: normalizedModel,
-				choices: [{ index: 0, message: { role: 'assistant', content: fullContent || null }, finish_reason: 'stop' }],
-				...(state.usage ? { usage: state.usage } : {})
-			}),
-			{
-				status: 200,
-				headers: { 'Content-Type': 'application/json' }
-			}
-		);
+		return new Response(JSON.stringify(accumulator.response(state)), {
+			status: 200,
+			headers: { 'Content-Type': 'application/json' }
+		});
 	}
 
 	private static errorContext(model: string, startTime: number): RequestContext {

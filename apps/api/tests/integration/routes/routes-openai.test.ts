@@ -170,13 +170,14 @@ describe('routes-openai', () => {
 				reasoning: { effort: 'high' },
 				service_tier: 'priority'
 			}),
-			'openai'
+			'openai',
+			expect.any(AbortSignal)
 		);
 		await app.close();
 	});
 
 	it('routes to anthropic provider and maps successful response', async () => {
-		resolveForChatCompletionMock.mockReturnValueOnce(null);
+		resolveForChatCompletionMock.mockReturnValueOnce({ provider: 'claude', upstreamModel: 'claude-sonnet-4-6' });
 		proxyRequestMock.mockResolvedValueOnce({
 			response: new Response(
 				JSON.stringify({
@@ -216,7 +217,7 @@ describe('routes-openai', () => {
 		await app.close();
 	});
 
-	it('routes to minimax by model name prefix when DB mapping is absent', async () => {
+	it('rejects a minimax prefix without an explicit mapping', async () => {
 		resolveForChatCompletionMock.mockReturnValueOnce(null);
 		proxyMiniMaxRequestMock.mockResolvedValueOnce({
 			response: new Response(JSON.stringify({ id: 'mm-prefix' }), {
@@ -242,13 +243,9 @@ describe('routes-openai', () => {
 			payload: { model: 'minimax-by-name', messages: [{ role: 'user', content: 'hi' }], stream: false }
 		});
 
-		expect(response.statusCode).toBe(200);
-		expect(response.json()).toEqual({ id: 'mm-prefix' });
-		expect(proxyMiniMaxRequestMock).toHaveBeenCalledTimes(1);
-		expect(proxyMiniMaxRequestMock.mock.calls[0][0]).toMatchObject({
-			model: 'minimax-by-name',
-			stream: false
-		});
+		expect(response.statusCode).toBe(404);
+		expect(response.json().error.code).toBe('model_not_found');
+		expect(proxyMiniMaxRequestMock).not.toHaveBeenCalled();
 		await app.close();
 	});
 
@@ -274,7 +271,7 @@ describe('routes-openai', () => {
 	});
 
 	it('routes to claude and sanitizes model id prefix in error message', async () => {
-		resolveForChatCompletionMock.mockReturnValueOnce(null);
+		resolveForChatCompletionMock.mockReturnValueOnce({ provider: 'claude', upstreamModel: 'claude-sonnet-4-6' });
 		proxyRequestMock.mockResolvedValueOnce({
 			response: new Response(
 				JSON.stringify({
@@ -300,7 +297,7 @@ describe('routes-openai', () => {
 	});
 
 	it('handles a non-JSON claude error body without crashing', async () => {
-		resolveForChatCompletionMock.mockReturnValueOnce(null);
+		resolveForChatCompletionMock.mockReturnValueOnce({ provider: 'claude', upstreamModel: 'claude-sonnet-4-6' });
 		proxyRequestMock.mockResolvedValueOnce({
 			response: new Response('upstream temporarily unavailable', {
 				status: 529,
@@ -383,7 +380,7 @@ describe('routes-openai', () => {
 	});
 
 	it('routes to claude with streaming via OpenAI stream mapper', async () => {
-		resolveForChatCompletionMock.mockReturnValueOnce(null);
+		resolveForChatCompletionMock.mockReturnValueOnce({ provider: 'claude', upstreamModel: 'claude-sonnet-4-6' });
 		proxyRequestMock.mockResolvedValueOnce({
 			response: anthropicSseResponse([
 				'data: {"type":"message_start","message":{"usage":{"input_tokens":5,"output_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}',
@@ -408,7 +405,7 @@ describe('routes-openai', () => {
 		await app.close();
 	});
 
-	it('returns 400 on handler exception', async () => {
+	it('returns a sanitized 502 on handler exception', async () => {
 		resolveForChatCompletionMock.mockImplementationOnce(() => {
 			throw new Error('boom');
 		});
@@ -421,8 +418,8 @@ describe('routes-openai', () => {
 			payload: { model: 'm', messages: [{ role: 'user', content: 'x' }], stream: false }
 		});
 
-		expect(response.statusCode).toBe(400);
-		expect(response.json().error.type).toBe('invalid_request_error');
+		expect(response.statusCode).toBe(502);
+		expect(response.json()).toEqual({ error: { message: 'Upstream request failed', type: 'api_error' } });
 		await app.close();
 	});
 });

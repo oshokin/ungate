@@ -9,12 +9,25 @@ import {
 
 /** Identity checks do not trust the PID stored on disk or any arbitrary listener. */
 export async function readApiHealth(port: number, signal?: AbortSignal): Promise<ApiHealth> {
-	const response = await fetch(`http://127.0.0.1:${port}/health`, {
-		signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(1500)]) : AbortSignal.timeout(1500),
-		redirect: 'error'
-	});
+	const request = (path: string, authenticated = false) =>
+		fetch(`http://127.0.0.1:${port}${path}`, {
+			headers: authenticated ? { Authorization: `Bearer ${getAdminToken()}` } : undefined,
+			signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(1500)]) : AbortSignal.timeout(1500),
+			redirect: 'error'
+		});
+	let response = await request('/health');
 	if (!response.ok) throw new Error(`API health: HTTP ${response.status}`);
-	const raw: unknown = await response.json();
+	let raw: unknown = await response.json();
+	if (
+		raw &&
+		typeof raw === 'object' &&
+		(raw as Record<string, unknown>).service === 'ungate' &&
+		!Number.isInteger((raw as Record<string, unknown>).pid)
+	) {
+		response = await request('/admin/health', true);
+		if (!response.ok) throw new Error(`API health: HTTP ${response.status}`);
+		raw = await response.json();
+	}
 	if (!raw || typeof raw !== 'object') throw new Error('Unknown service on the Ungate port');
 	const health = raw as Record<string, unknown>;
 	if (health.service !== 'ungate' || !Number.isInteger(health.pid) || Number(health.pid) <= 0)

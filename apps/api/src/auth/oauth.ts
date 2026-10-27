@@ -11,6 +11,7 @@ import type { TokenInfo, TokenRefreshResponse, AuthStatus, LoginStart } from '..
 
 interface PkceSession {
 	codeVerifier: string;
+	state: string;
 	expiresAt: number;
 }
 
@@ -50,10 +51,12 @@ export class OAuth {
 
 	static async startLogin(): Promise<LoginStart> {
 		const { verifier, challenge } = await this.generatePkce();
-		const sessionId = verifier;
+		const sessionId = this.base64urlEncode(randomBytes(32));
+		const state = this.base64urlEncode(randomBytes(32));
 
 		this.pkceStore.set(sessionId, {
 			codeVerifier: verifier,
+			state,
 			expiresAt: Date.now() + this.SESSION_TTL_MS
 		});
 
@@ -65,7 +68,7 @@ export class OAuth {
 			scope: 'org:create_api_key user:profile user:inference',
 			code_challenge: challenge,
 			code_challenge_method: 'S256',
-			state: verifier
+			state
 		});
 
 		const result: LoginStart = {
@@ -91,10 +94,16 @@ export class OAuth {
 
 		this.pkceStore.delete(sessionId);
 
-		// Input may be CODE#STATE — split to extract both
-		const parts = codeInput.trim().split('#');
-		const code = parts[0];
-		const state = parts[1] ?? sessionId;
+		// Claude returns CODE#STATE for the manual redirect flow.
+		const separator = codeInput.lastIndexOf('#');
+		if (separator <= 0 || separator === codeInput.length - 1) {
+			return { ok: false, error: 'Missing OAuth state' };
+		}
+		const code = codeInput.slice(0, separator).trim();
+		const state = codeInput.slice(separator + 1).trim();
+		if (state !== session.state) {
+			return { ok: false, error: 'Invalid OAuth state' };
+		}
 
 		try {
 			const response = await fetch(config.claude.oauth.tokenUrl, {

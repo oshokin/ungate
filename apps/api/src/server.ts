@@ -3,7 +3,7 @@ import Fastify from 'fastify';
 
 import { logger, setQuietMode } from 'src/utils/logger';
 
-const BODY_LIMIT_BYTES = 256 * 1024 * 1024;
+const BODY_LIMIT_BYTES = 32 * 1024 * 1024;
 
 import { getConfig } from './config';
 import { getDb } from './database/index';
@@ -32,7 +32,11 @@ export async function startServer(): Promise<void> {
 	protectAdministration(app);
 	app.post('/admin/shutdown', async (_request, reply) => {
 		setImmediate(() => {
-			void app.close().then(() => process.exit(0));
+			// Fastify waits for keep-alive connections during close(). A detached API must
+			// still terminate promptly so its replacement can bind the same port.
+			const forceExit = setTimeout(() => process.exit(0), 1000);
+			forceExit.unref();
+			void app.close().finally(() => process.exit(0));
 		});
 
 		return reply.send({ ok: true });
@@ -48,6 +52,24 @@ export async function startServer(): Promise<void> {
 		}
 
 		done();
+	});
+	app.setErrorHandler((error, _request, reply) => {
+		const apiError = error as { validation?: unknown; code?: string; statusCode?: number };
+		if (apiError.validation) {
+			return reply.code(400).send({
+				error: { message: 'Request validation failed', type: 'invalid_request_error', code: 'invalid_request' }
+			});
+		}
+		if (apiError.code === 'FST_ERR_CTP_BODY_TOO_LARGE') {
+			return reply.code(413).send({
+				error: { message: 'Request body too large', type: 'invalid_request_error', code: 'request_too_large' }
+			});
+		}
+		logger.error('Unhandled API error');
+
+		return reply.code(apiError.statusCode && apiError.statusCode < 500 ? apiError.statusCode : 500).send({
+			error: { message: 'Request failed', type: 'api_error' }
+		});
 	});
 
 	await app.register(healthPlugin);

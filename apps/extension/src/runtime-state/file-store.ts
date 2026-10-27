@@ -16,17 +16,16 @@ export class RuntimeStateFileStore {
 		this.ensureStorage();
 		const fallback = RuntimeStateDefaults.create();
 
-		if (!fs.existsSync(config.paths.stateFilePath)) {
-			return fallback;
-		}
-
 		try {
 			const raw = fs.readFileSync(config.paths.stateFilePath, 'utf8');
 			const parsed = JSON.parse(raw) as Partial<RuntimeState>;
 
 			return RuntimeStateNormalizer.normalize(parsed);
-		} catch {
-			return fallback;
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code === 'ENOENT') return fallback;
+			throw new Error(`Cannot read runtime state: ${error instanceof Error ? error.message : String(error)}`, {
+				cause: error
+			});
 		}
 	}
 
@@ -46,7 +45,13 @@ export class RuntimeStateFileStore {
 		const release = await CrossProcessLock.acquire(RUNTIME_STATE_LOCK);
 
 		try {
-			const current = this.read();
+			let current: RuntimeState;
+			try {
+				current = this.read();
+			} catch (error) {
+				this.quarantineCorruptState();
+				throw error;
+			}
 			const next = mutator(current);
 			this.write(next);
 
@@ -63,5 +68,14 @@ export class RuntimeStateFileStore {
 	private static ensureStorage(): void {
 		fs.mkdirSync(config.baseDir, { recursive: true, mode: 0o700 });
 		if (process.platform !== 'win32') fs.chmodSync(config.baseDir, 0o700);
+	}
+
+	private static quarantineCorruptState(): void {
+		const quarantine = `${config.paths.stateFilePath}.corrupt-${Date.now()}-${randomUUID()}`;
+		try {
+			fs.renameSync(config.paths.stateFilePath, quarantine);
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+		}
 	}
 }

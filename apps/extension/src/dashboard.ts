@@ -14,9 +14,7 @@ import * as vscode from 'vscode';
 
 import { DashboardApiBridge } from './dashboard-api-bridge';
 import { SharedLogStore } from './runtime-state/shared-log-store';
-import { LogRingBuffer } from './utils/log-ring-buffer';
 
-const LOG_BUFFER_SIZE = 500;
 const LOG_POLL_INTERVAL_MS = 500;
 
 const MSGS_SIMPLE = ['webview-ready', 'restart-server', 'start-tunnel', 'stop-tunnel', 'restart-tunnel'] as const;
@@ -29,11 +27,7 @@ export type Msg =
 
 export class Dashboard {
 	private panel: vscode.WebviewPanel | null = null;
-	private readonly apiLogBuffer = new LogRingBuffer(LOG_BUFFER_SIZE);
-	private readonly tunnelLogBuffer = new LogRingBuffer(LOG_BUFFER_SIZE);
 	private currentPort: number | null = null;
-	private apiLogFileOffset = 0;
-	private tunnelLogFileOffset = 0;
 	private logPollTimer: NodeJS.Timeout | null = null;
 	private htmlSource: string | null = null;
 
@@ -115,18 +109,13 @@ export class Dashboard {
 	}
 
 	pushLog(source: 'api' | 'tunnel', entry: LogEntry): void {
-		const buffer = source === 'api' ? this.apiLogBuffer : this.tunnelLogBuffer;
-		buffer.push(entry);
 		SharedLogStore.append(source, entry);
 
 		this.panel?.webview.postMessage({ type: 'log', source, entry });
 	}
 
 	clearLogs(source: 'api' | 'tunnel'): void {
-		const buffer = source === 'api' ? this.apiLogBuffer : this.tunnelLogBuffer;
-		buffer.clear();
 		SharedLogStore.clear(source);
-		this.syncLogFileOffsets();
 		this.panel?.webview.postMessage({ type: 'logs-cleared', source });
 	}
 
@@ -141,16 +130,12 @@ export class Dashboard {
 		this.panel?.webview.postMessage({ type: 'service-state', state });
 	}
 
-	sendActionResult(id: string, error?: string): void {
-		this.panel?.webview.postMessage({ type: 'action-result', id, ...(error ? { error } : {}) });
+	sendActionResult(id: string, result?: { error?: string; cancelled?: boolean }): void {
+		this.panel?.webview.postMessage({ type: 'action-result', id, ...result });
 	}
 
 	sendTunnelState(state: TunnelState): void {
 		this.panel?.webview.postMessage({ type: 'tunnel-status', state });
-	}
-
-	isOpen(): boolean {
-		return this.panel !== null;
 	}
 
 	private static parseIncomingMessage(raw: unknown): Msg | null {
@@ -223,11 +208,7 @@ export class Dashboard {
 	private sendBufferedLogs(source: 'api' | 'tunnel'): void {
 		const entries = SharedLogStore.readAll(source);
 
-		if (entries.length > 0) {
-			this.panel?.webview.postMessage({ type: 'log-bulk', source, entries });
-		}
-
-		this.syncLogFileOffsets();
+		this.panel?.webview.postMessage({ type: 'log-bulk', source, entries });
 	}
 
 	private startLogPoll(): void {
@@ -246,25 +227,8 @@ export class Dashboard {
 	}
 
 	private pollSharedLogs(source: 'api' | 'tunnel'): void {
-		const offset = source === 'api' ? this.apiLogFileOffset : this.tunnelLogFileOffset;
-		const { entries, nextOffset } = SharedLogStore.readSince(source, offset);
-
-		if (source === 'api') {
-			this.apiLogFileOffset = nextOffset;
-		} else {
-			this.tunnelLogFileOffset = nextOffset;
-		}
-
-		for (const entry of entries) {
-			this.panel?.webview.postMessage({ type: 'log', source, entry });
-		}
-	}
-
-	private syncLogFileOffsets(): void {
-		const fileSize = SharedLogStore.getFileSize();
-
-		this.apiLogFileOffset = fileSize;
-		this.tunnelLogFileOffset = fileSize;
+		// Replace the bounded view so cross-window writes and clear tombstones converge.
+		this.sendBufferedLogs(source);
 	}
 
 	private readHtmlSource(): string {

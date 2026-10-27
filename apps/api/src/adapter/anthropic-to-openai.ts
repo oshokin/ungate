@@ -3,19 +3,35 @@ import { logger } from 'src/utils/logger';
 import { ToolTranslator } from '../tools/translator';
 
 import type { ContentBlock, AnthropicResponse } from '../types';
-import type { OpenAIChatResponse, OpenAIStreamChunkToolCall, OpenAIStreamChunk } from '../types/openai';
+import type { OpenAIChatResponse, OpenAIStreamChunkToolCall, OpenAIStreamChunk, OpenAIToolCall } from '../types/openai';
 
 export class AnthropicToOpenai {
-	static convert(anthropicResponse: AnthropicResponse, model: string): OpenAIChatResponse {
+	static convert(
+		anthropicResponse: AnthropicResponse,
+		model: string,
+		reverseToolMapping: Record<string, string> = {}
+	): OpenAIChatResponse {
 		let content =
 			anthropicResponse.content
-				?.map((block: ContentBlock) => {
-					if (block.type === 'text') return block.text;
-					if (block.type === 'tool_use') return `[Tool: ${block.name}]`;
-
-					return '';
-				})
+				?.filter((block: ContentBlock) => block.type === 'text')
+				.map((block: ContentBlock) => (block.type === 'text' ? block.text : ''))
 				.join('') ?? '';
+		const toolCalls: OpenAIToolCall[] =
+			anthropicResponse.content
+				?.filter((block: ContentBlock) => block.type === 'tool_use')
+				.map((block: ContentBlock) => {
+					const id = block.id ?? `call_${Date.now()}`;
+					const name = block.name ?? 'unknown';
+
+					return {
+						id,
+						type: 'function' as const,
+						function: {
+							name: reverseToolMapping[name] ?? name,
+							arguments: JSON.stringify(block.input ?? {})
+						}
+					};
+				}) ?? [];
 
 		if (ToolTranslator.needsTranslation(content)) {
 			content = ToolTranslator.translate(content);
@@ -23,14 +39,25 @@ export class AnthropicToOpenai {
 
 		const stopReason = anthropicResponse.stop_reason;
 		const finishReason =
-			stopReason === 'end_turn' || stopReason === null ? 'stop' : stopReason === 'max_tokens' ? 'length' : 'stop';
+			toolCalls.length > 0 || stopReason === 'tool_use'
+				? 'tool_calls'
+				: stopReason === 'end_turn' || stopReason === null
+					? 'stop'
+					: stopReason === 'max_tokens'
+						? 'length'
+						: 'stop';
+		const message: OpenAIChatResponse['choices'][number]['message'] = {
+			role: 'assistant',
+			content: content || null
+		};
+		if (toolCalls.length > 0) message.tool_calls = toolCalls;
 
 		const result: OpenAIChatResponse = {
 			id: `chatcmpl-${anthropicResponse.id ?? Date.now()}`,
 			object: 'chat.completion',
 			created: Math.floor(Date.now() / 1000),
 			model,
-			choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: finishReason }],
+			choices: [{ index: 0, message, finish_reason: finishReason }],
 			usage: {
 				prompt_tokens: anthropicResponse.usage?.input_tokens ?? 0,
 				completion_tokens: anthropicResponse.usage?.output_tokens ?? 0,

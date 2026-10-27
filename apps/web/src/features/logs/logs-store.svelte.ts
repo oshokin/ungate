@@ -29,9 +29,9 @@ function handleMessage(event: MessageEvent): void {
 
 	if (message.type === 'log-bulk') {
 		if (message.source === 'api') {
-			apiLogs = trimLogEntries([...apiLogs, ...message.entries]);
+			apiLogs = trimLogEntries(message.entries);
 		} else {
-			tunnelLogs = trimLogEntries([...tunnelLogs, ...message.entries]);
+			tunnelLogs = trimLogEntries(message.entries);
 		}
 	}
 

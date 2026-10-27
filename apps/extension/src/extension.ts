@@ -12,7 +12,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	active = app;
 }
 
-export function deactivate(): void {
-	active?.stopBackendServices();
+export async function deactivate(): Promise<void> {
+	await active?.stopBackendServices();
 	active = undefined;
 }

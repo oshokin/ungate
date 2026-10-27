@@ -1,4 +1,5 @@
 import { MINIMAX_BASE_URLS } from '@ungate/shared';
+import { validateMiniMaxBaseUrl } from 'src/security/minimax-url';
 
 import { MAX_MODELS, REQUEST_TIMEOUT_MS, model, readJson, uniqueModels, type ProviderCatalog } from './common';
 
@@ -7,7 +8,7 @@ interface MiniMaxCatalog {
 }
 
 export async function discoverMiniMaxModels(accessToken: string, baseUrl: string): Promise<ProviderCatalog> {
-	const root = baseUrl.replace(/\/+$/, '');
+	const root = await validateMiniMaxBaseUrl(baseUrl);
 	const china = root === MINIMAX_BASE_URLS.china;
 	const url = china ? `${root}/anthropic/v1/models` : `${root}/v1/models`;
 	const response = await fetch(url, {

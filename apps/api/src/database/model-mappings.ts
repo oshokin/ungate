@@ -28,11 +28,10 @@ export class ModelMappings {
 			const trimmedUpstreamModel = trim(model.upstreamModel);
 			let reasoningBudget: ReasoningBudgetTier | null = null;
 			let serviceTier: ModelServiceTier | null = null;
-			let provider: ModelMappingProvider = 'claude';
-
-			if (isModelMappingProvider(model.provider)) {
-				provider = model.provider;
+			if (!isModelMappingProvider(model.provider)) {
+				continue;
 			}
+			const provider: ModelMappingProvider = model.provider;
 
 			if (isReasoningBudgetTier(model.reasoningBudget)) {
 				reasoningBudget = model.reasoningBudget;
@@ -65,15 +64,21 @@ export class ModelMappings {
 		const rows = db.select().from(modelMappings).all();
 
 		const models = orderBy(
-			rows.map((row) => ({
-				id: row.id,
-				label: row.label,
-				provider: isModelMappingProvider(row.provider) ? row.provider : 'claude',
-				upstreamModel: row.upstreamModel,
-				sortOrder: row.sortOrder,
-				reasoningBudget: isReasoningBudgetTier(row.reasoningBudget) ? row.reasoningBudget : null,
-				serviceTier: isModelServiceTier(row.serviceTier) ? row.serviceTier : null
-			})),
+			rows.flatMap((row) =>
+				isModelMappingProvider(row.provider)
+					? [
+							{
+								id: row.id,
+								label: row.label,
+								provider: row.provider,
+								upstreamModel: row.upstreamModel,
+								sortOrder: row.sortOrder,
+								reasoningBudget: isReasoningBudgetTier(row.reasoningBudget) ? row.reasoningBudget : null,
+								serviceTier: isModelServiceTier(row.serviceTier) ? row.serviceTier : null
+							}
+						]
+					: []
+			),
 			['sortOrder'],
 			['asc']
 		);

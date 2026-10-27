@@ -9,14 +9,8 @@ config.baseDir = directory;
 config.paths.stateFilePath = path.join(directory, 'runtime-state.json');
 
 async function run(): Promise<void> {
-	await RuntimeStateStore.touchClient(workerId);
 	for (let index = 0; index < 50; index++) {
-		await RuntimeStateStore.enqueueCommand({
-			id: `${workerId}-${index}`,
-			action: 'clear-logs',
-			originWindowId: workerId,
-			createdAt: Date.now()
-		});
+		await RuntimeStateStore.touchClient(`${workerId}-${index}`);
 	}
 }
 void run().catch((error: unknown) => {

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiServer } from '../../src/api-server';
+import { readApiHealth } from '../../src/local-api';
 
 import { TestHelper } from './helpers/test-helper';
 
@@ -79,7 +80,7 @@ vi.mock('@ungate/shared', () => {
 
 vi.mock('../../src/local-api', () => ({
 	assertCompatibleApi: vi.fn().mockResolvedValue(undefined),
-	readApiHealth: vi.fn().mockResolvedValue(null)
+	readApiHealth: vi.fn().mockResolvedValue({ service: 'ungate', pid: 1234, version: '1.7.14', protocolVersion: 3 })
 }));
 
 vi.mock('../../src/utils/cross-process-lock', () => ({ CrossProcessLock: { acquire: () => Promise.resolve(() => {}) } }));
@@ -115,7 +116,6 @@ interface ApiServerInternals {
 	port: number | null;
 	process: null;
 	lastStatus: 'starting' | 'running' | 'stopped' | 'error' | null;
-	restartRequested: boolean;
 	restartInProgress: boolean;
 	shutDownDeliberately: boolean;
 	startPromise: Promise<void> | null;
@@ -124,8 +124,12 @@ interface ApiServerInternals {
 	spawn(): void;
 	ensureNativeDeps(): Promise<void>;
 	checkPortHealth(port: number): Promise<boolean>;
+	isPortListening(port: number): Promise<boolean>;
+	stopAuthenticatedApiProcess(port: number): Promise<void>;
 	startHealthCheck(): void;
 	shouldRespawn(): boolean;
+	stopLocked(): Promise<void>;
+	startLocked(): Promise<void>;
 }
 
 function createRuntimeState(windowIds: string[] = [], port: number | null = 4783): RuntimeState {
@@ -523,24 +527,52 @@ describe('ApiServer.onExit', () => {
 		});
 	});
 
-	it('starts again after a requested restart exit', async () => {
+	it('performs an explicit stop, reset, and start during restart', async () => {
 		const { server } = createServer();
 		const internals = getInternals(server);
-		const startSpy = vi.spyOn(server, 'start').mockResolvedValue(undefined);
+		const stopSpy = vi.spyOn(internals, 'stopLocked').mockResolvedValue(undefined);
+		const startSpy = vi.spyOn(internals, 'startLocked').mockResolvedValue(undefined);
+		runtimeReadMock.mockReturnValue(createRuntimeState([], null));
 
-		Object.assign(internals, {
-			restartRequested: true,
-			restartInProgress: true,
-			process: null
-		});
+		await server.restart();
 
-		internals.onExit(null, 'SIGTERM');
-		await flushPromises();
-
+		expect(stopSpy).toHaveBeenCalledTimes(1);
+		expect(resetApiForRestartMock).toHaveBeenCalledTimes(1);
 		expect(startSpy).toHaveBeenCalledTimes(1);
-		expect(sleepMock).toHaveBeenCalledTimes(1);
-		expect(internals.restartRequested).toBe(false);
 		expect(internals.restartInProgress).toBe(false);
+	});
+
+	it('waits for the old listener to release its port before restarting', async () => {
+		const runtimeState = createRuntimeState([], 4783);
+		runtimeState.api.pid = 1234;
+		const { server } = createServer();
+		const internals = getInternals(server);
+		runtimeReadMock.mockReturnValue(runtimeState);
+		runtimeMutateMock.mockImplementation((mutator) => Promise.resolve(mutator(structuredClone(runtimeState))));
+		vi.spyOn(internals, 'checkPortHealth').mockResolvedValue(true);
+		const listenerSpy = vi.spyOn(internals, 'isPortListening').mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
+
+		await internals.stopLocked();
+
+		expect(listenerSpy).toHaveBeenCalledTimes(2);
+		expect(resetApiForRestartMock).not.toHaveBeenCalled();
+	});
+
+	it('terminates the same authenticated api when graceful shutdown does not release the port', async () => {
+		const runtimeState = createRuntimeState([], 4783);
+		const { server, onLog } = createServer();
+		const internals = getInternals(server);
+		runtimeReadMock.mockReturnValue(runtimeState);
+		vi.mocked(readApiHealth).mockResolvedValue({ service: 'ungate', pid: 1234, version: '1.7.14', protocolVersion: 3 });
+		const listenerSpy = vi.spyOn(internals, 'isPortListening').mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+		const killSpy = vi.spyOn(process, 'kill').mockReturnValue(true);
+
+		await internals.stopAuthenticatedApiProcess(4783);
+
+		expect(killSpy).toHaveBeenCalledWith(expect.any(Number), 'SIGTERM');
+		expect(listenerSpy).toHaveBeenCalledTimes(2);
+		expect(onLog).toHaveBeenCalledWith('warn', expect.stringContaining('terminating authenticated api'));
 	});
 
 	it('does not respawn after a deliberate shutdown', () => {
@@ -568,7 +600,6 @@ describe('ApiServer.onExit', () => {
 		vi.spyOn(internals, 'checkPortHealth').mockResolvedValue(true);
 
 		Object.assign(internals, {
-			restartRequested: false,
 			shutDownDeliberately: false,
 			process: null
 		});
@@ -591,7 +622,6 @@ describe('ApiServer.onExit', () => {
 		});
 
 		Object.assign(internals, {
-			restartRequested: false,
 			shutDownDeliberately: false,
 			process: null
 		});
@@ -611,7 +641,6 @@ describe('ApiServer.onExit', () => {
 		vi.spyOn(internals, 'checkPortHealth').mockResolvedValue(true);
 
 		Object.assign(internals, {
-			restartRequested: false,
 			shutDownDeliberately: false,
 			process: null
 		});
@@ -637,7 +666,6 @@ describe('ApiServer.onExit', () => {
 		Object.assign(internals, {
 			addressInUsePort: 47821,
 			process: null,
-			restartRequested: false,
 			shutDownDeliberately: false
 		});
 

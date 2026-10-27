@@ -29,6 +29,9 @@ export class ResponsesSseProcessor {
 
 	static process(state: StreamState, chunk: string): StreamProcessResult[] {
 		state.buffer += chunk.replace(/\r/g, '');
+		if (Buffer.byteLength(state.buffer, 'utf8') > state.maxSseEventBytes && !state.buffer.includes('\n\n')) {
+			throw new Error(`Codex SSE event exceeded ${state.maxSseEventBytes} bytes`);
+		}
 		const results: StreamProcessResult[] = [];
 		const parts = state.buffer.split('\n\n');
 		const tail = parts.pop();
@@ -39,6 +42,9 @@ export class ResponsesSseProcessor {
 		}
 
 		for (const part of parts) {
+			if (Buffer.byteLength(part, 'utf8') > state.maxSseEventBytes) {
+				throw new Error(`Codex SSE event exceeded ${state.maxSseEventBytes} bytes`);
+			}
 			const payloads = this.parsePart(part);
 
 			for (const payload of payloads) {

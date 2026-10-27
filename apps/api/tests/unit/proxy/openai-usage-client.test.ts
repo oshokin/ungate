@@ -2,8 +2,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { OpenAiClient } from 'src/proxy/openai-client';
 
-vi.mock('src/database/provider-settings', () => ({
-	ProviderSettings: { get: () => ({ accessToken: 'test-token', accountId: 'test-account' }) }
+vi.mock('src/auth/openai/openai-oauth-service', () => ({
+	OpenAIOAuthService: {
+		getValidToken: () => ({ accessToken: 'test-token', refreshToken: 'refresh-token', accountId: 'test-account' }),
+		refreshToken: vi.fn()
+	}
 }));
 vi.mock('src/database/app-settings', () => ({ Settings: { get: () => ({ extraInstruction: null }) } }));
 vi.mock('src/utils/logger', () => ({ logger: { log: vi.fn(), error: vi.fn(), warn: vi.fn() } }));

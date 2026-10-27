@@ -2,8 +2,28 @@ import { OAuth } from '../auth/oauth';
 import { OpenAIOAuthService } from '../auth/openai/openai-oauth-service';
 import { config } from '../config';
 import { ProviderSettings } from '../database/provider-settings';
+import { validateMiniMaxBaseUrl } from '../security/minimax-url';
 
-import type { FastifyPluginCallback } from 'fastify';
+import type { FastifyPluginCallback, FastifyReply } from 'fastify';
+
+const OAUTH_HTML_CSP =
+	"default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'";
+
+function escapeHtml(value: string): string {
+	return value.replace(/[&<>"']/g, (character) => {
+		const escaped: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+
+		return escaped[character];
+	});
+}
+
+function oauthHtml(reply: FastifyReply, body: string) {
+	return reply
+		.header('Content-Security-Policy', OAUTH_HTML_CSP)
+		.header('X-Content-Type-Options', 'nosniff')
+		.type('text/html')
+		.send(body);
+}
 
 const plugin: FastifyPluginCallback = (app) => {
 	app.post('/auth/claude/start', async (_request, reply) => {
@@ -50,7 +70,13 @@ const plugin: FastifyPluginCallback = (app) => {
 			return reply.code(400).send({ ok: false, error: 'API key is required' });
 		}
 
-		ProviderSettings.upsertApiKey('minimax', apiKey.trim(), baseUrl?.trim());
+		let validatedBaseUrl: string;
+		try {
+			validatedBaseUrl = await validateMiniMaxBaseUrl(baseUrl?.trim() ?? config.minimax.baseUrlGlobal);
+		} catch {
+			return reply.code(400).send({ ok: false, error: 'MiniMax base URL is not allowed' });
+		}
+		ProviderSettings.upsertApiKey('minimax', apiKey.trim(), validatedBaseUrl);
 
 		return reply.send({ ok: true });
 	});
@@ -63,7 +89,13 @@ const plugin: FastifyPluginCallback = (app) => {
 			return reply.code(400).send({ ok: false, error: 'Base URL is required' });
 		}
 
-		const updated = ProviderSettings.updateBaseUrl('minimax', trimmedBaseUrl);
+		let validatedBaseUrl: string;
+		try {
+			validatedBaseUrl = await validateMiniMaxBaseUrl(trimmedBaseUrl);
+		} catch {
+			return reply.code(400).send({ ok: false, error: 'MiniMax base URL is not allowed' });
+		}
+		const updated = ProviderSettings.updateBaseUrl('minimax', validatedBaseUrl);
 
 		if (!updated) {
 			return reply.code(400).send({ ok: false, error: 'MiniMax is not configured yet' });
@@ -87,18 +119,17 @@ const plugin: FastifyPluginCallback = (app) => {
 	app.get('/auth/openai/callback', async (request, reply) => {
 		const { code, state: sessionId } = request.query as { code?: string; state?: string };
 		if (!code || !sessionId) {
-			return reply
-				.type('text/html')
-				.send('<html><body><h1>Missing code or session</h1><p>Please close this window and try again.</p></body></html>');
+			return oauthHtml(
+				reply,
+				'<html><body><h1>Missing code or session</h1><p>Please close this window and try again.</p></body></html>'
+			);
 		}
 		const result = await OpenAIOAuthService.completeLogin(code, sessionId);
 		if (result.ok) {
-			return reply
-				.type('text/html')
-				.send('<html><body><h1>Connected!</h1><p>You can close this window.</p><script>window.close()</script></body></html>');
+			return oauthHtml(reply, '<html><body><h1>Connected!</h1><p>You can close this window.</p></body></html>');
 		}
 
-		return reply.type('text/html').send(`<html><body><h1>Error</h1><p>${result.error ?? 'Unknown error'}</p></body></html>`);
+		return oauthHtml(reply, `<html><body><h1>Error</h1><p>${escapeHtml(result.error ?? 'Unknown error')}</p></body></html>`);
 	});
 
 	app.get('/auth/openai/status', (_request, reply) => {

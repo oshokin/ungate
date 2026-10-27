@@ -13,13 +13,14 @@ export class ClaudeChatHandler {
 		request: FastifyRequest,
 		openaiBody: OpenAIChatRequest,
 		resolvedModel: ModelMappingConfig | null,
-		reply: FastifyReply
+		reply: FastifyReply,
+		signal?: AbortSignal
 	): Promise<FastifyReply> {
 		HeadersExtractor.logRequestDetails(request.headers, request.url, request.method, 'OpenAI /v1/chat/completions');
 
 		const anthropicBody = CompletionModelRouting.toAnthropicRequest(openaiBody, resolvedModel);
 		const headers = HeadersExtractor.extractAnthropicHeaders(request.headers);
-		const { response, context } = await proxyRequest('/v1/messages', anthropicBody, headers);
+		const { response, context } = await proxyRequest('/v1/messages', anthropicBody, headers, signal);
 
 		if (!response.ok) {
 			const errorJson = await response.json().catch(() => ({ error: { message: `HTTP ${response.status}`, type: 'api_error' } }));
@@ -46,7 +47,7 @@ export class ClaudeChatHandler {
 		}
 
 		const anthropicResponse = await response.json();
-		const openaiResponse = AnthropicToOpenai.convert(anthropicResponse, openaiBody.model);
+		const openaiResponse = AnthropicToOpenai.convert(anthropicResponse, openaiBody.model, context.reverseToolMapping);
 		const latencyMs = Date.now() - context.startTime;
 
 		ProxyResponseHeaders.apply(reply, latencyMs);

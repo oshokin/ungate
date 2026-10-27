@@ -10,10 +10,11 @@ export class MiniMaxChatHandler {
 	static async handle(
 		openaiBody: OpenAIChatRequest,
 		resolvedModel: ModelMappingConfig | null,
-		reply: FastifyReply
+		reply: FastifyReply,
+		signal?: AbortSignal
 	): Promise<FastifyReply> {
 		const minimaxBody = CompletionModelRouting.buildMiniMaxBody(openaiBody, resolvedModel);
-		const { response, context } = await proxyMiniMaxRequest(minimaxBody);
+		const { response, context } = await proxyMiniMaxRequest(minimaxBody, signal);
 
 		if (!response.ok) {
 			const errorMessage = CompletionErrorMapper.miniMaxErrorMessage(response, context);

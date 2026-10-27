@@ -4,7 +4,7 @@ import { config } from './config';
 import { RuntimeStateFileStore } from './file-store';
 import { RuntimeStateNormalizer } from './normalizer';
 
-import type { RuntimeCommand, RuntimeState } from '@ungate/shared/frontend';
+import type { RuntimeState } from '@ungate/shared/frontend';
 
 export class RuntimeStateStore {
 	public static read(): RuntimeState {
@@ -109,32 +109,6 @@ export class RuntimeStateStore {
 
 	public static getFilePath(): string {
 		return RuntimeStateFileStore.getFilePath();
-	}
-
-	public static async enqueueCommand(command: RuntimeCommand): Promise<RuntimeState> {
-		return await this.mutate((current) => {
-			current.commands.push(command);
-
-			return current;
-		});
-	}
-
-	public static peekCommand(): RuntimeCommand | null {
-		const state = this.read();
-
-		if (state.commands.length === 0) {
-			return null;
-		}
-
-		return state.commands[0];
-	}
-
-	public static async removeCommand(commandId: string): Promise<RuntimeState> {
-		return await this.mutate((current) => {
-			current.commands = current.commands.filter((command) => command.id !== commandId);
-
-			return current;
-		});
 	}
 
 	public static isApiStartSuppressed(state: RuntimeState = this.read()): boolean {

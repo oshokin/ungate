@@ -166,179 +166,209 @@ export class MiniMaxStreamHandler {
 	}): ReadableStream {
 		const { reader, streamId, modelName, context } = options;
 		let cancelled = false;
+		let resumePull: (() => void) | undefined;
+		let pullRequested = false;
+		const maxSseEventBytes = Number(process.env.PROVIDER_MAX_SSE_EVENT_BYTES) || 1024 * 1024;
+		const maxToolArgumentBytes = Number(process.env.PROVIDER_MAX_TOOL_ARGUMENT_BYTES) || 4 * 1024 * 1024;
 
-		return new ReadableStream({
-			async start(controller) {
-				const decoder = new TextDecoder();
-				const encoder = new TextEncoder();
-				let sseBuffer = '';
-				let sentStart = false;
-				let finishReason: 'stop' | 'length' | 'tool_calls' | null = null;
-				let sawDone = false;
-				const pendingTools = new Map<number, MiniMaxToolCallDelta>();
-				let usage:
-					| {
-							prompt_tokens: number;
-							completion_tokens: number;
-							total_tokens: number;
-					  }
-					| undefined;
-				let streamState: MiniMaxStreamState = 'content';
-				let pendingTag = '';
+		return new ReadableStream(
+			{
+				async start(controller) {
+					const decoder = new TextDecoder();
+					const encoder = new TextEncoder();
+					let sseBuffer = '';
+					let sentStart = false;
+					let finishReason: 'stop' | 'length' | 'tool_calls' | null = null;
+					let sawDone = false;
+					const pendingTools = new Map<number, MiniMaxToolCallDelta>();
+					let usage:
+						| {
+								prompt_tokens: number;
+								completion_tokens: number;
+								total_tokens: number;
+						  }
+						| undefined;
+					let streamState: MiniMaxStreamState = 'content';
+					let pendingTag = '';
 
-				const safeEnqueue = (chunk: string) => {
-					try {
-						if (!cancelled) {
-							controller.enqueue(encoder.encode(chunk));
+					const safeEnqueue = (chunk: string) => {
+						try {
+							if (!cancelled) {
+								controller.enqueue(encoder.encode(chunk));
+							}
+						} catch {
+							cancelled = true;
 						}
-					} catch {
-						cancelled = true;
-					}
-				};
+					};
 
-				try {
-					while (true) {
-						if (cancelled) break;
-
-						const { done, value } = await reader.read();
-						if (cancelled) break;
-						if (done) break;
-
-						sseBuffer += decoder.decode(value, { stream: true });
-						const lines = sseBuffer.split('\n');
-						sseBuffer = lines.pop() ?? '';
-
-						for (const line of lines) {
-							if (cancelled || !line.startsWith('data: ')) continue;
-
-							const data = line.slice(6);
-							if (data === '[DONE]') {
-								sawDone = true;
-								continue;
+					try {
+						while (true) {
+							if (cancelled) break;
+							if ((controller.desiredSize ?? 1) <= 0) {
+								if (pullRequested) {
+									pullRequested = false;
+								} else {
+									await new Promise<void>((resolve) => {
+										resumePull = resolve;
+									});
+									resumePull = undefined;
+								}
+								if (cancelled) break;
 							}
 
-							try {
-								const event = JSON.parse(data) as MiniMaxStreamEvent;
-								const choice = event.choices?.[0];
+							const { done, value } = await reader.read();
+							if (cancelled) break;
+							if (done) break;
 
-								if (!sentStart) {
-									safeEnqueue(buildChunk(streamId, modelName, { role: 'assistant' }));
-									sentStart = true;
+							sseBuffer += decoder.decode(value, { stream: true });
+							if (Buffer.byteLength(sseBuffer, 'utf8') > maxSseEventBytes && !sseBuffer.includes('\n')) {
+								throw new Error(`MiniMax SSE event exceeded ${maxSseEventBytes} bytes`);
+							}
+							const lines = sseBuffer.split('\n');
+							sseBuffer = lines.pop() ?? '';
+
+							for (const line of lines) {
+								if (cancelled || !line.startsWith('data: ')) continue;
+
+								const data = line.slice(6);
+								if (data === '[DONE]') {
+									sawDone = true;
+									continue;
 								}
 
-								if (choice?.finish_reason) {
-									finishReason = choice.finish_reason as 'stop' | 'length' | 'tool_calls';
-								}
+								try {
+									const event = JSON.parse(data) as MiniMaxStreamEvent;
+									const choice = event.choices?.[0];
 
-								if (event.usage?.completion_tokens !== undefined) {
-									const promptTokens = event.usage.prompt_tokens ?? context.inputTokens ?? 0;
-									const completionTokens = event.usage.completion_tokens;
-									const totalTokens = event.usage.total_tokens ?? promptTokens + completionTokens;
-									usage = {
-										prompt_tokens: promptTokens,
-										completion_tokens: completionTokens,
-										total_tokens: totalTokens
-									};
-								}
-
-								const toolCallDeltas = choice?.delta?.tool_calls;
-								if (toolCallDeltas && toolCallDeltas.length > 0) {
-									for (const tc of toolCallDeltas) {
-										const previous = pendingTools.get(tc.index);
-										pendingTools.set(tc.index, {
-											index: tc.index,
-											id: tc.id ?? previous?.id,
-											type: tc.type ?? previous?.type,
-											function: {
-												name: tc.function?.name ?? previous?.function?.name,
-												arguments: (previous?.function?.arguments ?? '') + (tc.function?.arguments ?? '')
-											}
-										});
+									if (!sentStart) {
+										safeEnqueue(buildChunk(streamId, modelName, { role: 'assistant' }));
+										sentStart = true;
 									}
-									continue;
-								}
 
-								const deltaText = choice?.delta?.content;
-								if (!deltaText) {
-									continue;
-								}
+									if (choice?.finish_reason) {
+										finishReason = choice.finish_reason as 'stop' | 'length' | 'tool_calls';
+									}
 
-								const parsed = parseMiniMaxDelta(deltaText, streamState, pendingTag);
-								streamState = parsed.state;
-								pendingTag = parsed.pendingTag;
+									if (event.usage?.completion_tokens !== undefined) {
+										const promptTokens = event.usage.prompt_tokens ?? context.inputTokens ?? 0;
+										const completionTokens = event.usage.completion_tokens;
+										const totalTokens = event.usage.total_tokens ?? promptTokens + completionTokens;
+										usage = {
+											prompt_tokens: promptTokens,
+											completion_tokens: completionTokens,
+											total_tokens: totalTokens
+										};
+									}
 
-								for (const segment of parsed.segments) {
-									if (!segment.text) continue;
-
-									if (segment.kind === 'reasoning') {
-										safeEnqueue(buildChunk(streamId, modelName, { reasoning_content: segment.text }));
+									const toolCallDeltas = choice?.delta?.tool_calls;
+									if (toolCallDeltas && toolCallDeltas.length > 0) {
+										for (const tc of toolCallDeltas) {
+											const previous = pendingTools.get(tc.index);
+											const argumentsValue = (previous?.function?.arguments ?? '') + (tc.function?.arguments ?? '');
+											if (Buffer.byteLength(argumentsValue, 'utf8') > maxToolArgumentBytes) {
+												throw new Error(`MiniMax tool arguments exceeded ${maxToolArgumentBytes} bytes`);
+											}
+											pendingTools.set(tc.index, {
+												index: tc.index,
+												id: tc.id ?? previous?.id,
+												type: tc.type ?? previous?.type,
+												function: {
+													name: tc.function?.name ?? previous?.function?.name,
+													arguments: argumentsValue
+												}
+											});
+										}
 										continue;
 									}
 
-									safeEnqueue(buildChunk(streamId, modelName, { content: segment.text }));
+									const deltaText = choice?.delta?.content;
+									if (!deltaText) {
+										continue;
+									}
+
+									const parsed = parseMiniMaxDelta(deltaText, streamState, pendingTag);
+									streamState = parsed.state;
+									pendingTag = parsed.pendingTag;
+
+									for (const segment of parsed.segments) {
+										if (!segment.text) continue;
+
+										if (segment.kind === 'reasoning') {
+											safeEnqueue(buildChunk(streamId, modelName, { reasoning_content: segment.text }));
+											continue;
+										}
+
+										safeEnqueue(buildChunk(streamId, modelName, { content: segment.text }));
+									}
+								} catch (error) {
+									logger.error(`MiniMax stream parse error: ${String(error)}`);
 								}
-							} catch (error) {
-								logger.error(`MiniMax stream parse error: ${String(error)}`);
 							}
 						}
-					}
 
-					if (pendingTag) {
-						if (streamState === 'thinking') {
-							safeEnqueue(buildChunk(streamId, modelName, { reasoning_content: pendingTag }));
-						} else {
-							safeEnqueue(buildChunk(streamId, modelName, { content: pendingTag }));
-						}
-					}
-
-					let finalReason = finishReason ?? (sawDone && pendingTools.size === 0 ? 'stop' : 'length');
-					if (pendingTools.size > 0) {
-						try {
-							if (finishReason !== 'tool_calls') throw new Error('Unfinished tool stream');
-							for (const tool of pendingTools.values()) {
-								if (!tool.id || !tool.function?.name) throw new Error('Incomplete tool identity');
-								JSON.parse(tool.function.arguments ?? '');
+						if (pendingTag) {
+							if (streamState === 'thinking') {
+								safeEnqueue(buildChunk(streamId, modelName, { reasoning_content: pendingTag }));
+							} else {
+								safeEnqueue(buildChunk(streamId, modelName, { content: pendingTag }));
 							}
-							safeEnqueue(buildChunk(streamId, modelName, { tool_calls: [...pendingTools.values()] }));
-						} catch {
-							finalReason = 'length';
 						}
-					}
-					safeEnqueue(buildChunk(streamId, modelName, {}, finalReason));
 
-					if (usage) {
-						safeEnqueue(buildUsageChunk(streamId, modelName, usage));
-					}
+						let finalReason = finishReason ?? (sawDone && pendingTools.size === 0 ? 'stop' : 'length');
+						if (pendingTools.size > 0) {
+							try {
+								if (finishReason !== 'tool_calls') throw new Error('Unfinished tool stream');
+								for (const tool of pendingTools.values()) {
+									if (!tool.id || !tool.function?.name) throw new Error('Incomplete tool identity');
+									JSON.parse(tool.function.arguments ?? '');
+								}
+								safeEnqueue(buildChunk(streamId, modelName, { tool_calls: [...pendingTools.values()] }));
+							} catch {
+								finalReason = 'length';
+							}
+						}
+						safeEnqueue(buildChunk(streamId, modelName, {}, finalReason));
 
-					safeEnqueue('data: [DONE]\n\n');
-				} catch (error) {
-					if (!cancelled) {
-						logger.error(`MiniMax stream processing failed: ${String(error)}`);
-						safeEnqueue(buildChunk(streamId, modelName, {}, 'length'));
+						if (usage) {
+							safeEnqueue(buildUsageChunk(streamId, modelName, usage));
+						}
+
 						safeEnqueue('data: [DONE]\n\n');
-					}
-				} finally {
-					if (!sawDone && !cancelled) {
-						try {
-							reader.cancel().catch(() => {});
-						} catch {
-							// Reader already released
-						}
-					}
-
-					try {
+					} catch (error) {
 						if (!cancelled) {
-							controller.close();
+							logger.error(`MiniMax stream processing failed: ${String(error)}`);
+							safeEnqueue(buildChunk(streamId, modelName, {}, 'length'));
+							safeEnqueue('data: [DONE]\n\n');
 						}
-					} catch {
-						// Controller already closed
+					} finally {
+						if (!sawDone && !cancelled) {
+							try {
+								reader.cancel().catch(() => {});
+							} catch {
+								// Reader already released
+							}
+						}
+
+						try {
+							if (!cancelled) {
+								controller.close();
+							}
+						} catch {
+							// Controller already closed
+						}
 					}
+				},
+				pull() {
+					if (resumePull) resumePull();
+					else pullRequested = true;
+				},
+				cancel(reason) {
+					cancelled = true;
+					resumePull?.();
+					reader.cancel(reason).catch(() => {});
 				}
 			},
-			cancel(reason) {
-				cancelled = true;
-				reader.cancel(reason).catch(() => {});
-			}
-		});
+			new CountQueuingStrategy({ highWaterMark: 64 })
+		);
 	}
 }

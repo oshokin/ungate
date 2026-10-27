@@ -33,11 +33,11 @@ describe('routes-anthropic', () => {
 			method: 'POST',
 			url: '/v1/messages',
 			headers: { 'x-api-key': 'secret' },
-			payload: { model: 'm', max_tokens: 10, messages: [] }
+			payload: { model: 'm', max_tokens: 10, messages: [{ role: 'user', content: 'hi' }] }
 		});
 
 		expect(response.statusCode).toBe(201);
-		expect(response.headers['x-up']).toBe('1');
+		expect(response.headers['x-up']).toBeUndefined();
 		expect(response.headers['content-encoding']).toBeUndefined();
 		await app.close();
 	});
@@ -51,7 +51,7 @@ describe('routes-anthropic', () => {
 			method: 'POST',
 			url: '/v1/messages',
 			headers: { authorization: 'Bearer secret' },
-			payload: { model: 'm', max_tokens: 10, messages: [] }
+			payload: { model: 'm', max_tokens: 10, messages: [{ role: 'user', content: 'hi' }] }
 		});
 
 		expect(response.statusCode).toBe(202);
@@ -65,11 +65,11 @@ describe('routes-anthropic', () => {
 			method: 'POST',
 			url: '/v1/messages',
 			headers: { authorization: 'Bearer secret' },
-			payload: { model: 'm', max_tokens: 10, messages: [] }
+			payload: { model: 'm', max_tokens: 10, messages: [{ role: 'user', content: 'hi' }] }
 		});
 
-		expect(response.statusCode).toBe(400);
-		expect(response.json().error.message).toContain('upstream boom');
+		expect(response.statusCode).toBe(502);
+		expect(response.json().error.message).toBe('Upstream request failed');
 		await app.close();
 	});
 });

@@ -3,6 +3,8 @@ import { logger } from 'src/utils/logger';
 import { HeadersExtractor } from '../handlers/headers-extractor';
 import { apiKeyAuth } from '../plugins/auth';
 import { proxyRequest } from '../proxy/anthropic-client';
+import { anthropicRequestSchema } from '../schemas/proxy-requests';
+import { createRequestAbortSignal } from '../security/outbound-request';
 
 import type { AnthropicRequest, AnthropicError } from '../types';
 import type { FastifyPluginCallback } from 'fastify';
@@ -10,7 +12,8 @@ import type { FastifyPluginCallback } from 'fastify';
 const plugin: FastifyPluginCallback = (app) => {
 	const { config } = app;
 
-	app.post('/v1/messages', { onRequest: apiKeyAuth(config) }, async (request, reply) => {
+	app.post('/v1/messages', { onRequest: apiKeyAuth(config), schema: anthropicRequestSchema }, async (request, reply) => {
+		const cancellation = createRequestAbortSignal(request, reply);
 		try {
 			HeadersExtractor.logRequestDetails(request.headers, request.url, request.method, 'Anthropic /v1/messages');
 
@@ -19,10 +22,10 @@ const plugin: FastifyPluginCallback = (app) => {
 
 			logger.log(`→ Model: "${body.model}" | ${body.stream ? 'stream' : 'sync'} | max_tokens=${body.max_tokens}`);
 
-			const { response } = await proxyRequest('/v1/messages', body, headers);
+			const { response } = await proxyRequest('/v1/messages', body, headers, cancellation.signal);
 
 			for (const [key, value] of response.headers.entries()) {
-				if (key.toLowerCase() !== 'content-encoding') {
+				if (['content-type', 'cache-control', 'request-id', 'anthropic-request-id', 'retry-after'].includes(key.toLowerCase())) {
 					reply.header(key, value);
 				}
 			}
@@ -36,15 +39,15 @@ const plugin: FastifyPluginCallback = (app) => {
 			const fallbackBody = await response.arrayBuffer();
 
 			return reply.send(fallbackBody);
-		} catch (error) {
-			logger.error(`Request handling error: ${String(error)}`);
+		} catch {
+			logger.error('Anthropic request handling failed');
 
 			const errorBody: AnthropicError = {
 				type: 'error',
-				error: { type: 'invalid_request_error', message: String(error) }
+				error: { type: 'api_error', message: 'Upstream request failed' }
 			};
 
-			return reply.code(400).send(errorBody);
+			return reply.code(502).send(errorBody);
 		}
 	});
 };

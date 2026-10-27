@@ -27,8 +27,7 @@ export class RuntimeStateDefaults {
 			keyFix: {
 				enabled: DEFAULT_KEY_FIX_ENABLED
 			},
-			clients: {},
-			commands: []
+			clients: {}
 		};
 	}
 }

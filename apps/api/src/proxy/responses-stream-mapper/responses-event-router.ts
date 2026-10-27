@@ -124,6 +124,9 @@ export class ResponsesEventRouter {
 			return true;
 		}
 
+		if (Buffer.byteLength(pending.argsBuffer, 'utf8') + Buffer.byteLength(deltaStr, 'utf8') > state.maxToolArgumentBytes) {
+			throw new Error(`Codex tool arguments exceeded ${state.maxToolArgumentBytes} bytes`);
+		}
 		pending.argsBuffer += deltaStr;
 
 		if (pending.deferred) {

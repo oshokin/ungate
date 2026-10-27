@@ -1,4 +1,4 @@
-import { type RuntimeCommand, type RuntimeState, type TunnelState } from '@ungate/shared/frontend';
+import { type RuntimeState, type TunnelState } from '@ungate/shared/frontend';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { TestHelper } from './helpers/test-helper';
@@ -68,9 +68,7 @@ const runtimeGetLiveClientIdsMock = vi.fn<(state: RuntimeState) => string[]>();
 const runtimeTouchClientMock = vi.fn<(windowId: string) => Promise<RuntimeState>>();
 const runtimeRemoveClientMock = vi.fn<(windowId: string) => Promise<RuntimeState>>();
 const runtimeGetLeaderWindowIdMock = vi.fn<(state: RuntimeState) => string | null>();
-const runtimePeekCommandMock = vi.fn<() => RuntimeCommand | null>();
 const runtimeReconcileOrphanedTunnelMock = vi.fn<(state?: RuntimeState) => Promise<RuntimeState>>();
-const runtimeRemoveCommandMock = vi.fn<(commandId: string) => Promise<RuntimeState>>();
 const prepareApiForBootstrapMock = vi.fn(() => Promise.resolve(runtimeReadMock()));
 
 const apiServerStartMock = vi.fn().mockResolvedValue(undefined);
@@ -135,9 +133,7 @@ vi.mock('../../src/runtime-state', () => {
 			touchClient: runtimeTouchClientMock,
 			removeClient: runtimeRemoveClientMock,
 			getLeaderWindowId: runtimeGetLeaderWindowIdMock,
-			peekCommand: runtimePeekCommandMock,
 			reconcileOrphanedTunnel: runtimeReconcileOrphanedTunnelMock,
-			removeCommand: runtimeRemoveCommandMock,
 			isApiStartSuppressed: (state?: RuntimeState) => {
 				const runtimeState = state ?? runtimeReadMock();
 
@@ -295,14 +291,10 @@ describe('ExtensionController', () => {
 		runtimeRemoveClientMock.mockReset();
 		runtimeRemoveClientMock.mockResolvedValue(createRuntimeState([], null));
 		runtimeGetLeaderWindowIdMock.mockReset();
-		runtimePeekCommandMock.mockReset();
-		runtimePeekCommandMock.mockReturnValue(null);
 		runtimeReconcileOrphanedTunnelMock.mockReset();
 		runtimeReconcileOrphanedTunnelMock.mockImplementation((state) => {
 			return Promise.resolve(state ?? runtimeReadMock());
 		});
-		runtimeRemoveCommandMock.mockReset();
-		runtimeRemoveCommandMock.mockResolvedValue(createRuntimeState([], null));
 		prepareApiForBootstrapMock.mockReset();
 		prepareApiForBootstrapMock.mockImplementation(() => {
 			const runtimeState = runtimeReadMock();
@@ -465,46 +457,46 @@ describe('ExtensionController', () => {
 		});
 	});
 
-	it('does not stop api when current window is not leader', () => {
+	it('does not stop api when current window is not leader', async () => {
 		const { controller, apiServer, tunnelManager } = createController('window-b');
 		const runtimeState = createRuntimeState(['window-a', 'window-b'], null);
 		runtimeReadMock.mockReturnValue(runtimeState);
 		runtimeHasLiveClientsMock.mockReturnValue(true);
 		runtimeGetLeaderWindowIdMock.mockReturnValue('window-a');
 
-		controller.stopBackendServices();
+		await controller.stopBackendServices();
 
 		expect(apiServer.stop).not.toHaveBeenCalled();
 		expect(tunnelManager.stop).not.toHaveBeenCalled();
 	});
 
-	it('keeps shared API alive when the owner window closes', () => {
+	it('keeps shared API alive when the owner window closes', async () => {
 		const { controller, apiServer } = createController('window-a');
 		const runtimeState = createRuntimeState(['window-a', 'window-b'], null);
 		runtimeReadMock.mockReturnValue(runtimeState);
 		runtimeHasLiveClientsMock.mockReturnValue(true);
 		runtimeGetLeaderWindowIdMock.mockReturnValue('window-a');
 
-		controller.stopBackendServices();
+		await controller.stopBackendServices();
 
 		expect(apiServer.stop).not.toHaveBeenCalled();
 		expect(apiServer.detach).toHaveBeenCalledTimes(1);
 	});
 
-	it('detaches tunnel monitoring while preserving a tunnel for extension reload', () => {
+	it('detaches tunnel monitoring while preserving a tunnel for extension reload', async () => {
 		const { controller, tunnelManager } = createController('window-a');
 		const runtimeState = createRuntimeState(['window-a'], null);
 		runtimeReadMock.mockReturnValue(runtimeState);
 		runtimeHasLiveClientsMock.mockReturnValue(false);
 		runtimeGetLeaderWindowIdMock.mockReturnValue('window-a');
 
-		controller.stopBackendServices();
+		await controller.stopBackendServices();
 
 		expect(tunnelManager.stop).not.toHaveBeenCalled();
 		expect(tunnelManager.syncMonitor).toHaveBeenCalledWith(false);
 	});
 
-	it('removes the current client from runtime state during shutdown', () => {
+	it('removes the current client from runtime state during shutdown', async () => {
 		const { controller } = createController('window-a');
 		const runtimeState = createRuntimeState(['window-a'], null);
 		runtimeReadMock.mockReturnValue(runtimeState);
@@ -512,7 +504,7 @@ describe('ExtensionController', () => {
 		runtimeGetLeaderWindowIdMock.mockReturnValue('window-a');
 		runtimeRemoveClientMock.mockResolvedValue(createRuntimeState([], null));
 
-		controller.stopBackendServices();
+		await controller.stopBackendServices();
 
 		expect(runtimeRemoveClientMock).toHaveBeenCalledWith('window-a');
 	});
@@ -643,54 +635,5 @@ describe('ExtensionController', () => {
 		});
 		expect(tunnelManager.start).not.toHaveBeenCalled();
 		expect(tunnelManager.restart).not.toHaveBeenCalled();
-	});
-
-	it.each([
-		{ windowId: 'window-a', isLeader: true },
-		{ windowId: 'window-b', isLeader: false }
-	])('handles a stale-owner tunnel command only as leader ($windowId)', async ({ windowId, isLeader }) => {
-		const { controller, tunnelManager } = createController(windowId);
-		const internals = getInternals(controller);
-		const runtimeState = createRuntimeState(['window-a', 'window-b']);
-		runtimeState.tunnel.status = 'running';
-		runtimeState.tunnel.ownerWindowId = 'dead-window';
-		const command: RuntimeCommand = {
-			id: 'cmd-stop-tunnel',
-			action: 'stop-tunnel',
-			createdAt: Date.now(),
-			originWindowId: 'window-c'
-		};
-		runtimeReadMock.mockReturnValue(runtimeState);
-		runtimeGetLiveClientIdsMock.mockReturnValue(['window-a', 'window-b']);
-		runtimeGetLeaderWindowIdMock.mockReturnValue('window-a');
-		runtimePeekCommandMock.mockReturnValue(command);
-
-		await internals.syncFromRuntimeState();
-
-		expect(tunnelManager.stop).toHaveBeenCalledTimes(isLeader ? 1 : 0);
-		expect(runtimeRemoveCommandMock.mock.calls).toEqual(isLeader ? [[command.id]] : []);
-	});
-
-	it('does not handle a tunnel command when a different live window owns the tunnel', async () => {
-		const { controller, tunnelManager } = createController('window-b');
-		const internals = getInternals(controller);
-		const runtimeState = createRuntimeState(['window-a', 'window-b']);
-		runtimeState.tunnel.status = 'running';
-		runtimeState.tunnel.ownerWindowId = 'window-a';
-		const command: RuntimeCommand = {
-			id: 'cmd-stop-tunnel',
-			action: 'stop-tunnel',
-			createdAt: Date.now(),
-			originWindowId: 'window-c'
-		};
-		runtimeReadMock.mockReturnValue(runtimeState);
-		runtimeGetLiveClientIdsMock.mockReturnValue(['window-a', 'window-b']);
-		runtimeGetLeaderWindowIdMock.mockReturnValue('window-a');
-		runtimePeekCommandMock.mockReturnValue(command);
-
-		await internals.syncFromRuntimeState();
-
-		expect(tunnelManager.stop).not.toHaveBeenCalled();
-		expect(runtimeRemoveCommandMock).not.toHaveBeenCalled();
 	});
 });

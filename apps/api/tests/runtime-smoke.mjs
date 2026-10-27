@@ -62,9 +62,12 @@ try {
   assert.equal((await call('/v1/models', rotated)).status, 200); checks++;
   const health = await (await call('/health')).json();
   assert.equal(health.service, 'ungate'); checks++;
-  assert.equal(health.pid, child.pid); checks++;
-  assert.equal(health.version, JSON.parse(readFileSync(new URL('../../extension/package.json', import.meta.url), 'utf8')).version); checks++;
-  assert.equal(health.protocolVersion, 3); checks++;
+  assert.equal(health.status, 'ok'); checks++;
+  assert.equal(health.pid, undefined); checks++;
+  const adminHealth = await (await call('/admin/health', admin)).json();
+  assert.equal(adminHealth.pid, child.pid); checks++;
+  assert.equal(adminHealth.version, JSON.parse(readFileSync(new URL('../../extension/package.json', import.meta.url), 'utf8')).version); checks++;
+  assert.equal(adminHealth.protocolVersion, 3); checks++;
   assert.equal((await call('/admin/shutdown', undefined, 'POST')).status, 403); checks++;
   const exited = new Promise((resolve) => child.once('exit', resolve));
   assert.equal((await call('/admin/shutdown', admin, 'POST')).status, 200); checks++;

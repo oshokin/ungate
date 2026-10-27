@@ -96,10 +96,10 @@ describe('routes-auth', () => {
 		const login = await app.inject({
 			method: 'POST',
 			url: '/auth/minimax/login',
-			payload: { apiKey: ' key ', baseUrl: ' https://m ' }
+			payload: { apiKey: ' key ', baseUrl: ' https://api.minimax.io ' }
 		});
 		expect(login.json()).toEqual({ ok: true });
-		expect(providerUpsertApiKeyMock).toHaveBeenCalledWith('minimax', 'key', 'https://m');
+		expect(providerUpsertApiKeyMock).toHaveBeenCalledWith('minimax', 'key', 'https://api.minimax.io');
 
 		const logout = await app.inject({ method: 'POST', url: '/auth/minimax/logout' });
 		expect(logout.json()).toEqual({ ok: true });

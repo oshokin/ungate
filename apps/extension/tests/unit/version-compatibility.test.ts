@@ -17,12 +17,19 @@ afterEach(async () => {
 	server = undefined;
 });
 
-async function start(health: unknown) {
+async function start(health: unknown, modern = false) {
 	const requests: string[] = [];
 	server = createServer((request, response) => {
 		requests.push(request.url!);
 		response.setHeader('Content-Type', 'application/json');
-		response.end(JSON.stringify(request.url === '/health' ? health : { ok: true }));
+		if (request.url === '/health') {
+			response.end(JSON.stringify(modern ? { status: 'ok', service: 'ungate' } : health));
+		} else if (request.url === '/admin/health') {
+			expect(request.headers.authorization).toBe('Bearer test-admin');
+			response.end(JSON.stringify(health));
+		} else {
+			response.end(JSON.stringify({ ok: true }));
+		}
 	});
 	await new Promise<void>((resolve) => server!.listen(0, '127.0.0.1', resolve));
 	const address = server.address();
@@ -46,15 +53,18 @@ describe('shared API compatibility over real HTTP', () => {
 		}
 	});
 	it('allows management only after release and protocol match', async () => {
-		const { port, requests } = await start({
-			service: 'ungate',
-			pid: 123,
-			version: UNGATE_VERSION,
-			protocolVersion: API_PROTOCOL_VERSION
-		});
+		const { port, requests } = await start(
+			{
+				service: 'ungate',
+				pid: 123,
+				version: UNGATE_VERSION,
+				protocolVersion: API_PROTOCOL_VERSION
+			},
+			true
+		);
 		const send = vi.fn<(value: { status: number; error?: string }) => void>();
 		await new DashboardApiBridge(() => port, send).handle({ type: 'api-request', id: 'ok', method: 'GET', path: '/settings' });
-		expect(requests).toEqual(['/health', '/settings']);
+		expect(requests).toEqual(['/health', '/admin/health', '/settings']);
 		expect(send).toHaveBeenCalledWith({ type: 'api-response', id: 'ok', status: 200, body: { ok: true } });
 	});
 	it('offers to replace an older protocol from the same release', () => {

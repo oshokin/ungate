@@ -10,10 +10,11 @@ export class OpenAiMappedChatHandler {
 	static async handle(
 		openaiBody: OpenAIChatRequest,
 		resolvedModel: ModelMappingConfig,
-		reply: FastifyReply
+		reply: FastifyReply,
+		signal?: AbortSignal
 	): Promise<FastifyReply> {
 		const upstreamBody = CompletionModelRouting.buildOpenAiUpstreamBody(openaiBody, resolvedModel);
-		const { response, context } = await proxyOpenAIRequest(upstreamBody, 'openai');
+		const { response, context } = await proxyOpenAIRequest(upstreamBody, 'openai', signal);
 
 		if (!response.ok) {
 			const errorMessage = await CompletionErrorMapper.openAiUpstreamErrorMessage(response);
