@@ -25,7 +25,9 @@ export class ManagedProcess {
 			}
 			if (process.platform === 'win32') {
 				const raw = execFileSync(
-					'powershell.exe',
+					process.env.SystemRoot
+						? path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+						: 'powershell.exe',
 					[
 						'-NoProfile',
 						'-NonInteractive',
@@ -38,9 +40,21 @@ export class ManagedProcess {
 
 				return result.ExecutablePath?.toLowerCase() === executable.toLowerCase() && !!result.CommandLine?.includes(marker);
 			}
-			const command = execFileSync('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8', timeout: 3000 }).trim();
+			const command = execFileSync('ps', ['-p', String(pid), '-o', 'command='], {
+				encoding: 'utf8',
+				timeout: 3000
+			}).trim();
+			const resolvedExecutable = execFileSync('ps', ['-p', String(pid), '-o', 'comm='], {
+				encoding: 'utf8',
+				timeout: 3000
+			}).trim();
 
-			return command.startsWith(`${executable} `) && command.includes(marker);
+			return (
+				!!command &&
+				!!resolvedExecutable &&
+				fs.realpathSync(resolvedExecutable) === fs.realpathSync(executable) &&
+				command.includes(marker)
+			);
 		} catch {
 			return false;
 		}

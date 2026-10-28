@@ -1,13 +1,13 @@
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const result = spawnSync(
 	process.execPath,
 	[
 		'--import',
-		require.resolve('tsx'),
+		pathToFileURL(require.resolve('tsx')).href,
 		fileURLToPath(new URL('./build-package/main.ts', import.meta.url)),
 		...process.argv.slice(2)
 	],

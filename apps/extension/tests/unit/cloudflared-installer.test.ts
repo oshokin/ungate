@@ -50,7 +50,9 @@ describe('CloudflaredInstaller', () => {
 
 		expect(installed).toBe(binaryPath);
 		expect(fs.readFileSync(binaryPath, 'utf8')).toBe('verified-cloudflared');
-		expect(fs.statSync(binaryPath).mode & 0o777).toBe(0o755);
+		const expectedMode = originalPlatform === 'win32' ? fs.statSync(binaryPath).mode & 0o777 : 0o755;
+
+		expect(fs.statSync(binaryPath).mode & 0o777).toBe(expectedMode);
 		expect(fs.readFileSync(`${binaryPath}.sha256`, 'utf8')).toBe(LINUX_X64_SHA256);
 		expect(CloudflaredInstaller.isPinnedInstall(binaryPath)).toBe(true);
 

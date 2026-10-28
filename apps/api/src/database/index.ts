@@ -59,11 +59,21 @@ function acquireMigrationLock(dbPath: string): () => void {
 		} catch (error) {
 			const code = (error as NodeJS.ErrnoException).code;
 			if (code !== 'EEXIST') throw error;
-			const stat = lstatSync(lockPath);
-			if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`Unsafe migration lock path: "${lockPath}"`);
-			const owner = Number.parseInt(readFileSync(lockPath, 'utf8').trim(), 10);
-			if (!Number.isInteger(owner) || owner <= 0 || !isProcessAlive(owner)) {
-				unlinkSync(lockPath);
+			let owner: number;
+			try {
+				const stat = lstatSync(lockPath);
+				if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`Unsafe migration lock path: "${lockPath}"`);
+				owner = Number.parseInt(readFileSync(lockPath, 'utf8').trim(), 10);
+			} catch (readError) {
+				if ((readError as NodeJS.ErrnoException).code === 'ENOENT') continue;
+				throw readError;
+			}
+			if (Number.isInteger(owner) && owner > 0 && !isProcessAlive(owner)) {
+				try {
+					unlinkSync(lockPath);
+				} catch (unlinkError) {
+					if ((unlinkError as NodeJS.ErrnoException).code !== 'ENOENT') throw unlinkError;
+				}
 				continue;
 			}
 			if (Date.now() >= deadline) throw new Error(`Timed out waiting for database migrations held by PID ${owner}`);
@@ -95,8 +105,14 @@ function prepareDatabasePath(dbPath: string): void {
 	protectPath(directory, 0o700);
 
 	if (!existsSync(dbPath)) {
-		const fd = openSync(dbPath, constants.O_CREAT | constants.O_EXCL | constants.O_RDWR, 0o600);
-		closeSync(fd);
+		try {
+			const fd = openSync(dbPath, constants.O_CREAT | constants.O_EXCL | constants.O_RDWR, 0o600);
+			closeSync(fd);
+		} catch (error) {
+			// A parallel starter may create the database after existsSync().
+			// The path is validated below before it is opened by SQLite.
+			if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+		}
 	}
 	assertSafeOwnedPath(dbPath, 'database');
 	protectPath(dbPath, 0o600);

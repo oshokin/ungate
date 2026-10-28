@@ -1,5 +1,5 @@
 import { blocksDashboardUi, successNotice } from './action-policy';
-import { showToast } from './toast.svelte';
+import { showToast } from './toast-store.svelte';
 import { postExtensionMessage } from './vscode';
 
 import type { DashboardAction, DashboardActionResult } from '@ungate/shared/frontend';

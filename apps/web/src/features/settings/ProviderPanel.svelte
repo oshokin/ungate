@@ -1,6 +1,6 @@
 <script lang="ts">
 import ProviderIcon from '$shared/ProviderIcon.svelte';
-import { showToast } from '$shared/toast.svelte';
+import { showToast } from '$shared/toast-store.svelte';
 
 import ChatGPTAuthSection from '../auth/ChatGPTAuthSection.svelte';
 import ClaudeAuthSection from '../auth/ClaudeAuthSection.svelte';

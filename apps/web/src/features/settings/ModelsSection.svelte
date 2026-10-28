@@ -7,7 +7,7 @@ import IconRefreshCw from 'virtual:icons/lucide/refresh-cw';
 import IconTrash2 from 'virtual:icons/lucide/trash-2';
 import IconTriangleAlert from 'virtual:icons/lucide/triangle-alert';
 
-import { createToastWatcher } from '$shared/toast.svelte';
+import { createToastWatcher } from '$shared/toast-store.svelte';
 import { getSavedSettingsModelId, saveSettingsModelId } from '$shared/vscode';
 
 import { groupModelFamilies } from './model-discovery';

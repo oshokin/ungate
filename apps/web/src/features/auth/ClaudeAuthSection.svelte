@@ -5,7 +5,7 @@ import IconLoader from 'virtual:icons/lucide/loader-circle';
 import IconLogOut from 'virtual:icons/lucide/log-out';
 
 import { Api } from '$shared/api';
-import { createToastWatcher } from '$shared/toast.svelte';
+import { createToastWatcher } from '$shared/toast-store.svelte';
 import { postExtensionMessage } from '$shared/vscode';
 
 type Phase = 'idle' | 'pending-code' | 'completing';

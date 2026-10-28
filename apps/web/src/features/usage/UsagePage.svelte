@@ -2,7 +2,7 @@
 import { onMount } from 'svelte';
 
 import ProviderIcon from '$shared/ProviderIcon.svelte';
-import { createToastWatcher } from '$shared/toast.svelte';
+import { createToastWatcher } from '$shared/toast-store.svelte';
 
 import { getUsageStore } from './usage-store.svelte';
 

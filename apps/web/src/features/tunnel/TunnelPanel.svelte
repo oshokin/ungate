@@ -7,7 +7,7 @@ import IconEyeOff from 'virtual:icons/lucide/eye-off';
 import { getActionStore, performAction, runDashboardAction } from '$shared/actions.svelte';
 import { Api } from '$shared/api';
 import { getServiceStore } from '$shared/service-store.svelte';
-import { createToastWatcher, showToast } from '$shared/toast.svelte';
+import { createToastWatcher, showToast } from '$shared/toast-store.svelte';
 
 import { getTunnelStore } from './tunnel-store.svelte';
 

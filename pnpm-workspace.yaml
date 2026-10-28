@@ -4,7 +4,7 @@ packages:
   - 'scripts'
 allowBuilds:
   '@vscode/vsce-sign': false
-  better-sqlite3: true
+  better-sqlite3: false
   cloudflared: false
   esbuild: true
   keytar: false

@@ -54,12 +54,14 @@ describe('CrossProcessLock on the real filesystem', () => {
 	it('recovers a dead owner and never deletes a successor from an old release callback', async () => {
 		const dead = spawnSync(process.execPath, ['-e', '']);
 		const target = path.join(temporary, 'state.lock');
-		fs.writeFileSync(target, JSON.stringify({ pid: dead.pid, token: 'dead' }));
+		fs.mkdirSync(target);
+		fs.writeFileSync(path.join(target, 'owner.json'), JSON.stringify({ pid: dead.pid, token: 'dead' }));
 		const release = await CrossProcessLock.acquire('state.lock');
-		fs.unlinkSync(target);
-		fs.writeFileSync(target, JSON.stringify({ pid: process.pid, token: 'successor' }));
+		fs.rmSync(target, { recursive: true });
+		fs.mkdirSync(target);
+		fs.writeFileSync(path.join(target, 'owner.json'), JSON.stringify({ pid: process.pid, token: 'successor' }));
 		release();
-		const successor = JSON.parse(fs.readFileSync(target, 'utf8')) as { token: string };
+		const successor = JSON.parse(fs.readFileSync(path.join(target, 'owner.json'), 'utf8')) as { token: string };
 		expect(successor.token).toBe('successor');
 	});
 

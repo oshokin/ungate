@@ -8,7 +8,7 @@ import { resolve, join } from 'node:path';
 
 import { runtimeStateSchema } from '@ungate/shared';
 
-const fixture = resolve(process.argv[2] || '/tmp/ungate-coordination-worker.cjs');
+const fixture = resolve(process.argv[2] || join(tmpdir(), 'ungate-coordination-worker.cjs'));
 const directory = mkdtempSync(join(tmpdir(), 'ungate-coordination-smoke-'));
 /** @type {import('node:child_process').ChildProcess[]} */
 const children = [];

@@ -6,7 +6,7 @@ import IconLogOut from 'virtual:icons/lucide/log-out';
 import IconRotateCcw from 'virtual:icons/lucide/rotate-ccw';
 
 import { Api } from '$shared/api';
-import { createToastWatcher } from '$shared/toast.svelte';
+import { createToastWatcher } from '$shared/toast-store.svelte';
 import { postExtensionMessage } from '$shared/vscode';
 
 interface Props {

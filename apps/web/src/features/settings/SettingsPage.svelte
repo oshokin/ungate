@@ -1,6 +1,6 @@
 <script lang="ts">
 import { getServiceStore } from '$shared/service-store.svelte';
-import { createToastWatcher, showToast } from '$shared/toast.svelte';
+import { createToastWatcher, showToast } from '$shared/toast-store.svelte';
 
 import TunnelPanel from '../tunnel/TunnelPanel.svelte';
 

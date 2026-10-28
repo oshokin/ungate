@@ -1,7 +1,7 @@
 <script lang="ts">
 import IconX from 'virtual:icons/lucide/x';
 
-import { getToastStore } from './toast.svelte';
+import { getToastStore } from './toast-store.svelte';
 
 const toast = getToastStore();
 </script>

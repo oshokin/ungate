@@ -17,40 +17,59 @@ export class CrossProcessLock {
 		const target = path.join(config.baseDir, lockName);
 		const guard = `${target}.recovery`;
 		const owner: Owner = { pid: process.pid, token: randomUUID() };
-		const temporary = `${target}.${owner.token}.partial`;
-		fs.writeFileSync(temporary, JSON.stringify(owner), { mode: 0o600, flag: 'wx' });
 		const started = Date.now();
-		try {
-			while (true) {
-				if (!fs.existsSync(guard)) {
-					try {
-						fs.linkSync(temporary, target);
-						let released = false;
+		while (true) {
+			if (!fs.existsSync(guard)) {
+				let created = false;
+				try {
+					fs.mkdirSync(target, { mode: 0o700 });
+					created = true;
+					fs.writeFileSync(this.ownerPath(target), JSON.stringify(owner), { mode: 0o600, flag: 'wx' });
+					let released = false;
 
-						return () => {
-							if (released) return;
-							released = true;
-							if (this.readOwner(target)?.token === owner.token) fs.unlinkSync(target);
-						};
-					} catch (error) {
-						if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+					return () => {
+						if (released) return;
+						released = true;
+						if (this.readOwner(target)?.token === owner.token) this.removeDirectory(target);
+					};
+				} catch (error) {
+					if (created) this.removeDirectory(target);
+					if (!this.isContention(error)) {
+						throw error;
 					}
-					this.recoverDeadOwner(target, guard);
 				}
-				if (Date.now() - started >= timeoutMs) throw new Error(`Timed out waiting for Ungate lock: ${lockName}`);
-				await sleep(20);
+				this.recoverDeadOwner(target, guard);
 			}
-		} finally {
-			fs.rmSync(temporary, { force: true });
+			if (Date.now() - started >= timeoutMs) throw new Error(`Timed out waiting for Ungate lock: ${lockName}`);
+			await sleep(20);
 		}
+	}
+
+	private static isContention(error: unknown): boolean {
+		const code = (error as NodeJS.ErrnoException).code;
+
+		return code === 'EEXIST' || (process.platform === 'win32' && (code === 'EPERM' || code === 'ENOTEMPTY'));
 	}
 
 	private static readOwner(target: string): Owner | null {
 		try {
-			return JSON.parse(fs.readFileSync(target, 'utf8')) as Owner;
+			const ownerFile = fs.lstatSync(target).isDirectory() ? this.ownerPath(target) : target;
+			const parsed = JSON.parse(fs.readFileSync(ownerFile, 'utf8')) as Partial<Owner>;
+
+			return Number.isSafeInteger(parsed.pid) && typeof parsed.token === 'string'
+				? { pid: parsed.pid!, token: parsed.token }
+				: null;
 		} catch {
 			return null;
 		}
+	}
+
+	private static ownerPath(target: string): string {
+		return path.join(target, 'owner.json');
+	}
+
+	private static removeDirectory(target: string): void {
+		fs.rmSync(target, { recursive: true, force: true, maxRetries: 3, retryDelay: 10 });
 	}
 
 	private static alive(pid: number): boolean {
@@ -66,25 +85,20 @@ export class CrossProcessLock {
 
 	private static recoverDeadOwner(target: string, guard: string): void {
 		try {
-			fs.mkdirSync(guard);
-		} catch {
+			fs.mkdirSync(guard, { mode: 0o700 });
+		} catch (error) {
+			if (!this.isContention(error)) throw error;
+
 			return;
 		}
 		try {
 			// Serialize reapers and re-read ownership: a successor must never be unlinked.
 			const owner = this.readOwner(target);
-			if (owner && !this.alive(owner.pid)) fs.unlinkSync(target);
-			else if (fs.existsSync(target) && fs.statSync(target).isDirectory()) {
-				const pidFile = path.join(target, 'pid');
-				if (fs.existsSync(pidFile) && !this.alive(Number(fs.readFileSync(pidFile, 'utf8')))) {
-					fs.unlinkSync(pidFile);
-					fs.rmdirSync(target);
-				}
-			}
+			if (owner && !this.alive(owner.pid)) this.removeDirectory(target);
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
 		} finally {
-			fs.rmdirSync(guard);
+			this.removeDirectory(guard);
 		}
 	}
 }

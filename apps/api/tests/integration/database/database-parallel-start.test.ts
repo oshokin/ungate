@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 
 import BetterSqlite3 from 'better-sqlite3';
@@ -22,7 +23,7 @@ describe('database parallel startup', () => {
 		const dbPath = join(directory, 'data.db');
 		const worker = join(import.meta.dirname, 'parallel-start-worker.ts');
 		const repoRoot = join(process.cwd(), '..', '..');
-		const tsxLoader = createRequire(join(repoRoot, 'scripts', 'package.json')).resolve('tsx');
+		const tsxLoader = pathToFileURL(createRequire(join(repoRoot, 'scripts', 'package.json')).resolve('tsx')).href;
 		const environment = {
 			...process.env,
 			DB_PATH: dbPath,

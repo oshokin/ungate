@@ -255,6 +255,7 @@ export class ApiServer {
 			return;
 		}
 
+		this.ensureBaseDir();
 		const cwd = this.getServerCwd();
 		this.stdoutBuffer = '';
 		const logPath = path.join(config.baseDir, `api-${randomUUID()}.log`);
@@ -625,6 +626,7 @@ export class ApiServer {
 	}
 
 	private rotateLogs(): void {
+		this.ensureBaseDir();
 		const active = this.logPath;
 		const logs = fs
 			.readdirSync(config.baseDir)
@@ -633,6 +635,11 @@ export class ApiServer {
 			.filter((file) => file !== active)
 			.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
 		for (const file of logs.slice(5)) fs.rmSync(file, { force: true });
+	}
+
+	private ensureBaseDir(): void {
+		fs.mkdirSync(config.baseDir, { recursive: true, mode: 0o700 });
+		if (process.platform !== 'win32') fs.chmodSync(config.baseDir, 0o700);
 	}
 
 	private async ensureNativeDeps(): Promise<void> {
