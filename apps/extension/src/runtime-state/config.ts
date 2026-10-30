@@ -13,35 +13,45 @@ export const config = {
 	runtimeState: {
 		// Max age for a client heartbeat before the window is considered stale.
 		staleClientMs: 30000,
-		// Max time to wait for lock acquisition before forcing lock recovery.
+		// Default lock wait; only a provably dead owner is recovered.
 		lockTimeoutMs: 1500,
 		// Minimum interval between heartbeat writes for the same window.
 		heartbeatThrottleMs: 2000
 	},
+	locks: {
+		commandsTimeoutMs: 180_000,
+		startupTimeoutMs: 120_000
+	},
 	apiServer: {
+		startupTimeoutMs: 30_000,
+		shutdownRequestTimeoutMs: 5_000,
+		shutdownTimeoutMs: 10_000,
+		terminationGraceMs: 2_000,
+		terminationTimeoutMs: 5_000,
+		pollIntervalMs: 100,
+		healthFailureThreshold: 3,
+		stdoutBufferBytes: 8_192,
+		retainedProcessLogs: 5,
 		// Interval between API /health checks while process is running.
 		healthCheckIntervalMs: 1000,
 		// Grace period before stopping API when no live windows remain.
 		noClientsGracePeriodMs: 3000,
 		// Delay before spawning API again after restart/clean exit.
 		restartDelayMs: 500,
-		// Request timeout for periodic API health checks.
-		healthCheckRequestTimeoutMs: 2000,
 		// Request timeout used when validating an existing API port.
-		portHealthRequestTimeoutMs: 1500
+		portHealthRequestTimeoutMs: 1500,
+		adminRequestTimeoutMs: 3_000
 	},
 	tunnelManager: {
-		// Interval for checking if tunnel should auto-stop without live windows.
-		autoStopCheckIntervalMs: 1500
+		monitorIntervalMs: 1_000,
+		startupTimeoutMs: 45_000,
+		startupPollIntervalMs: 200,
+		stopPollIntervalMs: 100
 	},
 	extensionController: {
 		// Interval between heartbeat updates from the current window.
 		heartbeatIntervalMs: 2000,
 		// Interval for pulling shared runtime state and syncing UI/actions.
-		runtimeSyncIntervalMs: 2000,
-		// Max wait time for tunnel URL while startup is in progress.
-		tunnelWaitTimeoutMs: 30000,
-		// Poll interval while waiting for tunnel URL readiness.
-		tunnelWaitPollIntervalMs: 250
+		runtimeSyncIntervalMs: 2000
 	}
 };

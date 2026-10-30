@@ -28,9 +28,17 @@ vi.mock('../../src/runtime-state/shared-log-store', () => {
 		SharedLogStore: {
 			append(source: 'api' | 'tunnel', entry: { timestamp: number; level: 'info' | 'warn' | 'error'; message: string }) {
 				sharedLogs[source].push(entry);
+
+				return `${source}-${sharedLogs[source].length}`;
 			},
 			readAll(source: 'api' | 'tunnel') {
 				return [...sharedLogs[source]];
+			},
+			readSnapshot(source: 'api' | 'tunnel') {
+				return {
+					entries: [...sharedLogs[source]],
+					entryIds: sharedLogs[source].map((_, index) => `${source}-${index + 1}`)
+				};
 			},
 			readSince(source: 'api' | 'tunnel', byteOffset: number) {
 				const entries = sharedLogs[source].slice(byteOffset);
@@ -53,6 +61,7 @@ vi.mock('vscode', () => {
 	}
 
 	return {
+		workspace: { getConfiguration: () => ({ inspect: () => undefined }) },
 		window: {
 			createWebviewPanel: createWebviewPanelMock
 		},
@@ -224,10 +233,13 @@ describe('Dashboard.setPort', () => {
 
 		dashboardB.sendInitialState({ status: 'stopped', url: null, error: null });
 
-		expect(panel.webview.postMessage).toHaveBeenCalledWith({
-			type: 'log-bulk',
-			source: 'api',
-			entries: [{ timestamp: 1, level: 'info', message: 'started elsewhere' }]
-		});
+		expect(panel.webview.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: 'log-bulk',
+				source: 'api',
+				entries: [{ timestamp: 1, level: 'info', message: 'started elsewhere' }],
+				entryIds: [expect.any(String)]
+			})
+		);
 	});
 });

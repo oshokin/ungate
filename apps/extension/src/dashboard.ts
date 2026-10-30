@@ -13,6 +13,7 @@ import {
 import * as vscode from 'vscode';
 
 import { DashboardApiBridge } from './dashboard-api-bridge';
+import { dashboardLogEntryLimit } from './dashboard-settings';
 import { SharedLogStore } from './runtime-state/shared-log-store';
 
 const LOG_POLL_INTERVAL_MS = 500;
@@ -109,9 +110,9 @@ export class Dashboard {
 	}
 
 	pushLog(source: 'api' | 'tunnel', entry: LogEntry): void {
-		SharedLogStore.append(source, entry);
+		const entryId = SharedLogStore.append(source, entry);
 
-		this.panel?.webview.postMessage({ type: 'log', source, entry });
+		this.panel?.webview.postMessage({ type: 'log', source, entry, entryId, maxEntries: dashboardLogEntryLimit() });
 	}
 
 	clearLogs(source: 'api' | 'tunnel'): void {
@@ -206,9 +207,10 @@ export class Dashboard {
 	}
 
 	private sendBufferedLogs(source: 'api' | 'tunnel'): void {
-		const entries = SharedLogStore.readAll(source);
+		const maxEntries = dashboardLogEntryLimit();
+		const { entries, entryIds } = SharedLogStore.readSnapshot(source, maxEntries);
 
-		this.panel?.webview.postMessage({ type: 'log-bulk', source, entries });
+		this.panel?.webview.postMessage({ type: 'log-bulk', source, entries, entryIds, maxEntries });
 	}
 
 	private startLogPoll(): void {

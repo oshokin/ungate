@@ -24,6 +24,7 @@ if (
 		} else if (operation === 'test') {
 			runPnpm(['--filter', 'ungate', 'test']);
 			runPnpm(['--filter', '@ungate/api', 'test']);
+			runPnpm(['--filter', '@ungate/web', 'test']);
 		} else if (operation === 'build') build();
 		else if (operation === 'check') check();
 		else {

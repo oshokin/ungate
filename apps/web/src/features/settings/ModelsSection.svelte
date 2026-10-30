@@ -256,6 +256,10 @@ function cancelDelete() {
 	confirmDeleteIndex = null;
 }
 
+function showDeleteDialog(dialog: HTMLDialogElement): void {
+	dialog.showModal();
+}
+
 function confirmDelete() {
 	if (confirmDeleteIndex === null) {
 		return;
@@ -293,15 +297,15 @@ $effect(() => {
 });
 </script>
 
-<div class="card preset-tonal-surface border border-surface-700/30 p-5 space-y-4">
+<div class="ug-panel p-5 space-y-4">
 	<div class="flex flex-wrap items-center justify-between gap-3">
 		<div class="space-y-1">
 			<p class="text-sm font-semibold">Models · {getProviderLabel(selectedProvider)}</p>
-			<p class="text-xs text-surface-400"> Use these IDs when adding custom models in Cursor. </p>
+			<p class="text-xs ug-description"> Use these IDs when adding custom models in Cursor. </p>
 		</div>
 		<div class="flex flex-wrap items-center gap-2">
 			<button
-				class="btn btn-sm preset-outlined-surface-700 hover:preset-filled-surface-500"
+				class="ug-button"
 				type="button"
 				onclick={() => void discoveryStore.sync(selectedProvider)}
 				disabled={discoveryState.loading || restarting}>
@@ -309,13 +313,13 @@ $effect(() => {
 				{discoveryState.loading ? 'Syncing' : 'Sync Models'}
 			</button>
 			<button
-				class="btn btn-sm preset-outlined-surface-700 hover:preset-filled-surface-500"
+				class="ug-button"
 				type="button"
 				onclick={addModel}>
 				Add Model
 			</button>
 			<button
-				class="btn btn-sm preset-filled-primary-500"
+				class="ug-button ug-primary"
 				type="button"
 				onclick={onSave}
 				disabled={saving || restarting}>
@@ -325,7 +329,7 @@ $effect(() => {
 	</div>
 
 	{#if discoveryState.summary}
-		<div class="card preset-tonal-primary p-3 text-sm space-y-1">
+		<div class="ug-notice p-3 text-sm space-y-1">
 			<p>
 				{#if discoveryState.usingFallback}
 					Using configured fallback · {discoveryState.summary.existing} models kept
@@ -340,12 +344,12 @@ $effect(() => {
 				{/if}
 			</p>
 			{#if discoveryState.summary.added > 0}
-				<p class="text-xs text-primary-200">
+				<p class="text-xs ug-description">
 					{discoveryState.autoSaved ? 'New models were saved automatically.' : 'Review the additions, then save to apply.'}
 				</p>
 			{/if}
 			{#if discoveryState.summary.renamed.length > 0}
-				<details class="text-xs text-primary-200">
+				<details class="text-xs ug-description">
 					<summary class="cursor-pointer">
 						{discoveryState.summary.renamed.length} ID
 						{discoveryState.summary.renamed.length === 1 ? 'conflict was' : 'conflicts were'} kept as separate models
@@ -359,11 +363,11 @@ $effect(() => {
 			{/if}
 			{#if notListedModelCount > 0}
 				<div class="flex flex-wrap items-center justify-between gap-2 pt-1">
-					<p class="text-xs text-primary-200">
+					<p class="text-xs ug-description">
 						{notListedModelCount} configured {notListedModelCount === 1 ? 'model is' : 'models are'} not listed by the provider.
 					</p>
 					<button
-						class="btn btn-sm preset-outlined-error-500"
+						class="ug-button ug-danger"
 						type="button"
 						onclick={() => discoveryStore.removeNotListed(selectedProvider)}>
 						<IconTrash2 class="size-4" />
@@ -372,34 +376,34 @@ $effect(() => {
 				</div>
 			{:else if discoveryState.removedNotListed.length > 0}
 				<div class="flex flex-wrap items-center justify-between gap-2 pt-1">
-					<p class="text-xs text-primary-200">
+					<p class="text-xs ug-description">
 						{discoveryState.removedNotListed.length} not-listed
 						{discoveryState.removedNotListed.length === 1 ? 'model was' : 'models were'} removed from the draft.
 					</p>
 					<button
-						class="btn btn-sm preset-outlined-surface-700 hover:preset-filled-surface-500"
+						class="ug-button"
 						type="button"
 						onclick={() => discoveryStore.undoRemoveNotListed(selectedProvider)}>Undo</button>
 				</div>
 			{/if}
 			{#if discoveryState.catalogMessage}
-				<p class="text-xs text-primary-200">{discoveryState.catalogMessage}</p>
+				<p class="text-xs ug-description">{discoveryState.catalogMessage}</p>
 			{/if}
 		</div>
 	{/if}
 
 	<div class="space-y-3">
 		{#if modelFamilies.length === 0}
-			<div class="card preset-tonal-surface border border-surface-700/30 p-4 text-sm text-surface-400">
+			<div class="ug-panel p-4 text-sm ug-description">
 				No models for {getProviderLabel(selectedProvider)}.
 			</div>
 		{:else}
 			<div class="space-y-2">
 				{#each modelFamilies as group (group.key)}
-					<section class="rounded-container border border-surface-700/40 bg-surface-900/20">
+					<section class="rounded-md border ug-border">
 						<button
 							type="button"
-							class="flex w-full items-center gap-3 rounded-container px-4 py-3 text-left hover:bg-surface-700/20"
+							class="flex w-full items-center gap-3 rounded-md px-4 py-3 text-left ug-hover"
 							aria-expanded={expandedFamilyKey === group.key}
 							aria-controls={`model-family-${group.key.replace(/[^a-zA-Z0-9_-]/g, '-')}`}
 							onclick={() => toggleFamily(group)}>
@@ -407,24 +411,22 @@ $effect(() => {
 								<span class="flex flex-wrap items-center gap-2">
 									<span class="text-sm font-semibold">{group.label}</span>
 									{#if group.isProviderDefault}
-										<span class="rounded-full bg-primary-500/15 px-2 py-0.5 text-[11px] text-primary-200">
-											Provider default
-										</span>
+										<span class="rounded-full ug-badge px-2 py-0.5 text-[11px] ug-description"> Provider default </span>
 									{/if}
 									{#if discoveryStore.isNotListed(selectedProvider, group.upstreamModel)}
-										<span class="inline-flex items-center gap-1 text-[11px] text-warning-200">
-											<span class="inline-block size-1.5 rounded-full bg-warning-500"></span>
+										<span class="inline-flex items-center gap-1 text-[11px] ug-warning">
+											<span class="inline-block size-1.5 rounded-full ug-warning-dot"></span>
 											Not listed
 										</span>
 									{/if}
 								</span>
-								<span class="mt-0.5 block text-xs text-surface-400">
+								<span class="mt-0.5 block text-xs ug-description">
 									{reasoningCount(group)} reasoning {reasoningCount(group) === 1 ? 'level' : 'levels'} ·
 									{group.supportsFast ? 'Standard / Fast' : 'Standard'} · {variantCount(group)}
 									{variantCount(group) === 1 ? 'variant' : 'variants'}
 								</span>
 								{#if group.description}
-									<span class="mt-1 block text-xs text-surface-400">{group.description}</span>
+									<span class="mt-1 block text-xs ug-description">{group.description}</span>
 								{/if}
 							</span>
 							<IconChevronDown
@@ -434,10 +436,10 @@ $effect(() => {
 						{#if expandedFamilyKey === group.key}
 							<div
 								id={`model-family-${group.key.replace(/[^a-zA-Z0-9_-]/g, '-')}`}
-								class="border-t border-surface-700/40 p-3 sm:p-4">
-								<div class="overflow-x-auto rounded-container border border-surface-700/40">
+								class="border-t ug-border p-3 sm:p-4">
+								<div class="overflow-x-auto rounded-md border ug-border">
 									<table class="w-full min-w-[34rem] border-collapse text-left text-xs">
-										<thead class="bg-surface-800/50 text-surface-400">
+										<thead class="ug-table-heading ug-description">
 											<tr>
 												<th class="px-3 py-2 font-medium">Reasoning</th>
 												<th class="px-3 py-2 font-medium">Standard</th>
@@ -446,8 +448,8 @@ $effect(() => {
 										</thead>
 										<tbody>
 											{#each group.rows as row}
-												<tr class="border-t border-surface-700/30">
-													<th class="whitespace-nowrap px-3 py-2 font-medium text-surface-300">{row.label}</th>
+												<tr class="border-t ug-border">
+													<th class="whitespace-nowrap px-3 py-2 font-medium ug-description">{row.label}</th>
 													<td class="px-2 py-1.5">
 														{#if row.standard.length}
 															<div class="space-y-1">
@@ -455,20 +457,20 @@ $effect(() => {
 																	<div class="flex items-center gap-1">
 																		<button
 																			type="button"
-																			class="min-w-0 flex-1 rounded-container px-2 py-1.5 text-left font-mono {activeModelIndex ===
+																			class="min-w-0 flex-1 rounded-md px-2 py-1.5 text-left font-mono {activeModelIndex ===
 																			item.index
-																				? 'bg-primary-500/20 text-primary-100 ring-1 ring-primary-500/60'
-																				: 'hover:bg-surface-700/40'}"
+																				? 'ug-selection'
+																				: 'ug-hover'}"
 																			aria-label={`Select ${item.model.id || 'unsaved model'} ${row.label} Standard`}
 																			onclick={() => selectVariant(item)}>
 																			<span class="block truncate">{item.model.id || 'Unsaved model'}</span>
 																			{#if isProviderDefaultVariant(group, item)}
-																				<span class="font-sans text-[10px] text-primary-200">Provider default</span>
+																				<span class="font-sans text-[10px] ug-description">Provider default</span>
 																			{/if}
 																		</button>
 																		<button
 																			type="button"
-																			class="btn btn-sm px-2"
+																			class="ug-button px-2"
 																			aria-label={`Copy ${item.model.id}`}
 																			title={copiedId === item.model.id ? 'Copied' : 'Copy model ID'}
 																			disabled={!item.model.id.trim()}
@@ -483,31 +485,31 @@ $effect(() => {
 																{/each}
 															</div>
 														{:else}
-															<span class="px-2 text-surface-500">Not available</span>
+															<span class="px-2 ug-foreground">Not available</span>
 														{/if}
 													</td>
 													{#if group.supportsFast}
-														<td class="border-l border-surface-700/20 px-2 py-1.5">
+														<td class="border-l ug-border px-2 py-1.5">
 															{#if row.fast.length}
 																<div class="space-y-1">
 																	{#each row.fast as item}
 																		<div class="flex items-center gap-1">
 																			<button
 																				type="button"
-																				class="min-w-0 flex-1 rounded-container px-2 py-1.5 text-left font-mono {activeModelIndex ===
+																				class="min-w-0 flex-1 rounded-md px-2 py-1.5 text-left font-mono {activeModelIndex ===
 																				item.index
-																					? 'bg-primary-500/20 text-primary-100 ring-1 ring-primary-500/60'
-																					: 'hover:bg-surface-700/40'}"
+																					? 'ug-selection'
+																					: 'ug-hover'}"
 																				aria-label={`Select ${item.model.id || 'unsaved model'} ${row.label} Fast`}
 																				onclick={() => selectVariant(item)}>
 																				<span class="block truncate">{item.model.id || 'Unsaved model'}</span>
 																				{#if isProviderDefaultVariant(group, item)}
-																					<span class="font-sans text-[10px] text-primary-200">Provider default</span>
+																					<span class="font-sans text-[10px] ug-description">Provider default</span>
 																				{/if}
 																			</button>
 																			<button
 																				type="button"
-																				class="btn btn-sm px-2"
+																				class="ug-button px-2"
 																				aria-label={`Copy ${item.model.id}`}
 																				title={copiedId === item.model.id ? 'Copied' : 'Copy model ID'}
 																				disabled={!item.model.id.trim()}
@@ -522,7 +524,7 @@ $effect(() => {
 																	{/each}
 																</div>
 															{:else}
-																<span class="px-2 text-surface-500">Not available</span>
+																<span class="px-2 ug-foreground">Not available</span>
 															{/if}
 														</td>
 													{/if}
@@ -537,15 +539,15 @@ $effect(() => {
 									{@const model = activeItem.model}
 									{@const index = activeItem.index}
 									<div
-										class="mt-3 space-y-3 rounded-container border border-surface-700/30 p-3"
+										class="mt-3 space-y-3 rounded-md border ug-border p-3"
 										aria-label={`Edit ${modelTitle(activeItem)}`}>
 										<div class="flex flex-wrap items-center justify-between gap-2">
 											<div>
 												<p class="text-sm font-medium">{modelTitle(activeItem)}</p>
-												<p class="text-xs text-surface-400">Selected model</p>
+												<p class="text-xs ug-description">Selected model</p>
 											</div>
 											<button
-												class="btn btn-sm preset-outlined-error-500"
+												class="ug-button ug-danger"
 												type="button"
 												onclick={() => requestDelete(model.id.trim() || model.label.trim() || 'Unsaved model', index)}>
 												<IconTrash2 class="size-4" />
@@ -554,7 +556,7 @@ $effect(() => {
 										</div>
 
 										{#if discoveryStore.isNotListed(selectedProvider, model.upstreamModel)}
-											<div class="flex items-start gap-2 rounded-container bg-warning-500/10 p-3 text-xs text-warning-200">
+											<div class="flex items-start gap-2 rounded-md ug-warning-note p-3 text-xs ug-warning">
 												<IconTriangleAlert class="mt-0.5 size-4 shrink-0" />
 												<span>
 													Not listed in the latest provider catalog. It may still work, so Ungate kept this model unchanged.
@@ -563,28 +565,28 @@ $effect(() => {
 										{/if}
 
 										<div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-											<label class="label">
-												<span class="label-text text-xs">Model ID</span>
+											<label class="ug-label">
+												<span class=" text-xs">Model ID</span>
 												<input
-													class="input text-sm font-mono"
+													class="ug-input text-sm font-mono"
 													type="text"
 													value={model.id}
 													oninput={(event) => updateModelAtIndex(index, 'id', inputValue(event))}
 													placeholder={example.id} />
 											</label>
-											<label class="label">
-												<span class="label-text text-xs">Label</span>
+											<label class="ug-label">
+												<span class=" text-xs">Label</span>
 												<input
-													class="input text-sm"
+													class="ug-input text-sm"
 													type="text"
 													value={model.label}
 													oninput={(event) => updateModelAtIndex(index, 'label', inputValue(event))}
 													placeholder={example.label} />
 											</label>
-											<label class="label md:col-span-2 xl:col-span-1">
-												<span class="label-text text-xs">Upstream Model</span>
+											<label class="ug-label md:col-span-2 xl:col-span-1">
+												<span class=" text-xs">Upstream Model</span>
 												<input
-													class="input text-sm font-mono"
+													class="ug-input text-sm font-mono"
 													type="text"
 													value={model.upstreamModel}
 													oninput={(event) => updateModelAtIndex(index, 'upstreamModel', inputValue(event))}
@@ -592,16 +594,16 @@ $effect(() => {
 											</label>
 										</div>
 
-										<details class="rounded-container border border-surface-700/30">
+										<details class="rounded-md border ug-border">
 											<summary class="cursor-pointer px-3 py-2 text-xs font-medium">Advanced options</summary>
 											<div
-												class="grid grid-cols-1 gap-4 border-t border-surface-700/30 p-3 {selectedProvider === 'openai'
+												class="grid grid-cols-1 gap-4 border-t ug-border p-3 {selectedProvider === 'openai'
 													? 'md:grid-cols-2'
 													: ''}">
-												<label class="label">
-													<span class="label-text text-xs">Reasoning Budget</span>
+												<label class="ug-label">
+													<span class=" text-xs">Reasoning Budget</span>
 													<select
-														class="select text-sm"
+														class="ug-select text-sm"
 														value={model.reasoningBudget ?? ''}
 														onchange={(event) => {
 															const value = selectValue(event);
@@ -613,10 +615,10 @@ $effect(() => {
 													</select>
 												</label>
 												{#if selectedProvider === 'openai'}
-													<label class="label">
-														<span class="label-text text-xs">Service Tier</span>
+													<label class="ug-label">
+														<span class=" text-xs">Service Tier</span>
 														<select
-															class="select text-sm"
+															class="ug-select text-sm"
 															value={model.serviceTier ?? ''}
 															onchange={(event) => {
 																const value = selectValue(event);
@@ -642,29 +644,38 @@ $effect(() => {
 </div>
 
 {#if confirmDeleteModelLabel}
-	<div class="fixed inset-0 z-30 flex items-center justify-center bg-surface-950/70 p-4">
-		<div class="card preset-tonal-surface border border-surface-700/30 w-full max-w-md p-5 space-y-4">
-			<p class="text-sm font-semibold">Remove model</p>
-			<p class="text-sm text-surface-400">
-				Remove <strong class="text-surface-50">{confirmDeleteModelLabel}</strong> from Ungate?
-			</p>
-			<p class="text-xs text-surface-400">The deletion takes effect after you save the model list.</p>
-			<div class="flex justify-end gap-2">
-				<button
-					class="btn btn-sm preset-outlined-surface-700 hover:preset-filled-surface-500"
-					type="button"
-					onclick={cancelDelete}>
-					Cancel
-				</button>
-				<button
-					class="btn btn-sm preset-outlined-error-500"
-					type="button"
-					disabled={confirmDeleteIndex === null}
-					onclick={confirmDelete}>
-					<IconTrash2 class="size-4" />
-					Remove
-				</button>
-			</div>
+	<dialog
+		class="ug-dialog space-y-4"
+		aria-labelledby="remove-model-title"
+		aria-describedby="remove-model-description remove-model-hint"
+		use:showDeleteDialog
+		oncancel={cancelDelete}>
+		<p
+			id="remove-model-title"
+			class="text-sm font-semibold">Remove model</p>
+		<p
+			id="remove-model-description"
+			class="text-sm ug-description">
+			Remove <strong>{confirmDeleteModelLabel}</strong> from Ungate?
+		</p>
+		<p
+			id="remove-model-hint"
+			class="text-xs ug-description">The deletion takes effect after you save the model list.</p>
+		<div class="flex justify-end gap-2">
+			<button
+				class="ug-button"
+				type="button"
+				onclick={cancelDelete}>
+				Cancel
+			</button>
+			<button
+				class="ug-button ug-danger"
+				type="button"
+				disabled={confirmDeleteIndex === null}
+				onclick={confirmDelete}>
+				<IconTrash2 class="size-4" />
+				Remove
+			</button>
 		</div>
-	</div>
+	</dialog>
 {/if}

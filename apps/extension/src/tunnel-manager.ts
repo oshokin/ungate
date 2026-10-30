@@ -11,6 +11,7 @@ import { RuntimeStateStore } from './runtime-state';
 import { config } from './runtime-state/config';
 import { CLOUDFLARED_VERSION, CloudflaredInstaller } from './utils/cloudflared-installer';
 import { CrossProcessLock } from './utils/cross-process-lock';
+import { LogFileReader } from './utils/log-file-reader';
 import { getCloudflaredBinPath, ManagedProcess } from './utils/managed-process';
 
 export { getCloudflaredBinPath } from './utils/managed-process';
@@ -98,8 +99,7 @@ function isValidPublicHealth(raw: unknown): boolean {
 export class TunnelManager {
 	private monitor: NodeJS.Timeout | null = null;
 	private monitorInFlight = false;
-	private logOffset = 0;
-	private observedLogPath: string | null = null;
+	private readonly logReader = new LogFileReader();
 	private lastPublicProbeAt = 0;
 	private publicProbeInFlight = false;
 	private publicProbeIdentity: string | null = null;
@@ -127,7 +127,7 @@ export class TunnelManager {
 	}
 
 	async start(port: number, protocol: TunnelProtocol = 'http2'): Promise<void> {
-		const release = await CrossProcessLock.acquire('tunnel.lock', 120000);
+		const release = await CrossProcessLock.acquire('tunnel.lock', config.locks.startupTimeoutMs);
 		try {
 			await this.startLocked(port, protocol);
 		} finally {
@@ -136,7 +136,7 @@ export class TunnelManager {
 	}
 
 	async stop(): Promise<void> {
-		const release = await CrossProcessLock.acquire('tunnel.lock', 120000);
+		const release = await CrossProcessLock.acquire('tunnel.lock', config.locks.startupTimeoutMs);
 		try {
 			await this.stopLocked();
 		} finally {
@@ -145,7 +145,7 @@ export class TunnelManager {
 	}
 
 	async restart(port: number, protocol: TunnelProtocol = 'http2'): Promise<void> {
-		const release = await CrossProcessLock.acquire('tunnel.lock', 120000);
+		const release = await CrossProcessLock.acquire('tunnel.lock', config.locks.startupTimeoutMs);
 		try {
 			await this.stopLocked();
 			await this.startLocked(port, protocol);
@@ -164,7 +164,7 @@ export class TunnelManager {
 		}
 		this.monitor ??= setInterval(() => {
 			void this.runMonitorCycle();
-		}, 1000);
+		}, config.tunnelManager.monitorIntervalMs);
 		void this.runMonitorCycle();
 	}
 
@@ -271,7 +271,7 @@ export class TunnelManager {
 
 				return current;
 			});
-			const deadline = Date.now() + 45000;
+			const deadline = Date.now() + config.tunnelManager.startupTimeoutMs;
 			while (Date.now() < deadline) {
 				const log = fs.readFileSync(logPath, 'utf8');
 				const url = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/.exec(log)?.[0];
@@ -291,7 +291,7 @@ export class TunnelManager {
 				}
 				if (!child.pid || !ManagedProcess.matches(child.pid, binary, logPath))
 					throw new Error('cloudflared exited before connecting. See tunnel logs.');
-				await sleep(200);
+				await sleep(config.tunnelManager.startupPollIntervalMs);
 			}
 			throw new Error('Tunnel did not connect within 45 seconds. Check VPN/firewall access to TCP port 7844.');
 		} catch (error) {
@@ -377,7 +377,7 @@ export class TunnelManager {
 				forced = true;
 			}
 			if (Date.now() > deadline) throw new Error('Tunnel did not stop. No replacement started.');
-			await sleep(100);
+			await sleep(config.tunnelManager.stopPollIntervalMs);
 		}
 	}
 
@@ -402,30 +402,7 @@ export class TunnelManager {
 
 	private pollLogs(): void {
 		const logPath = RuntimeStateStore.read().tunnel.logPath;
-		if (!logPath) return;
-		if (this.observedLogPath !== logPath) {
-			this.observedLogPath = logPath;
-			this.logOffset = 0;
-		}
-		try {
-			const size = fs.statSync(logPath).size;
-			const start = Math.max(this.logOffset, size - 65536);
-			const bytes = Buffer.alloc(Math.max(0, size - start));
-			const fd = fs.openSync(logPath, 'r');
-			try {
-				fs.readSync(fd, bytes, 0, bytes.length, start);
-			} finally {
-				fs.closeSync(fd);
-			}
-			this.logOffset = size;
-			for (const line of bytes
-				.toString('utf8')
-				.split('\n')
-				.filter((line) => line.trim()))
-				this.log(line);
-		} catch {
-			/* Process has not created its log yet. */
-		}
+		if (logPath) for (const line of this.logReader.read(logPath)) this.log(line);
 	}
 
 	private async probePublicHealth(force = false): Promise<void> {

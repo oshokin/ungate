@@ -2,6 +2,12 @@
 
 ## 1.7.14 - 2026-10-25 (oshokin fork)
 
+- Preserve independently resizable API/tunnel logs, saved panel heights, initial tail positioning and unread-entry counts from the user's 2026-10-30 source archive alongside the dashboard settings and refactoring.
+- Reset paused log following after Clear so a delayed history snapshot opens at the latest entry.
+- Resume the tail when a retained dashboard becomes visible; do not count older history loaded by a larger display limit as new entries, including when a live entry announces the preference first.
+- Verify pointer/keyboard resizing, height bounds and reset, page re-entry and webview reload persistence in the real browser regression suite. Release identity remains 1.7.14.
+- Clean WebUI output before building so repeated packaging does not retain obsolete hashed JavaScript assets.
+
 - Incorporate upstream 1.7.14, Remote SSH dashboard port mapping, and preservation of parallel Claude tool calls.
 - Protect model traffic with API keys and management routes with a separate local capability; bind administration to IPv4 loopback.
 - Move dashboard requests through a validated extension-host bridge so the webview never receives the administrative token.
@@ -15,6 +21,26 @@
 - Redesign the dashboard around Connection, Usage, Logs, responsive settings, and editor theme tokens.
 - Verify downloaded native artifacts against pinned SHA-256 allowlists before installation or execution.
 - Add portable Node 24 build and CI pipelines, isolated VSIX staging and verification, packaged API smoke tests, process coordination tests, and browser regressions.
+- Replace the obsolete Node module-ABI allowlist with standalone Node and Node-API 10 checks matching the bundled SQLite prebuilds.
+- Fix nvm-windows version paths; discover later PATH entries, fnm installations and case-insensitive Windows environment keys.
+- Add a validated, machine-local Node executable picker and an explicit recovery action without restarting an active shared API.
+- Keep probe timeouts, direct executable invocation and hidden Windows consoles; remove the duplicate unbounded runtime-path probe.
+- Separate runtime and SQLite diagnostic categories and keep component tags out of user-facing errors.
+- Render API/tunnel logs with native editor colors; share their rendering and verify visible error text across themes.
+- Remove the independent Skeleton/Wintry palette and unused dependencies. All dashboard panels and controls now use the editor theme.
+- Fix provider authentication, Usage, model families/selection, discovery notices, inputs, selects, radio controls and tooltips in dark, light and both high-contrast themes.
+- Use a native themed removal dialog with keyboard focus containment and Escape cancellation.
+- Extend browser regression checks to all provider screens, model editing, settings, Usage, removal and tooltips; include live theme changes, missing optional tokens and an opposite OS color preference.
+
+- Keep both extension and bundled API release identity at 1.7.14; use only the workspace pnpm pin and lockfile, removing the obsolete per-extension lockfile.
+- Pair quiet-button hover foreground and background; bound overflow menus/tooltips and reflow narrow headers and version controls.
+- Use associated, hoverable native popover tooltips with Escape dismissal and explicit Windows forced-colors boundaries.
+- Share a bounded, complete-line process log reader that preserves UTF-8/CRLF across polling boundaries.
+- Consolidate dashboard transport limits, lifecycle timing, log retention constants, source state and copy-feedback teardown.
+- Add the user-level logs.maxEntries preference (500 by default, 100–5000) without restarting shared services.
+- Skip malformed shared-log records and tolerate concurrent file pruning.
+- Include web unit tests in the root test command and verify all eight platform/architecture SQLite prebuilds in the packaged VSIX.
+- Expand browser checks to sparse high-contrast tokens, adversarial secondary-button colors, narrow open panels and forced-colors.
 
 ## 1.7.13 - 2026-10-07
 

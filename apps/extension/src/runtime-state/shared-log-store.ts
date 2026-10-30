@@ -2,15 +2,13 @@ import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
+import { LOG_LIMITS, normalizeLogEntryLimit } from '@ungate/shared';
+
 import { config } from './config';
 
 import type { LogEntry } from '@ungate/shared/frontend';
 
-const MAX_LOG_ENTRIES_PER_SOURCE = 500;
-const MAX_LOG_FILES = 24;
-const MAX_FILE_BYTES = 512 * 1024;
-const logDir =
-	(config.paths as typeof config.paths & { logDir?: string; sharedLogPath?: string }).logDir ?? path.join(config.baseDir, 'logs');
+const logDir = config.paths.logDir;
 const processToken = `${process.pid}-${randomUUID()}`;
 let generation = 0;
 
@@ -32,11 +30,18 @@ interface ClearRecord {
 
 type SharedLogRecord = EntryRecord | ClearRecord;
 
+export interface SharedLogSnapshot {
+	entries: LogEntry[];
+	entryIds: string[];
+}
+
 export class SharedLogStore {
-	public static append(source: LogSource, entry: LogEntry): void {
+	public static append(source: LogSource, entry: LogEntry): string {
 		this.ensureDirectory();
 		const record: EntryRecord = { kind: 'entry', id: randomUUID(), source, entry };
 		this.appendRecord(record);
+
+		return record.id;
 	}
 
 	public static clear(source: LogSource): void {
@@ -45,6 +50,10 @@ export class SharedLogStore {
 	}
 
 	public static readAll(source: LogSource): LogEntry[] {
+		return this.readSnapshot(source).entries;
+	}
+
+	public static readSnapshot(source: LogSource, maxEntries?: number): SharedLogSnapshot {
 		this.ensureDirectory();
 		const records = this.readAllRecords().filter((record) => record.source === source);
 		const clearAt = records.reduce(
@@ -52,11 +61,15 @@ export class SharedLogStore {
 			Number.NEGATIVE_INFINITY
 		);
 
-		return records
+		const entries = records
 			.filter((record): record is EntryRecord => record.kind === 'entry' && record.entry.timestamp > clearAt)
 			.sort((left, right) => left.entry.timestamp - right.entry.timestamp || left.id.localeCompare(right.id))
-			.slice(-MAX_LOG_ENTRIES_PER_SOURCE)
-			.map((record) => record.entry);
+			.slice(-normalizeLogEntryLimit(maxEntries));
+
+		return {
+			entries: entries.map((record) => record.entry),
+			entryIds: entries.map((record) => record.id)
+		};
 	}
 
 	private static readAllRecords(): SharedLogRecord[] {
@@ -77,7 +90,13 @@ export class SharedLogStore {
 					if (
 						(record.kind === 'entry' || record.kind === 'clear') &&
 						(record.source === 'api' || record.source === 'tunnel') &&
-						typeof record.id === 'string'
+						typeof record.id === 'string' &&
+						(record.kind === 'clear'
+							? Number.isFinite(record.clearedAt)
+							: record.entry &&
+								Number.isFinite(record.entry.timestamp) &&
+								['info', 'warn', 'error'].includes(record.entry.level) &&
+								typeof record.entry.message === 'string')
 					) {
 						records.push(record);
 					}
@@ -96,7 +115,7 @@ export class SharedLogStore {
 		} finally {
 			fs.closeSync(fd);
 		}
-		if (fs.statSync(file).size >= MAX_FILE_BYTES) generation += 1;
+		if (fs.statSync(file).size >= LOG_LIMITS.maxFileBytes) generation += 1;
 		this.pruneFiles();
 	}
 
@@ -108,9 +127,16 @@ export class SharedLogStore {
 		return fs
 			.readdirSync(logDir)
 			.filter((name) => /^extension-[\w-]+-\d+\.jsonl$/.test(name))
-			.map((name) => ({ name, mtime: fs.statSync(path.join(logDir, name)).mtimeMs }))
+			.flatMap((name) => {
+				try {
+					return [{ name, mtime: fs.statSync(path.join(logDir, name)).mtimeMs }];
+				} catch {
+					// Another window can prune a file between readdir and stat.
+					return [];
+				}
+			})
 			.sort((left, right) => left.mtime - right.mtime || left.name.localeCompare(right.name))
-			.slice(-MAX_LOG_FILES)
+			.slice(-LOG_LIMITS.maxFiles)
 			.map(({ name }) => name);
 	}
 

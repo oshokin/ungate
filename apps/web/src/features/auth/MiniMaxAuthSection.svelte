@@ -136,11 +136,11 @@ async function handleLogout() {
 }
 </script>
 
-<div class="card preset-tonal-surface border border-surface-700/30 p-5 space-y-4">
+<div class="ug-panel p-5 space-y-4">
 	<p class="text-sm font-semibold">MiniMax</p>
 
 	{#if loading}
-		<div class="flex items-center gap-2 text-sm text-surface-400">
+		<div class="flex items-center gap-2 text-sm ug-description">
 			<IconLoader class="size-4 animate-spin" />
 			Checking status...
 		</div>
@@ -148,22 +148,22 @@ async function handleLogout() {
 		<div class="space-y-3">
 			{#if authenticated}
 				<div class="flex items-center gap-2 text-sm">
-					<IconCheck class="size-4 text-success-500" />
+					<IconCheck class="size-4 ug-success" />
 					<span>API key configured</span>
 				</div>
 				<div class="flex gap-2">
 					<button
-						class="btn btn-sm preset-filled-surface-500 border border-surface-500/50 hover:preset-filled-surface-400"
+						class="ug-button"
 						onclick={handleLogout}>
 						<IconLogOut class="size-4" />
 						Logout
 					</button>
 				</div>
 			{:else}
-				<label class="label">
-					<span class="label-text text-xs">API Key</span>
+				<label class="ug-label">
+					<span class=" text-xs">API Key</span>
 					<input
-						class="input text-sm font-mono"
+						class="ug-input text-sm font-mono"
 						type="password"
 						bind:value={apiKey}
 						placeholder="eyJ..." />
@@ -171,14 +171,14 @@ async function handleLogout() {
 			{/if}
 
 			<div class="space-y-1">
-				<span class="label-text text-xs">Base URL</span>
+				<span class=" text-xs">Base URL</span>
 				<div class="flex gap-4">
 					<label class="flex items-center gap-1.5 text-sm cursor-pointer">
 						<input
 							type="radio"
 							bind:group={urlType}
 							value="global"
-							class="radio"
+							class="ug-radio"
 							onchange={() => void saveBaseUrlImmediately()} />
 						Global
 					</label>
@@ -187,7 +187,7 @@ async function handleLogout() {
 							type="radio"
 							bind:group={urlType}
 							value="china"
-							class="radio"
+							class="ug-radio"
 							onchange={() => void saveBaseUrlImmediately()} />
 						China
 					</label>
@@ -196,7 +196,7 @@ async function handleLogout() {
 							type="radio"
 							bind:group={urlType}
 							value="custom"
-							class="radio"
+							class="ug-radio"
 							onchange={() => void saveBaseUrlImmediately()} />
 						Custom
 					</label>
@@ -205,7 +205,7 @@ async function handleLogout() {
 
 			{#if urlType === 'custom'}
 				<input
-					class="input text-sm"
+					class="ug-input text-sm"
 					type="text"
 					bind:value={customUrl}
 					onblur={() => void saveBaseUrlImmediately()}
@@ -213,13 +213,13 @@ async function handleLogout() {
 			{/if}
 
 			{#if authenticated && savingBaseUrl}
-				<p class="text-xs text-surface-400">Saving base URL...</p>
+				<p class="text-xs ug-description">Saving base URL...</p>
 			{/if}
 
 			{#if !authenticated}
 				<div class="flex gap-2">
 					<button
-						class="btn btn-sm preset-filled-primary-500"
+						class="ug-button ug-primary"
 						onclick={handleSave}
 						disabled={saving || !apiKey.trim()}>
 						{#if saving}

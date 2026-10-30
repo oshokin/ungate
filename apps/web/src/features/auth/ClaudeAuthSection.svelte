@@ -114,55 +114,55 @@ function handleCancelLogin() {
 }
 </script>
 
-<div class="card preset-tonal-surface border border-surface-700/30 p-5 space-y-4">
+<div class="ug-panel p-5 space-y-4">
 	<p class="text-sm font-semibold">Claude</p>
 
 	{#if loading}
-		<div class="flex items-center gap-2 text-sm text-surface-400">
+		<div class="flex items-center gap-2 text-sm ug-description">
 			<IconLoader class="size-4 animate-spin" />
 			Checking status...
 		</div>
 	{:else if authenticated}
 		<div class="space-y-3">
 			<div class="flex items-center gap-2 text-sm">
-				<IconCheck class="size-4 text-success-500" />
+				<IconCheck class="size-4 ug-success" />
 				<span>Logged in{email ? ` as ${email}` : ''}</span>
 			</div>
 			<button
-				class="btn btn-sm preset-filled-surface-500 border border-surface-500/50 hover:preset-filled-surface-400 w-fit"
+				class="ug-button w-fit"
 				onclick={handleLogout}>
 				<IconLogOut class="size-4" />
 				Logout
 			</button>
 		</div>
 	{:else if phase === 'idle'}
-		<p class="text-sm text-surface-400">Not logged in.</p>
+		<p class="text-sm ug-description">Not logged in.</p>
 		<button
-			class="btn btn-sm preset-filled-primary-500"
+			class="ug-button ug-primary"
 			onclick={handleStartLogin}>
 			Login with Claude
 		</button>
 	{:else if phase === 'pending-code' || phase === 'completing'}
 		<div class="space-y-3">
-			<div class="flex items-center gap-2 text-sm text-surface-400">
+			<div class="flex items-center gap-2 text-sm ug-description">
 				<a
 					href={authUrl}
 					target="_blank"
 					rel="noopener noreferrer"
-					class="anchor flex items-center gap-1">
+					class="ug-link flex items-center gap-1">
 					<IconExternalLink class="size-3.5" />
 					Open authorization page
 				</a>
 				<span>— paste the code below</span>
 			</div>
 			<input
-				class="input text-sm font-mono"
+				class="ug-input text-sm font-mono"
 				type="text"
 				bind:value={codeInput}
 				placeholder="CODE#STATE" />
 			<div class="flex gap-2">
 				<button
-					class="btn btn-sm preset-filled-primary-500"
+					class="ug-button ug-primary"
 					onclick={handleComplete}
 					disabled={phase === 'completing' || !codeInput.trim()}>
 					{#if phase === 'completing'}
@@ -173,7 +173,7 @@ function handleCancelLogin() {
 					{/if}
 				</button>
 				<button
-					class="btn btn-sm preset-outlined-surface-700 hover:preset-filled-surface-500"
+					class="ug-button"
 					onclick={handleCancelLogin}
 					disabled={phase === 'completing'}>
 					Cancel

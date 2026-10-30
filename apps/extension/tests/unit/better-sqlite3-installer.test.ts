@@ -110,7 +110,7 @@ describe('BetterSqlite3Installer', () => {
 		const expectedBinding = path.join(apiDir, 'node_modules', 'better-sqlite3', 'prebuilds', 'linux-x64.node');
 
 		expect(execArgs?.[1]).toContain(JSON.stringify(expectedBinding));
-		expect(onLog).toHaveBeenCalledWith('info', '[native] better-sqlite3 13.0.3 bundled prebuild is ready');
+		expect(onLog).toHaveBeenCalledWith('info', '[sqlite] better-sqlite3 13.0.3 bundled prebuild is ready');
 	});
 
 	it('rejects a package version that does not match the bundled runtime contract', async () => {

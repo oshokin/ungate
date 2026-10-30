@@ -12,6 +12,9 @@ import { chromium } from 'playwright';
 import { describeService, UNGATE_VERSION, API_PROTOCOL_VERSION } from '../../packages/shared/src/service';
 import { repoDir } from '../build-package/process';
 
+import { verifyLogPanels } from './dashboard-logs';
+import { verifyDashboardThemes } from './dashboard-theme';
+
 import type { DashboardApiBridge as ApiBridge } from '../../apps/extension/src/dashboard-api-bridge';
 
 // The extension is CJS, the build tools are ESM. Use the CJS boundary explicitly.
@@ -66,13 +69,13 @@ const server = createServer((request, response) => {
 let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
 let bridge: ApiBridge | undefined;
 const hardTimeout = setTimeout(() => {
-	console.error('Dashboard browser test exceeded its 60-second hard timeout.');
+	console.error('Dashboard browser test exceeded its 120-second hard timeout.');
 	try {
 		child.kill('SIGKILL');
 	} catch {}
 	server.close();
 	process.exit(1);
-}, 60_000);
+}, 120_000);
 try {
 	const port = await new Promise<number>((resolvePort, reject) => {
 		const timer = setTimeout(() => reject(new Error(`API did not start: ${startup}`)), 10000);
@@ -149,12 +152,12 @@ try {
 		} else await bridge?.handle(raw);
 	});
 	await page.addInitScript(`(() => {
-        let state = { currentPage: 'analytics' };
+        let state = JSON.parse(sessionStorage.getItem('ungate-test-state') || '{"currentPage":"analytics"}');
         window.acquireVsCodeApi = function () {
             return {
                 postMessage: function (message) { void window.ungateBridge(message); },
                 getState: function () { return state; },
-                setState: function (value) { state = value; }
+                setState: function (value) { state = value; sessionStorage.setItem('ungate-test-state', JSON.stringify(value)); }
             };
         };
     })();`);
@@ -279,6 +282,7 @@ try {
 	await page.getByRole('button', { name: 'Close Claude', exact: true }).click();
 	await page.getByRole('button', { name: 'Reload window', exact: true }).click();
 	await page.getByText('Reload is emulated in this browser test.', { exact: true }).waitFor();
+	await page.locator('.ug-toast[role="alert"]').getByRole('button', { name: 'Dismiss notification' }).click();
 	// Check native light-theme tokens and the compact layout.
 	await page.evaluate(() => {
 		const style = document.documentElement.style;
@@ -290,6 +294,173 @@ try {
 	await page.setViewportSize({ width: 420, height: 820 });
 	assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
 	if (screenshotDirectory) await page.screenshot({ path: join(screenshotDirectory, 'light-narrow.png'), fullPage: true });
+
+	// Reproduce startup failure before any API request and check recovery controls.
+	await emit({
+		type: 'service-state',
+		state: {
+			status: 'error',
+			version: null,
+			expectedVersion: UNGATE_VERSION,
+			canUpdate: false,
+			message: 'Node.js was not found or is incompatible.'
+		}
+	});
+	await page.getByRole('button', { name: 'Choose Node.js', exact: true }).click();
+	await page.getByText('Choose Node.js Executable: done', { exact: true }).waitFor();
+	assert.ok(actionRequests.includes('choose-node-runtime'));
+	await emit({ type: 'service-state', state: readyState });
+	await emit({
+		type: 'log-bulk',
+		source: 'api',
+		entries: [{ timestamp: Date.now(), level: 'error', message: 'Node.js was not found or is incompatible.' }],
+		entryIds: ['api-initial']
+	});
+	await page.getByRole('button', { name: 'Logs', exact: true }).click();
+	const logPanel = page.getByRole('region', { name: 'API log entries', exact: true });
+	const logText = logPanel.locator('.ug-log-message');
+	await logText.getByText('Node.js was not found or is incompatible.', { exact: true }).waitFor();
+	await emit({
+		type: 'log-bulk',
+		source: 'api',
+		entries: Array.from({ length: 40 }, (_, index) => ({
+			timestamp: Date.now() + index,
+			level: 'info',
+			message: `Live tail entry ${index + 1}`
+		})),
+		entryIds: Array.from({ length: 40 }, (_, index) => `api-${index + 1}`)
+	});
+	await emit({
+		type: 'log-bulk',
+		source: 'tunnel',
+		entries: Array.from({ length: 40 }, (_, index) => ({
+			timestamp: Date.now() + index,
+			level: 'info',
+			message: `Tunnel tail entry ${index + 1}`
+		})),
+		entryIds: Array.from({ length: 40 }, (_, index) => `tunnel-${index + 1}`)
+	});
+	await logText.getByText('Live tail entry 40', { exact: true }).waitFor();
+	const tunnelPanel = page.getByRole('region', { name: 'Tunnel log entries', exact: true });
+	await tunnelPanel.locator('.ug-log-message').getByText('Tunnel tail entry 40', { exact: true }).waitFor();
+	await page.waitForFunction(
+		() => {
+			const panel = document.querySelector<HTMLElement>('[aria-label="API log entries"]');
+
+			return !!panel && panel.scrollHeight - panel.scrollTop - panel.clientHeight <= 24;
+		},
+		undefined,
+		{ timeout: 5000 }
+	);
+	await logPanel.evaluate((panel) => {
+		panel.scrollTop = 0;
+		panel.dispatchEvent(new Event('scroll'));
+	});
+	await tunnelPanel.evaluate((panel) => {
+		panel.scrollTop = 0;
+		panel.dispatchEvent(new Event('scroll'));
+	});
+	for (const source of ['api', 'tunnel'] as const) {
+		for (let index = 1; index <= 3; index += 1) {
+			await emit({
+				type: 'log',
+				source,
+				entry: { timestamp: Date.now() + 100 + index, level: 'info', message: `${source} paused entry ${index}` },
+				entryId: `${source}-new-${index}`
+			});
+		}
+	}
+	const apiNewLogs = page.getByRole('button', { name: '3 new API log entries. Jump to latest.', exact: true });
+	const tunnelNewLogs = page.getByRole('button', { name: '3 new Tunnel log entries. Jump to latest.', exact: true });
+	await apiNewLogs.waitFor();
+	await tunnelNewLogs.waitFor();
+	assert.equal(await logPanel.evaluate((panel) => panel.scrollTop), 0);
+	assert.equal(await tunnelPanel.evaluate((panel) => panel.scrollTop), 0);
+	await apiNewLogs.click();
+	await tunnelNewLogs.click();
+	await page.waitForFunction(
+		() => {
+			const panels = [...document.querySelectorAll<HTMLElement>('[aria-label$="log entries"]')];
+
+			return panels.length === 2 && panels.every((panel) => panel.scrollHeight - panel.scrollTop - panel.clientHeight <= 24);
+		},
+		undefined,
+		{ timeout: 5000 }
+	);
+	// Text remains readable even if a third-party surface palette uses white.
+	// The extension owns the preference; bulk updates must apply it to entries and identities together.
+	for (const maxEntries of [100, 1000]) {
+		await emit({
+			type: 'log-bulk',
+			source: 'api',
+			maxEntries,
+			entries: Array.from({ length: 200 }, (_, index) => ({
+				timestamp: Date.now() + index,
+				level: 'info',
+				message: `Capacity entry ${index}`
+			})),
+			entryIds: Array.from({ length: 200 }, (_, index) => `capacity-${index}`)
+		});
+		await page.waitForFunction(
+			(expected) => document.querySelectorAll('[aria-label="API log entries"] .ug-log-message').length === expected,
+			Math.min(200, maxEntries)
+		);
+	}
+	await verifyLogPanels(page, emit);
+	for (const [name, background, foreground] of [
+		['dark', '#1e1e1e', '#dddddd'],
+		['light', '#ffffff', '#202020'],
+		['high-contrast', '#000000', '#ffffff']
+	]) {
+		await page.evaluate(
+			({ background, foreground }) => {
+				const style = document.documentElement.style;
+				style.setProperty('--vscode-editor-background', background);
+				style.setProperty('--vscode-editor-foreground', foreground);
+				style.setProperty('--vscode-descriptionForeground', foreground);
+				style.setProperty('--vscode-errorForeground', background === '#ffffff' ? '#c00000' : '#ff8080');
+				style.setProperty('--vscode-textCodeBlock-background', '#ffffff');
+			},
+			{ background, foreground }
+		);
+		const colors = await logPanel.evaluate((panel) => {
+			const text = panel.querySelector('.ug-log-message')!;
+
+			return { background: getComputedStyle(panel).backgroundColor, foreground: getComputedStyle(text).color };
+		});
+		const rgb = (value: string) => value.match(/\d+/g)!.slice(0, 3).map(Number);
+		const luminance = (values: number[]) =>
+			values
+				.map((number) => number / 255)
+				.map((v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4))
+				.reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0);
+		const a = luminance(rgb(colors.background)),
+			b = luminance(rgb(colors.foreground));
+		assert.ok((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05) >= 4.5, `Logs contrast in ${name}`);
+		await page.getByRole('button', { name: 'Reload window', exact: true }).click();
+		const themeToast = page.locator('.ug-toast');
+		await themeToast.waitFor();
+		const toastColors = await themeToast.evaluate((element) => ({
+			background: getComputedStyle(element).backgroundColor,
+			foreground: getComputedStyle(element.querySelector('p')!).color
+		}));
+		const ta = luminance(rgb(toastColors.background)),
+			tb = luminance(rgb(toastColors.foreground));
+		assert.ok((Math.max(ta, tb) + 0.05) / (Math.min(ta, tb) + 0.05) >= 4.5, `Toast fallback contrast in ${name}`);
+		if (screenshotDirectory) await page.screenshot({ path: join(screenshotDirectory, `logs-${name}.png`), fullPage: true });
+	}
+	assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+	const themeAudit = await verifyDashboardThemes(page, screenshotDirectory);
+	await page.emulateMedia({ forcedColors: 'active', colorScheme: 'light' });
+	await page.getByLabel('More actions', { exact: true }).click();
+	const forcedBorder = await page.getByRole('button', { name: 'Models', exact: true }).evaluate((element) => {
+		const style = getComputedStyle(element);
+
+		return { border: style.borderTopColor, background: getComputedStyle(document.body).backgroundColor };
+	});
+	assert.notEqual(forcedBorder.border, forcedBorder.background, 'Controls need a boundary in Windows forced-colors');
+	await page.keyboard.press('Escape');
+	await page.emulateMedia({ forcedColors: 'none' });
 	assert.ok(
 		actionRequests.includes('open-cursor-models') &&
 			actionRequests.includes('copy-api-key') &&
@@ -314,6 +485,10 @@ try {
 			versionRecovery: true,
 			draftSurvivesHealthSync: true,
 			narrowAndLightTheme: true,
+			logsContrastAcrossThemes: true,
+			nodeRecoveryAction: true,
+			logPanelBehavior: true,
+			themeAudit,
 			cspConnectNone: true,
 			browserHttpFetches: 0,
 			analyticsRemoved: true,

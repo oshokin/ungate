@@ -6,6 +6,7 @@ import IconEyeOff from 'virtual:icons/lucide/eye-off';
 
 import { getActionStore, performAction, runDashboardAction } from '$shared/actions.svelte';
 import { Api } from '$shared/api';
+import { createCopyFeedback } from '$shared/copy-feedback.svelte';
 import { getServiceStore } from '$shared/service-store.svelte';
 import { createToastWatcher, showToast } from '$shared/toast-store.svelte';
 
@@ -17,10 +18,9 @@ const actions = getActionStore();
 const watchTunnelError = createToastWatcher();
 const labels = { stopped: 'Stopped', installing: 'Installing…', starting: 'Starting…', running: 'Running', error: 'Error' };
 const tunnelLabel = $derived(labels[store.tunnel.status]);
-let copied = $state(false);
-let apiKeyCopied = $state(false);
-let copiedTimer: ReturnType<typeof setTimeout> | null = null;
-let apiKeyCopiedTimer: ReturnType<typeof setTimeout> | null = null;
+const copyFeedback = createCopyFeedback<'url' | 'key'>();
+const copied = $derived(copyFeedback.value === 'url');
+const apiKeyCopied = $derived(copyFeedback.value === 'key');
 let apiKey = $state('');
 let savedApiKey = $state('');
 let revealApiKey = $state(false);
@@ -29,11 +29,7 @@ let savingApiKey = $state(false);
 async function copyTunnelUrl(): Promise<void> {
 	try {
 		await runDashboardAction('copy-tunnel-url');
-		copied = true;
-		if (copiedTimer) clearTimeout(copiedTimer);
-		copiedTimer = setTimeout(() => {
-			copied = false;
-		}, 3000);
+		copyFeedback.mark('url');
 	} catch {
 		// The shared toast renders the error.
 	}
@@ -42,11 +38,7 @@ async function copyTunnelUrl(): Promise<void> {
 async function copyApiKey(): Promise<void> {
 	try {
 		await runDashboardAction('copy-api-key');
-		apiKeyCopied = true;
-		if (apiKeyCopiedTimer) clearTimeout(apiKeyCopiedTimer);
-		apiKeyCopiedTimer = setTimeout(() => {
-			apiKeyCopied = false;
-		}, 3000);
+		copyFeedback.mark('key');
 	} catch {
 		// The shared toast renders the error.
 	}

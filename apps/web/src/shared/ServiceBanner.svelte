@@ -33,6 +33,11 @@ const actions = getActionStore();
 				onclick={() => performAction('restart-services')}>
 				{actions.busy === 'restart-services' ? 'Restarting…' : service.state.canUpdate ? 'Update shared API' : 'Start API'}
 			</button>
+			{#if service.state.status === 'error'}<button
+					class="ug-button"
+					disabled={!!actions.busy}
+					onclick={() => performAction('choose-node-runtime')}>Choose Node.js</button
+				>{/if}
 		{/if}
 	</div>
 {/if}

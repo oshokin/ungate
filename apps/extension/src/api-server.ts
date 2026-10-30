@@ -9,10 +9,12 @@ import { describeService } from '@ungate/shared/frontend';
 import * as vscode from 'vscode';
 
 import { readApiHealth, assertCompatibleApi } from './local-api';
+import { configuredNodePath } from './node-runtime-settings';
 import { RuntimeStateStore } from './runtime-state';
 import { config } from './runtime-state/config';
 import { BetterSqlite3Installer } from './utils/better-sqlite3-installer';
 import { CrossProcessLock } from './utils/cross-process-lock';
+import { LogFileReader } from './utils/log-file-reader';
 import { ManagedProcess } from './utils/managed-process';
 import { NodeResolver } from './utils/node-resolver';
 
@@ -31,7 +33,7 @@ export class ApiServer {
 	private healthCheckInFlight = false;
 	private stdoutBuffer = '';
 	private logPath: string | null = null;
-	private logOffset = 0;
+	private readonly logReader = new LogFileReader();
 	private shutDownDeliberately = false;
 	private lastStatus: ServerStatus | null = null;
 	private port: number | null = null;
@@ -80,7 +82,7 @@ export class ApiServer {
 		this.restartInProgress = true;
 		let release: (() => void) | undefined;
 		try {
-			release = await CrossProcessLock.acquire('api-start.lock', 120000);
+			release = await CrossProcessLock.acquire('api-start.lock', config.locks.startupTimeoutMs);
 			const existingPort = this.port ?? RuntimeStateStore.read().api.port;
 			if (existingPort) {
 				const health = await readApiHealth(existingPort).catch(() => null);
@@ -105,7 +107,7 @@ export class ApiServer {
 	}
 
 	async stop(): Promise<void> {
-		const release = await CrossProcessLock.acquire('api-start.lock', 120000);
+		const release = await CrossProcessLock.acquire('api-start.lock', config.locks.startupTimeoutMs);
 		try {
 			await this.stopLocked();
 		} finally {
@@ -122,10 +124,10 @@ export class ApiServer {
 			const response = await fetch(`http://127.0.0.1:${port}/admin/shutdown`, {
 				method: 'POST',
 				headers: { Authorization: `Bearer ${getAdminToken()}` },
-				signal: AbortSignal.timeout(5000)
+				signal: AbortSignal.timeout(config.apiServer.shutdownRequestTimeoutMs)
 			});
 			if (!response.ok) throw new Error(`Cannot stop shared API: HTTP ${response.status}`);
-			const deadline = Date.now() + 10000;
+			const deadline = Date.now() + config.apiServer.shutdownTimeoutMs;
 			while (true) {
 				const alive = await this.isPortListening(port);
 				if (!alive) break;
@@ -133,7 +135,7 @@ export class ApiServer {
 					await this.stopAuthenticatedApiProcess(port);
 					break;
 				}
-				await sleep(100);
+				await sleep(config.apiServer.pollIntervalMs);
 			}
 		} else {
 			const savedPid = RuntimeStateStore.read().api.pid;
@@ -168,7 +170,7 @@ export class ApiServer {
 	}
 
 	private async doStart(): Promise<void> {
-		const release = await CrossProcessLock.acquire('api-start.lock', 120000);
+		const release = await CrossProcessLock.acquire('api-start.lock', config.locks.startupTimeoutMs);
 		try {
 			await this.startLocked();
 		} finally {
@@ -218,13 +220,13 @@ export class ApiServer {
 			await this.ensureNativeDeps();
 			this.shutDownDeliberately = false;
 			this.spawn();
-			const deadline = Date.now() + 30000;
+			const deadline = Date.now() + config.apiServer.startupTimeoutMs;
 			while (true) {
 				this.pollLogs();
 				const healthy = this.port ? await this.checkPortHealth(this.port) : false;
 				if (healthy) break;
 				if (!this.process || Date.now() > deadline) throw new Error('Ungate API did not become ready within 30 seconds.');
-				await sleep(100);
+				await sleep(config.apiServer.pollIntervalMs);
 			}
 			if (this.port) await assertCompatibleApi(this.port);
 			await this.setStatus('running');
@@ -246,6 +248,7 @@ export class ApiServer {
 
 	private async recordApiFailure(message: string): Promise<void> {
 		this.lastStatus = 'error';
+		this.callbacks.onLog('error', `[startup] ${message}`);
 		await RuntimeStateStore.suppressApiAutoStart(message);
 		this.callbacks.onStatusChange('error');
 	}
@@ -263,7 +266,8 @@ export class ApiServer {
 		this.attachLog(logPath);
 
 		const isDev = this.context.extensionMode === vscode.ExtensionMode.Development;
-		const runtime = this.runtimePath || this.resolveRuntimePath(NodeResolver.resolve(process.env.UNGATE_NODE_BIN));
+		const runtime =
+			this.runtimePath || NodeResolver.resolve(configuredNodePath(), (message) => this.callbacks.onLog('info', message));
 		this.runtimePath = runtime;
 
 		const env: NodeJS.ProcessEnv = {
@@ -278,7 +282,13 @@ export class ApiServer {
 		this.callbacks.onLog('info', `[process] starting api via ${runtime}`);
 
 		try {
-			this.process = cp.spawn(runtime, nodeArgs, { cwd, env, stdio: ['ignore', logFd, logFd], detached: true });
+			this.process = cp.spawn(runtime, nodeArgs, {
+				cwd,
+				env,
+				windowsHide: true,
+				stdio: ['ignore', logFd, logFd],
+				detached: true
+			});
 		} finally {
 			fs.closeSync(logFd);
 		}
@@ -298,7 +308,7 @@ export class ApiServer {
 
 	private onStdout(data: Buffer): void {
 		const text = data.toString();
-		this.stdoutBuffer = (this.stdoutBuffer + text).slice(-8192);
+		this.stdoutBuffer = (this.stdoutBuffer + text).slice(-config.apiServer.stdoutBufferBytes);
 
 		for (const line of text.split('\n').filter((l) => l.trim())) {
 			if (line.includes('EADDRINUSE')) {
@@ -463,7 +473,7 @@ export class ApiServer {
 	}
 
 	private async handleHealthFailure(message: string): Promise<void> {
-		if (++this.healthFailures < 3) return;
+		if (++this.healthFailures < config.apiServer.healthFailureThreshold) return;
 		const pid = RuntimeStateStore.read().api.pid;
 		if (pid && !ManagedProcess.isAlive(pid)) {
 			this.port = null;
@@ -552,8 +562,8 @@ export class ApiServer {
 		const pid = health.pid;
 		this.callbacks.onLog('warn', `[process] graceful shutdown timed out; terminating authenticated api pid=${pid}`);
 		this.signalProcess(pid, 'SIGTERM');
-		const forceAt = Date.now() + 2000;
-		const deadline = Date.now() + 5000;
+		const forceAt = Date.now() + config.apiServer.terminationGraceMs;
+		const deadline = Date.now() + config.apiServer.terminationTimeoutMs;
 		let forced = false;
 		let listening = await this.isPortListening(port);
 		while (listening) {
@@ -564,7 +574,7 @@ export class ApiServer {
 				forced = true;
 			}
 			if (Date.now() >= deadline) throw new Error('API shutdown timed out; no replacement started.');
-			await sleep(100);
+			await sleep(config.apiServer.pollIntervalMs);
 			listening = await this.isPortListening(port);
 		}
 	}
@@ -602,27 +612,13 @@ export class ApiServer {
 	private attachLog(logPath: string | undefined): void {
 		if (!logPath || this.logPath === logPath) return;
 		this.logPath = logPath;
-		this.logOffset = 0;
 		this.stdoutBuffer = '';
 	}
 
 	private pollLogs(): void {
 		if (!this.logPath) return;
-		try {
-			const size = fs.statSync(this.logPath).size;
-			const start = Math.max(this.logOffset, size - 65536);
-			const bytes = Buffer.alloc(Math.max(0, size - start));
-			const fd = fs.openSync(this.logPath, 'r');
-			try {
-				fs.readSync(fd, bytes, 0, bytes.length, start);
-			} finally {
-				fs.closeSync(fd);
-			}
-			this.logOffset = size;
-			if (bytes.length) this.onStdout(bytes);
-		} catch {
-			/* The process may not have written its log yet. */
-		}
+		const lines = this.logReader.read(this.logPath);
+		if (lines.length) this.onStdout(Buffer.from(`${lines.join('\n')}\n`));
 	}
 
 	private rotateLogs(): void {
@@ -634,7 +630,7 @@ export class ApiServer {
 			.map((name) => path.join(config.baseDir, name))
 			.filter((file) => file !== active)
 			.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
-		for (const file of logs.slice(5)) fs.rmSync(file, { force: true });
+		for (const file of logs.slice(config.apiServer.retainedProcessLogs)) fs.rmSync(file, { force: true });
 	}
 
 	private ensureBaseDir(): void {
@@ -644,7 +640,7 @@ export class ApiServer {
 
 	private async ensureNativeDeps(): Promise<void> {
 		const apiDir = this.getServerCwd();
-		const runtime = this.resolveRuntimePath(NodeResolver.resolve(process.env.UNGATE_NODE_BIN));
+		const runtime = NodeResolver.resolve(configuredNodePath(), (message) => this.callbacks.onLog('info', message));
 		this.runtimePath = runtime;
 
 		await BetterSqlite3Installer.ensureInstalled(apiDir, runtime, {
@@ -652,21 +648,5 @@ export class ApiServer {
 				this.callbacks.onLog(level, message);
 			}
 		});
-	}
-
-	private resolveRuntimePath(runtime: string): string {
-		const inspected = cp.spawnSync(runtime, ['-p', 'process.execPath'], { encoding: 'utf8' });
-
-		if (inspected.error || inspected.status !== 0) {
-			return runtime;
-		}
-
-		const absolutePath = inspected.stdout.trim();
-
-		if (!absolutePath) {
-			return runtime;
-		}
-
-		return absolutePath;
 	}
 }

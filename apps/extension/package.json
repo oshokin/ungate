@@ -96,6 +96,11 @@
 				"command": "ungate.stopServices",
 				"title": "Stop Shared API and Tunnel",
 				"category": "Ungate"
+			},
+			{
+				"command": "ungate.chooseNodeRuntime",
+				"title": "Choose Node.js Executable",
+				"category": "Ungate"
 			}
 		],
 		"menus": {
@@ -121,6 +126,25 @@
 					"group": "ungate@2"
 				}
 			]
+		},
+		"configuration": {
+			"title": "Ungate",
+			"properties": {
+				"ungate.nodePath": {
+					"type": "string",
+					"default": "",
+					"scope": "machine",
+					"description": "Absolute path to the local Node.js executable (node.exe on Windows). Empty uses UNGATE_NODE_BIN, then automatic detection. Use Ungate: Choose Node.js Executable to validate and save a path."
+				},
+				"ungate.logs.maxEntries": {
+					"type": "integer",
+					"default": 500,
+					"minimum": 100,
+					"maximum": 5000,
+					"scope": "application",
+					"description": "Maximum recent log entries shown per source (API and tunnel). Applies to all Ungate windows without restarting services. File retention remains bounded separately."
+				}
+			}
 		}
 	},
 	"scripts": {
@@ -143,6 +167,5 @@
 		"tsup": "~9.0.0",
 		"typescript": "~6.0.3",
 		"vitest": "~5.0.5"
-	},
-	"packageManager": "pnpm@10.24.0"
+	}
 }

@@ -1,3 +1,5 @@
+import { DASHBOARD_TRANSPORT } from '@ungate/shared/frontend';
+
 import { blocksDashboardUi, successNotice } from './action-policy';
 import { showToast } from './toast-store.svelte';
 import { postExtensionMessage } from './vscode';
@@ -28,7 +30,10 @@ export async function runDashboardAction(action: DashboardAction): Promise<void>
 	try {
 		const result = await new Promise<DashboardActionResult>((resolve, reject) => {
 			const id = crypto.randomUUID();
-			const timer = setTimeout(() => reject(new Error('The action timed out. Check Logs before retrying.')), 180000);
+			const timer = setTimeout(
+				() => reject(new Error('The action timed out. Check Logs before retrying.')),
+				DASHBOARD_TRANSPORT.actionTimeoutMs
+			);
 			pending = { id, resolve, reject, timer };
 			if (!postExtensionMessage({ type: 'dashboard-action', id, action })) reject(new Error('Open Ungate inside Cursor.'));
 		});

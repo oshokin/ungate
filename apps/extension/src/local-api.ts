@@ -7,12 +7,16 @@ import {
 	type TunnelProtocol
 } from '@ungate/shared';
 
+import { config } from './runtime-state/config';
+
 /** Identity checks do not trust the PID stored on disk or any arbitrary listener. */
 export async function readApiHealth(port: number, signal?: AbortSignal): Promise<ApiHealth> {
 	const request = (path: string, authenticated = false) =>
 		fetch(`http://127.0.0.1:${port}${path}`, {
 			headers: authenticated ? { Authorization: `Bearer ${getAdminToken()}` } : undefined,
-			signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(1500)]) : AbortSignal.timeout(1500),
+			signal: signal
+				? AbortSignal.any([signal, AbortSignal.timeout(config.apiServer.portHealthRequestTimeoutMs)])
+				: AbortSignal.timeout(config.apiServer.portHealthRequestTimeoutMs),
 			redirect: 'error'
 		});
 	let response = await request('/health');
@@ -42,13 +46,7 @@ export async function readApiHealth(port: number, signal?: AbortSignal): Promise
 }
 
 export async function readTunnelProtocol(port: number): Promise<TunnelProtocol> {
-	const response = await fetch(`http://127.0.0.1:${port}/settings`, {
-		headers: { Authorization: `Bearer ${getAdminToken()}` },
-		redirect: 'error',
-		signal: AbortSignal.timeout(3000)
-	});
-	if (!response.ok) throw new Error(`Cannot read tunnel protocol: HTTP ${response.status}`);
-	const raw: unknown = await response.json();
+	const raw = await readAdminJson<unknown>(port, '/settings');
 	const protocol = raw && typeof raw === 'object' ? (raw as { tunnelProtocol?: unknown }).tunnelProtocol : null;
 	if (!isTunnelProtocol(protocol)) throw new Error('Saved tunnel protocol is invalid.');
 
@@ -59,7 +57,7 @@ async function readAdminJson<T>(port: number, path: string): Promise<T> {
 	const response = await fetch(`http://127.0.0.1:${port}${path}`, {
 		headers: { Authorization: `Bearer ${getAdminToken()}` },
 		redirect: 'error',
-		signal: AbortSignal.timeout(3000)
+		signal: AbortSignal.timeout(config.apiServer.adminRequestTimeoutMs)
 	});
 	if (!response.ok) throw new Error(`Cannot read ${path}: HTTP ${response.status}`);
 	const raw: unknown = await response.json();

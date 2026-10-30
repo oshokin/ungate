@@ -1,34 +1,79 @@
 @import "tailwindcss";
-@import "@skeletonlabs/skeleton";
-@import "@skeletonlabs/skeleton-svelte";
-@import "@skeletonlabs/skeleton/themes/wintry";
 
-/* Follow the editor's theme instead of painting an independent application. */
+.ug-sr-only {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip: rect(0, 0, 0, 0);
+	white-space: nowrap;
+	border: 0;
+}
+
+/* All semantic colors come from the host editor. Fallbacks also form complete pairs. */
 :root {
-	--color-surface-50: var(--vscode-editor-foreground, #ddd);
-	--color-surface-100: var(--vscode-editor-foreground, #ddd);
-	--color-surface-200: var(--vscode-editor-foreground, #ccc);
-	--color-surface-300: var(--vscode-descriptionForeground, #aaa);
-	--color-surface-400: var(--vscode-descriptionForeground, #aaa);
-	--color-surface-500: var(--vscode-descriptionForeground, #aaa);
-	--color-surface-600: var(--vscode-input-border, #666);
-	--color-surface-700: var(--vscode-widget-border, #444);
-	--color-surface-800: var(
-		--vscode-input-background,
-		var(--vscode-editor-background, #303030)
-	);
-	--color-surface-900: var(--vscode-sideBar-background, #252526);
-	--color-surface-950: var(--vscode-editor-background, #1e1e1e);
-	--color-primary-500: var(--vscode-button-background, #007acc);
-	--color-primary-contrast-500: var(--vscode-button-foreground, #fff);
+	--ug-fallback-bg: #1e1e1e;
+	--ug-fallback-fg: #dddddd;
+	--ug-fallback-muted: #aaaaaa;
+	--ug-fallback-border: #666666;
+	--ug-fallback-error: #f48771;
+	--ug-fallback-warning: #cca700;
+	--ug-fallback-success: #73c991;
+	color-scheme: dark;
 	font-family: var(--vscode-font-family, system-ui, sans-serif);
 	font-size: var(--vscode-font-size, 13px);
-	color: var(--vscode-editor-foreground, #ddd);
-	background: var(--vscode-editor-background, #1e1e1e);
-	color-scheme: light dark;
+}
+body.vscode-light,
+body.vscode-high-contrast-light {
+	--ug-fallback-bg: #ffffff;
+	--ug-fallback-fg: #202020;
+	--ug-fallback-muted: #555555;
+	--ug-fallback-error: #a1260d;
+	--ug-fallback-warning: #795e00;
+	--ug-fallback-success: #187028;
+	color-scheme: light;
+}
+body.vscode-dark,
+body.vscode-high-contrast {
+	color-scheme: dark;
+}
+body.vscode-high-contrast {
+	--ug-fallback-bg: #000000;
+	--ug-fallback-fg: #ffffff;
+	--ug-fallback-muted: #ffffff;
+	--ug-fallback-border: #ffffff;
+}
+body.vscode-high-contrast-light {
+	--ug-fallback-fg: #000000;
+	--ug-fallback-muted: #000000;
+	--ug-fallback-border: #000000;
+}
+/* Resolve aliases on body as well, so its theme class controls missing host tokens. */
+:root,
+body {
+	--ug-bg: var(--vscode-editor-background, var(--ug-fallback-bg));
+	--ug-fg: var(--vscode-editor-foreground, var(--ug-fallback-fg));
+	--ug-muted: var(--vscode-descriptionForeground, var(--ug-fallback-muted));
+	--ug-border: var(--vscode-widget-border, var(--ug-fallback-border));
+	--ug-error: var(--vscode-errorForeground, var(--ug-fallback-error));
+	--ug-warning: var(
+		--vscode-editorWarning-foreground,
+		var(--ug-fallback-warning)
+	);
+	--ug-success: var(--vscode-testing-iconPassed, var(--ug-fallback-success));
+	--ug-focus: var(--vscode-focusBorder, #007acc);
+	--ug-input-bg: var(--vscode-input-background, var(--ug-bg));
+	--ug-input-fg: var(--vscode-input-foreground, var(--ug-fg));
+	--ug-button-bg: var(--vscode-button-background, #005a9e);
+	--ug-button-fg: var(--vscode-button-foreground, #ffffff);
+	--ug-button-hover-bg: var(--vscode-button-hoverBackground, #0062a3);
 }
 body {
 	margin: 0;
+	color: var(--ug-fg);
+	background: var(--ug-bg);
 }
 button,
 input,
@@ -45,7 +90,7 @@ button:disabled {
 	cursor: default;
 }
 :focus-visible {
-	outline: 2px solid var(--vscode-focusBorder, #75beff);
+	outline: 2px solid var(--ug-focus);
 	outline-offset: 2px;
 }
 .ug-app {
@@ -60,8 +105,8 @@ button:disabled {
 	gap: 16px;
 	min-height: 48px;
 	padding: 0 20px;
-	border-bottom: 1px solid var(--vscode-widget-border, #3d3d3d);
-	background: var(--vscode-editor-background, #1e1e1e);
+	border-bottom: 1px solid var(--ug-border);
+	background: var(--ug-bg);
 	flex-wrap: wrap;
 }
 .ug-tabs,
@@ -82,11 +127,11 @@ button:disabled {
 	min-height: 48px;
 	padding: 0 12px;
 	border-bottom: 2px solid transparent;
-	color: var(--vscode-descriptionForeground, #aaa);
+	color: var(--ug-muted);
 }
 .ug-selected {
-	color: var(--vscode-editor-foreground, #fff);
-	border-bottom-color: var(--vscode-focusBorder, #007acc);
+	color: var(--ug-fg);
+	border-bottom-color: var(--ug-focus);
 }
 .ug-main {
 	max-width: 960px;
@@ -100,10 +145,10 @@ button:disabled {
 	gap: 16px;
 }
 .ug-card {
-	border: 1px solid var(--vscode-widget-border, #3d3d3d);
+	border: 1px solid var(--ug-border);
 	border-radius: 6px;
 	padding: 20px;
-	background: var(--vscode-editor-background, #1e1e1e);
+	background: var(--ug-bg);
 	min-width: 0;
 }
 .ug-row {
@@ -126,7 +171,7 @@ button:disabled {
 	display: flex;
 	flex-wrap: wrap;
 	gap: 16px;
-	color: var(--vscode-descriptionForeground, #aaa);
+	color: var(--ug-muted);
 	font-size: 12px;
 }
 .ug-dot {
@@ -134,11 +179,11 @@ button:disabled {
 	width: 6px;
 	height: 6px;
 	border-radius: 50%;
-	background: var(--vscode-descriptionForeground, #aaa);
+	background: var(--ug-muted);
 	margin-right: 6px;
 }
 .ug-online {
-	background: var(--vscode-testing-iconPassed, #73c991);
+	background: var(--ug-success);
 }
 .ug-connection-status {
 	display: inline-flex;
@@ -146,7 +191,7 @@ button:disabled {
 	white-space: nowrap;
 }
 .ug-muted {
-	color: var(--vscode-descriptionForeground, #aaa);
+	color: var(--ug-muted);
 	font-size: 12px;
 	line-height: 1.6;
 }
@@ -165,16 +210,16 @@ button:disabled {
 	display: inline-flex;
 	align-items: center;
 	gap: 3px;
-	color: var(--vscode-descriptionForeground, #aaa);
+	color: var(--ug-muted);
 }
 .ug-shortcut kbd {
 	min-width: 20px;
 	padding: 1px 5px;
-	border: 1px solid var(--vscode-widget-border, #555);
-	border-bottom-color: var(--vscode-descriptionForeground, #777);
+	border: 1px solid var(--ug-border);
+	border-bottom-color: var(--ug-muted);
 	border-radius: 4px;
-	background: var(--vscode-keybindingLabel-background, var(--vscode-editor-background, #292929));
-	color: var(--vscode-keybindingLabel-foreground, var(--vscode-editor-foreground, #ddd));
+	background: var(--vscode-keybindingLabel-background, var(--ug-bg));
+	color: var(--vscode-keybindingLabel-foreground, var(--ug-fg));
 	font-family: var(--vscode-font-family, sans-serif);
 	font-size: 11px;
 	line-height: 18px;
@@ -187,59 +232,51 @@ button:disabled {
 	gap: 6px;
 	min-height: 30px;
 	padding: 4px 10px;
-	border: 1px solid var(--vscode-button-border, #666);
+	border: 1px solid var(--vscode-button-border, var(--ug-border));
 	border-radius: 4px;
-	background: var(
-		--vscode-button-secondaryBackground,
-		var(--vscode-editor-background, #333)
-	);
-	color: var(
-		--vscode-button-secondaryForeground,
-		var(--vscode-editor-foreground, #ddd)
-	);
+	background: var(--vscode-button-secondaryBackground, var(--ug-bg));
+	color: var(--vscode-button-secondaryForeground, var(--ug-fg));
 	white-space: nowrap;
 }
 .ug-button:hover:not(:disabled) {
-	background: var(
-		--vscode-button-secondaryHoverBackground,
-		var(--vscode-editor-background, #454545)
-	);
+	background: var(--vscode-button-secondaryHoverBackground, var(--ug-bg));
 }
 .ug-primary {
-	background: var(--vscode-button-background, #007acc);
-	color: var(--vscode-button-foreground, #fff);
-	border-color: transparent;
+	background: var(--ug-button-bg);
+	color: var(--ug-button-fg);
+	border-color: var(--vscode-contrastBorder, transparent);
 }
 .ug-primary:hover:not(:disabled) {
-	background: var(--vscode-button-hoverBackground, #0062a3);
+	background: var(--ug-button-hover-bg);
 }
 .ug-quiet {
 	border-color: transparent;
 	background: transparent;
 	color: inherit;
 }
+.ug-quiet:hover:not(:disabled) {
+	/* Quiet controls become secondary buttons on hover: change the entire color pair. */
+	color: var(--vscode-button-secondaryForeground, var(--ug-fg));
+}
 .ug-endpoint {
 	display: flex;
 	align-items: center;
-	border: 1px solid var(--vscode-input-border, #555);
+	border: 1px solid var(--vscode-input-border, var(--ug-border));
 	border-radius: 4px;
-	background: var(
-		--vscode-input-background,
-		var(--vscode-editor-background, #303030)
-	);
+	background: var(--vscode-input-background, var(--ug-bg));
 }
 .ug-endpoint input {
 	min-width: 0;
 	flex: 1;
 	padding: 8px 10px;
 	background: transparent;
-	color: var(--vscode-input-foreground, var(--vscode-editor-foreground, #ddd));
+	color: var(--vscode-input-foreground, var(--ug-fg));
 	font-family: var(--vscode-editor-font-family, monospace);
 	font-size: 12px;
 }
 .ug-details > summary {
 	font-size: 12px;
-	color: var(--vscode-descriptionForeground, #aaa);
+	color: var(--ug-muted);
 	list-style: revert;
 }
 .ug-details[open] > summary {
@@ -251,12 +288,12 @@ button:disabled {
 	align-items: center;
 	gap: 16px;
 	flex-wrap: wrap;
-	border-left: 3px solid var(--vscode-editorWarning-foreground, #cca700);
+	border-left: 3px solid var(--ug-warning);
 	padding: 12px 16px;
-	background: var(--vscode-textBlockQuote-background, #282820);
+	background: var(--vscode-textBlockQuote-background, var(--ug-bg));
 }
 .ug-error {
-	color: var(--vscode-errorForeground, #f48771);
+	color: var(--ug-error);
 	line-height: 1.6;
 	overflow-wrap: anywhere;
 }
@@ -271,11 +308,11 @@ button:disabled {
 	gap: 12px;
 	max-width: 380px;
 	margin-left: auto;
-	border: 1px solid var(--vscode-widget-border, #454545);
+	border: 1px solid var(--ug-border);
 	border-radius: 6px;
 	padding: 12px 8px 12px 14px;
-	background: var(--vscode-notifications-background, var(--vscode-editorWidget-background, #252526));
-	color: var(--vscode-notifications-foreground, var(--vscode-editor-foreground, #ddd));
+	background: var(--vscode-notifications-background, var(--ug-bg));
+	color: var(--vscode-notifications-foreground, var(--ug-fg));
 	box-shadow: 0 8px 24px #0006;
 }
 .ug-toast p {
@@ -286,10 +323,15 @@ button:disabled {
 	overflow-wrap: anywhere;
 }
 .ug-toast-error {
-	border-left: 3px solid var(--vscode-notificationsErrorIcon-foreground, var(--vscode-errorForeground, #f48771));
+	border-left: 3px solid
+		var(--vscode-notificationsErrorIcon-foreground, var(--ug-error));
 }
 .ug-toast-status {
-	border-left: 3px solid var(--vscode-notificationsInfoIcon-foreground, var(--vscode-button-background, #0078d4));
+	border-left: 3px solid
+		var(
+			--vscode-notificationsInfoIcon-foreground,
+			var(--vscode-button-background, #0078d4)
+		);
 }
 .ug-overflow {
 	position: relative;
@@ -305,11 +347,11 @@ button:disabled {
 	position: absolute;
 	right: 0;
 	top: calc(100% + 6px);
-	min-width: 250px;
-	border: 1px solid var(--vscode-menu-border, #555);
+	width: min(280px, calc(100vw - 24px));
+	border: 1px solid var(--vscode-menu-border, var(--ug-border));
 	border-radius: 5px;
-	background: var(--vscode-menu-background, #252526);
-	color: var(--vscode-menu-foreground, #ddd);
+	background: var(--vscode-menu-background, var(--ug-bg));
+	color: var(--vscode-menu-foreground, var(--ug-fg));
 	box-shadow: 0 4px 12px #0005;
 	padding: 4px;
 }
@@ -318,6 +360,8 @@ button:disabled {
 	width: 100%;
 	padding: 8px 10px;
 	text-align: left;
+	white-space: normal;
+	overflow-wrap: anywhere;
 	border-radius: 3px;
 }
 .ug-menu-item:hover,
@@ -326,11 +370,11 @@ button:disabled {
 	color: var(--vscode-menu-selectionForeground, #fff);
 }
 .ug-menu hr {
-	border-color: var(--vscode-menu-separatorBackground, #555);
+	border-color: var(--vscode-menu-separatorBackground, var(--ug-border));
 	margin: 4px;
 }
 .ug-danger {
-	color: var(--vscode-errorForeground, #f48771);
+	color: var(--ug-error);
 }
 .ug-provider-row {
 	display: grid;
@@ -338,7 +382,7 @@ button:disabled {
 	align-items: center;
 	gap: 12px;
 	padding: 10px 0;
-	border-top: 1px solid var(--vscode-widget-border, #3d3d3d);
+	border-top: 1px solid var(--ug-border);
 }
 .ug-provider-name {
 	display: inline-flex;
@@ -360,13 +404,10 @@ button:disabled {
 	color: #d97757;
 }
 .ug-provider-icon-openai {
-	color: #fff;
+	color: currentColor;
 }
 .ug-provider-icon-minimax {
 	color: #ff6452;
-}
-body.vscode-light .ug-provider-icon-openai {
-	color: #000;
 }
 body.vscode-high-contrast .ug-provider-icon,
 body.vscode-high-contrast-light .ug-provider-icon {
@@ -377,7 +418,7 @@ body.vscode-high-contrast-light .ug-provider-icon {
 }
 .ug-form-grid {
 	display: grid;
-	grid-template-columns: 1fr 2fr;
+	grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
 	gap: 16px;
 }
 .ug-label {
@@ -385,22 +426,189 @@ body.vscode-high-contrast-light .ug-provider-icon {
 	gap: 6px;
 	font-size: 12px;
 }
+.ug-description {
+	color: var(--ug-muted);
+}
+.ug-foreground {
+	color: var(--ug-fg);
+}
+.ug-border {
+	border-color: var(--ug-border);
+}
+.ug-success {
+	color: var(--ug-success);
+}
+.ug-warning {
+	color: var(--ug-warning);
+}
+.ug-warning-dot {
+	background: var(--ug-warning);
+}
+.ug-panel {
+	min-width: 0;
+	border: 1px solid var(--ug-border);
+	border-radius: 6px;
+	background: var(--ug-bg);
+	color: var(--ug-fg);
+}
+.ug-notice,
+.ug-warning-note {
+	border-left: 3px solid
+		var(--vscode-notificationsInfoIcon-foreground, var(--ug-focus));
+	border-radius: 4px;
+	background: var(--ug-bg);
+	color: var(--ug-fg);
+}
+.ug-warning-note {
+	border-left-color: var(--ug-warning);
+}
+.ug-badge {
+	border: 1px solid var(--ug-border);
+	color: var(--ug-fg);
+}
+.ug-table-heading {
+	background: var(--ug-bg);
+	color: var(--ug-muted);
+}
+.ug-hover:hover {
+	background: var(--vscode-list-hoverBackground, var(--ug-bg));
+	color: var(--vscode-list-hoverForeground, var(--ug-fg));
+}
+.ug-selection {
+	background: var(
+		--vscode-list-activeSelectionBackground,
+		var(--ug-button-bg)
+	);
+	color: var(
+		--vscode-list-activeSelectionForeground,
+		var(--ug-button-fg)
+	);
+	outline: 1px solid var(--vscode-contrastActiveBorder, var(--ug-focus));
+}
+.ug-selection .ug-description {
+	color: inherit;
+}
+.ug-button.ug-danger {
+	border-color: var(--ug-error);
+	color: var(--vscode-button-secondaryForeground, var(--ug-fg));
+}
+.ug-button.ug-danger svg {
+	color: var(--ug-error);
+}
+.ug-link {
+	color: var(--vscode-textLink-foreground, var(--ug-focus));
+	text-decoration: underline;
+}
+.ug-link:hover {
+	color: var(--vscode-textLink-activeForeground, var(--ug-fg));
+}
+.ug-input,
+.ug-select,
+.ug-textarea {
+	width: 100%;
+	min-width: 0;
+	min-height: 30px;
+	padding: 6px 8px;
+	border: 1px solid var(--vscode-input-border, var(--ug-border));
+	border-radius: 4px;
+	background: var(--ug-input-bg);
+	color: var(--ug-input-fg);
+	caret-color: var(--ug-input-fg);
+}
+.ug-input::placeholder,
+.ug-textarea::placeholder {
+	color: var(--vscode-input-placeholderForeground, var(--ug-muted));
+	opacity: 1;
+}
+.ug-select,
+.ug-select option {
+	background: var(--vscode-dropdown-background, var(--ug-input-bg));
+	color: var(--vscode-dropdown-foreground, var(--ug-input-fg));
+}
+.ug-textarea {
+	resize: vertical;
+}
+.ug-version-input {
+	width: 8rem;
+}
+.ug-radio {
+	appearance: auto;
+	accent-color: var(--ug-button-bg);
+}
+.ug-tooltip-anchor {
+	display: inline-flex;
+	min-width: 0;
+}
+.ug-tooltip {
+	position: fixed;
+	inset: auto;
+	margin: 0;
+	width: min(240px, calc(100vw - 16px));
+	max-height: calc(100vh - 16px);
+	overflow: auto;
+	overflow-wrap: anywhere;
+	border: 1px solid;
+	border-radius: 6px;
+	padding: 8px 12px;
+	font-size: 12px;
+	line-height: 1.6;
+	box-shadow: 0 4px 12px #0005;
+	border-color: var(--vscode-editorHoverWidget-border, var(--ug-border));
+	background: var(--vscode-editorHoverWidget-background, var(--ug-bg));
+	color: var(--vscode-editorHoverWidget-foreground, var(--ug-fg));
+}
+.ug-dialog {
+	width: min(28rem, calc(100vw - 32px));
+	max-height: calc(100vh - 32px);
+	margin: auto;
+	padding: 20px;
+	overflow: auto;
+	border: 1px solid var(--vscode-contrastBorder, var(--ug-border));
+	border-radius: 6px;
+	background: var(--vscode-editorWidget-background, var(--ug-bg));
+	color: var(--vscode-editorWidget-foreground, var(--ug-fg));
+	box-shadow: 0 8px 24px #0006;
+}
+.ug-dialog::backdrop {
+	background: #0009;
+}
+.ug-dialog .ug-description {
+	color: inherit;
+}
+.ug-progress {
+	height: 6px;
+	accent-color: var(--vscode-progressBar-background, var(--ug-focus));
+}
+.ug-progress::-webkit-progress-bar {
+	background: var(--ug-border);
+	border-radius: 3px;
+}
+.ug-progress::-webkit-progress-value {
+	background: var(--vscode-progressBar-background, var(--ug-focus));
+	border-radius: 3px;
+}
+.ug-progress::-moz-progress-bar {
+	background: var(--vscode-progressBar-background, var(--ug-focus));
+}
+body.vscode-high-contrast .ug-border,
+body.vscode-high-contrast-light .ug-border {
+	border-color: var(--vscode-contrastBorder, var(--ug-fg));
+}
 @media (max-width: 580px) {
 	.ug-header {
-		padding: 0 12px;
-		gap: 8px;
-	}
-	.ug-header {
+		padding: 0 12px 8px;
+		gap: 0;
 		display: grid;
-		grid-template-columns: 1fr auto;
+		grid-template-columns: minmax(0, 1fr);
 	}
 	.ug-tabs {
 		grid-column: 1;
 		grid-row: 1;
 	}
 	.ug-header > .ug-toolbar {
-		grid-column: 2;
-		grid-row: 1;
+		grid-column: 1;
+		grid-row: 2;
+		justify-content: flex-end;
 	}
 	.ug-tab {
 		padding: 0 8px;
@@ -422,4 +630,114 @@ body.vscode-high-contrast-light .ug-provider-icon {
 		animation: none !important;
 		transition: none !important;
 	}
+}
+
+/* Logs share the same editor palette as all other panels. */
+.ug-log-panel-wrap {
+	position: relative;
+}
+.ug-log-panel {
+	color: var(--ug-fg);
+	background: var(--ug-bg);
+	border: 1px solid var(--ug-border);
+	border-radius: 4px;
+	padding: 12px;
+	font-family: var(--vscode-editor-font-family, monospace);
+	font-size: 12px;
+	line-height: 1.6;
+	max-height: min(80vh, 720px);
+	min-height: 192px;
+	overflow: auto;
+	min-width: 0;
+	user-select: text;
+}
+.ug-new-logs {
+	position: absolute;
+	right: 12px;
+	bottom: 12px;
+	z-index: 1;
+	min-height: 26px;
+	padding: 3px 9px;
+	border: 1px solid var(--vscode-button-border, var(--ug-border));
+	border-radius: 13px;
+	background: var(--ug-button-bg);
+	color: var(--ug-button-fg);
+	box-shadow: 0 2px 6px rgb(0 0 0 / 25%);
+	font-size: 11px;
+	white-space: nowrap;
+}
+.ug-new-logs:hover {
+	background: var(--ug-button-hover-bg);
+}
+.ug-log-resize-handle {
+	position: relative;
+	height: 9px;
+	margin-top: -5px;
+	cursor: ns-resize;
+	touch-action: none;
+}
+.ug-log-resize-handle::after {
+	content: "";
+	position: absolute;
+	left: 50%;
+	bottom: 1px;
+	width: 32px;
+	height: 2px;
+	border-radius: 1px;
+	background: var(--vscode-panel-border, var(--ug-border));
+	transform: translateX(-50%);
+}
+.ug-log-resize-handle:hover::after,
+.ug-log-resize-handle:focus-visible::after {
+	background: var(--vscode-focusBorder, var(--ug-focus));
+}
+.ug-log-row {
+	display: grid;
+	grid-template-columns: auto 5ch minmax(0, 1fr);
+	gap: 12px;
+	padding: 2px 0;
+}
+.ug-log-time {
+	color: var(--ug-muted);
+	white-space: nowrap;
+}
+.ug-log-level {
+	text-transform: uppercase;
+}
+.ug-log-message {
+	overflow-wrap: anywhere;
+	white-space: pre-wrap;
+}
+.ug-log-error {
+	color: var(--ug-error);
+}
+.ug-log-warning {
+	color: var(--ug-warning);
+}
+@media (max-width: 580px) {
+	.ug-log-row {
+		grid-template-columns: 5ch minmax(0, 1fr);
+	}
+	.ug-log-time {
+		grid-column: 1 / -1;
+	}
+}
+
+/* Windows forced-colors is separate from the editor's high-contrast theme. */
+@media (forced-colors: active) {
+	.ug-button,
+	.ug-primary,
+	.ug-quiet,
+	.ug-input,
+	.ug-select,
+	.ug-textarea,
+	.ug-endpoint,
+	.ug-menu,
+	.ug-tooltip,
+	.ug-new-logs {
+		border-color: ButtonText;
+	}
+	.ug-provider-icon { color: CanvasText; }
+	.ug-selected { border-bottom-color: Highlight; }
+	.ug-progress { forced-color-adjust: auto; }
 }

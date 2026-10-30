@@ -2,6 +2,7 @@ import { describeService, type DashboardAction } from '@ungate/shared/frontend';
 
 import { readApiHealth, readTunnelProtocol } from './local-api';
 import { RuntimeStateStore } from './runtime-state';
+import { config } from './runtime-state/config';
 import { CrossProcessLock } from './utils/cross-process-lock';
 
 import type { ApiServer } from './api-server';
@@ -17,7 +18,7 @@ export class SharedServiceController {
 
 	/** Execute in the requesting window so an old leader cannot relaunch its old bundle. */
 	async run(action: DashboardAction): Promise<void> {
-		const release = await CrossProcessLock.acquire('commands.lock', 180000);
+		const release = await CrossProcessLock.acquire('commands.lock', config.locks.commandsTimeoutMs);
 		try {
 			if (!this.isActive()) throw new Error('This Ungate window has closed.');
 			if (action === 'restart-services') {

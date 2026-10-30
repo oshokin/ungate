@@ -61,13 +61,13 @@ $effect(() => watchSettingsError(store.settings ? store.error : null, 'error'));
 					<div class="ug-form-grid">
 						<label class="ug-label"
 							>Port<input
-								class="input"
+								class="ug-input"
 								type="number"
 								value={form.port}
 								oninput={(event) => form.setPort(event.currentTarget.value)} /></label>
 						<label class="ug-label"
 							>Tunnel protocol<select
-								class="select"
+								class="ug-select"
 								aria-label="Tunnel protocol"
 								value={form.tunnelProtocol}
 								onchange={(event) => form.setTunnelProtocol(event.currentTarget.value)}>
@@ -82,7 +82,7 @@ $effect(() => watchSettingsError(store.settings ? store.error : null, 'error'));
 					</p>
 					<label class="ug-label"
 						>Global instruction<textarea
-							class="textarea"
+							class="ug-textarea"
 							rows={3}
 							value={form.extraInstruction}
 							oninput={(event) => form.setExtraInstruction(event.currentTarget.value)}

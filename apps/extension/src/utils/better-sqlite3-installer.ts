@@ -25,7 +25,7 @@ export class BetterSqlite3Installer {
 		const packagePath = path.join(apiDir, 'node_modules', 'better-sqlite3', 'package.json');
 		const pkg = JSON.parse(fs.readFileSync(packagePath, 'utf8')) as { version?: string };
 
-		if (!pkg.version) throw new Error('[native] better-sqlite3 package.json is missing version');
+		if (!pkg.version) throw new Error('better-sqlite3 package.json is missing version');
 
 		return pkg.version;
 	}
@@ -36,7 +36,7 @@ export class BetterSqlite3Installer {
 
 		if (!SUPPORTED_PLATFORMS.has(target.platform) || !SUPPORTED_ARCHITECTURES.has(target.arch)) {
 			throw new Error(
-				`[native] better-sqlite3 ${BUNDLED_VERSION} has no bundled prebuild for ${target.platform}-${target.arch}. ` +
+				`better-sqlite3 ${BUNDLED_VERSION} has no bundled prebuild for ${target.platform}-${target.arch}. ` +
 					'Use x64 or arm64 on glibc/musl Linux, macOS or Windows.'
 			);
 		}
@@ -53,12 +53,12 @@ export class BetterSqlite3Installer {
 	static async ensureInstalled(apiDir: string, runtime: string, callbacks: InstallCallbacks): Promise<void> {
 		if (RuntimeStateStore.isApiStartSuppressed()) {
 			const runtimeState = RuntimeStateStore.read();
-			throw new Error(runtimeState.api.lastError ?? '[native] better-sqlite3 bundled prebuild failed to load');
+			throw new Error(runtimeState.api.lastError ?? 'better-sqlite3 bundled prebuild failed to load');
 		}
 
 		const version = this.readBundledVersion(apiDir);
 		if (version !== BUNDLED_VERSION) {
-			throw new Error(`[native] Expected better-sqlite3 ${BUNDLED_VERSION}, but the bundle contains ${version}`);
+			throw new Error(`Expected better-sqlite3 ${BUNDLED_VERSION}, but the bundle contains ${version}`);
 		}
 
 		const binaryPath = this.getBinaryPath(apiDir, runtime);
@@ -66,13 +66,13 @@ export class BetterSqlite3Installer {
 		const isLoadable = binaryExists ? await this.tryLoad(runtime, apiDir, binaryPath, callbacks) : false;
 
 		if (!isLoadable) {
-			const message = `[native] better-sqlite3 bundled prebuild failed to load: ${binaryPath}`;
+			const message = `better-sqlite3 bundled prebuild failed to load: ${binaryPath}`;
 
 			await RuntimeStateStore.suppressApiAutoStart(message);
 			throw new Error(message);
 		}
 
-		callbacks.onLog('info', `[native] better-sqlite3 ${version} bundled prebuild is ready`);
+		callbacks.onLog('info', `[sqlite] better-sqlite3 ${version} bundled prebuild is ready`);
 	}
 
 	private static inspectRuntime(runtime: string): RuntimeTarget {
@@ -96,14 +96,14 @@ export class BetterSqlite3Installer {
 		const script = `const Database=require('better-sqlite3'); const db=new Database(':memory:', { nativeBinding: ${bindingLiteral} }); db.pragma('journal_mode = WAL'); db.close();`;
 
 		try {
-			await execFile(runtime, ['-e', script], { cwd: apiDir });
+			await execFile(runtime, ['-e', script], { cwd: apiDir, timeout: 10000, maxBuffer: 65536, windowsHide: true });
 
 			return true;
 		} catch (error) {
 			const stderrRaw = error instanceof Error && 'stderr' in error ? error.stderr : '';
 			const stderr = typeof stderrRaw === 'string' ? stderrRaw.trim() : '';
 
-			if (stderr) callbacks.onLog('warn', `[native] ${stderr}`);
+			if (stderr) callbacks.onLog('warn', `[sqlite] ${stderr}`);
 
 			return false;
 		}

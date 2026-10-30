@@ -75,6 +75,13 @@ export async function verifyPackage(file: string): Promise<void> {
 	]) {
 		if (!entries.has(required)) throw new Error(`Missing packaged file: ${required}`);
 	}
+	for (const platform of ['darwin', 'linux', 'linuxmusl', 'win32']) {
+		for (const arch of ['x64', 'arm64']) {
+			const native = `extension/bundled/api/node_modules/better-sqlite3/prebuilds/${platform}-${arch}.node`;
+			if (!entries.has(native)) throw new Error(`Missing packaged SQLite prebuild: ${platform}-${arch}`);
+		}
+	}
+
 	// vsce normalizes LICENSE to LICENSE.txt in current package output.
 	const license = entries.get('extension/LICENSE.txt') ?? entries.get('extension/LICENSE');
 	if (!license?.equals(readFileSync(join(repoDir, 'LICENSE')))) throw new Error('Packaged license does not match source');

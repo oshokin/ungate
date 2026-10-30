@@ -15,7 +15,10 @@ import { RuntimeStateStore } from '../../src/runtime-state';
 import { config } from '../../src/runtime-state/config';
 import { SharedServiceController } from '../../src/shared-service-controller';
 
-vi.mock('vscode', () => ({ ExtensionMode: { Development: 1, Production: 2 } }));
+vi.mock('vscode', () => ({
+	ExtensionMode: { Development: 1, Production: 2 },
+	workspace: { getConfiguration: () => ({ inspect: () => undefined }) }
+}));
 vi.mock('@ungate/shared', async (original) => {
 	const actual = await original<typeof import('@ungate/shared')>();
 
@@ -50,7 +53,7 @@ describe('upgrade of a detached shared API', () => {
 			config.baseDir = directory;
 			config.paths.stateFilePath = join(directory, 'runtime-state.json');
 			config.paths.lockPath = join(directory, 'runtime-state.lock');
-			config.paths.sharedLogPath = join(directory, 'extension.log');
+			config.paths.logDir = join(directory, 'logs');
 			const extensionPath = join(directory, 'extension');
 			const packagedApi = join(extensionPath, 'bundled/api');
 			mkdirSync(packagedApi, { recursive: true });

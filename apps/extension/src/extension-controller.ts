@@ -1,6 +1,5 @@
 import * as path from 'node:path';
 
-import { getAdminToken } from '@ungate/shared';
 import {
 	dashboardActions,
 	describeService,
@@ -19,11 +18,13 @@ import { openCursorModels } from './cursor-settings';
 import { Dashboard, type Msg } from './dashboard';
 import { extensionCommands } from './extension-commands';
 import { ExtensionStatusBar, type UngateConnectionStatus } from './extension-status-bar';
-import { readApiHealth } from './local-api';
+import { readAppSettings, readApiHealth } from './local-api';
+import { chooseNodeRuntime } from './node-runtime-settings';
 import { RuntimeStateStore } from './runtime-state';
 import { config } from './runtime-state/config';
 import { SharedServiceController } from './shared-service-controller';
 import { TunnelManager } from './tunnel-manager';
+import { ManagedProcess } from './utils/managed-process';
 
 class ActionCancelledError extends Error {}
 
@@ -283,6 +284,16 @@ export class ExtensionController {
 		if (this.actionInProgress) throw new Error('Another Ungate action is still running.');
 		this.actionInProgress = true;
 		try {
+			if (action === 'choose-node-runtime') {
+				const selected = await chooseNodeRuntime();
+				if (!selected) throw new ActionCancelledError('Action cancelled.');
+				const state = RuntimeStateStore.read();
+				if (state.api.status !== 'running' && (!state.api.pid || !ManagedProcess.isAlive(state.api.pid)))
+					await this.services.run('restart-services');
+				await this.syncFromRuntimeState();
+
+				return;
+			}
 			if (action === 'open-cursor-models') return await openCursorModels();
 			if (action === 'reload-window') {
 				await vscode.commands.executeCommand('workbench.action.reloadWindow');
@@ -299,14 +310,7 @@ export class ExtensionController {
 			if (action === 'copy-api-key') {
 				const port = RuntimeStateStore.read().api.port;
 				if (!port) throw new Error('Start the API before copying its key.');
-				const response = await fetch(`http://127.0.0.1:${port}/settings`, {
-					headers: { Authorization: `Bearer ${getAdminToken()}` },
-					redirect: 'error',
-					signal: AbortSignal.timeout(3000)
-				});
-				if (!response.ok) throw new Error(`Cannot read the saved API key: HTTP ${response.status}`);
-				const raw: unknown = await response.json();
-				const settings = raw as { apiKey?: unknown };
+				const settings = await readAppSettings(port);
 				if (typeof settings.apiKey !== 'string' || !settings.apiKey.trim()) throw new Error('Save an API key first.');
 				await vscode.env.clipboard.writeText(settings.apiKey);
 

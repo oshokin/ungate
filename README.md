@@ -29,6 +29,45 @@ The model API key is mandatory. It authenticates model requests and is separate 
 
 Provider credentials are stored as plaintext in the local SQLite database under `~/.ungate`, protected with owner-only filesystem permissions. This protects against other OS users, not compromise of the same local user account, malware running as that user, or privileged access.
 
+## Node.js startup on Windows, macOS and Linux
+
+The API needs a standalone x64/arm64 Node.js with Node-API 10 (Node 22.14+); **Node.js 24 LTS is recommended**. The Node embedded in desktop Cursor's Electron executable is not used as a separate server runtime.
+
+If Node is missing, install Node.js 24 LTS from https://nodejs.org/en/download, completely quit Cursor and reopen it. A window reload alone may keep the old application environment. If Node is installed but not detected, use **Choose Node.js** in the error banner or **Ungate: Choose Node.js Executable**. Select `node.exe` on Windows (often `C:\Program Files\nodejs\node.exe`) or `node` on Linux/macOS. The executable is validated before its canonical path is saved in the local machine setting `ungate.nodePath`. Cancellation or validation failure preserves the old setting.
+
+Selection order is the explicit local `ungate.nodePath`, then `UNGATE_NODE_BIN`, then automatic discovery. Workspace settings cannot override the executable. Discovery checks PATH entries, standard OS installations, nvm/nvm-windows, fnm, Volta and Unix asdf installations without launching a shell. An invalid explicit override produces an error instead of silently choosing another runtime. The SQLite prebuild is load-tested before the API starts.
+
+Useful diagnostics in PowerShell:
+
+```powershell
+where.exe node
+node -p "JSON.stringify({version:process.version,napi:process.versions.napi,exe:process.execPath})"
+```
+
+On macOS/Linux:
+
+```sh
+command -v node
+node -p 'JSON.stringify({version:process.version,napi:process.versions.napi,exe:process.execPath})'
+```
+
+Startup logs use `[runtime]` for Node discovery, `[sqlite]` for the native SQLite module and `[process]` for the server lifecycle. User-facing errors omit these component tags. API and tunnel log panes use paired editor background/foreground colors in dark, light and high-contrast themes.
+
+The whole dashboard follows Cursor/VS Code theme tokens, including provider authentication, Usage, model tables, form controls, tooltips and confirmation dialogs. There is no separate Skeleton/Wintry color palette. Switching the editor theme updates the panel immediately; the editor theme also controls native form controls independently of the OS color preference.
+
+Set **Ungate › Logs: Max Entries** (`ungate.logs.maxEntries`) in Cursor's user settings to control the recent entries displayed per source. Default: **500**; range: **100–5000**. It applies to all local and SSH dashboard windows without restarting the API or tunnel. This is a display limit, not a change to bounded shared-journal file retention.
+
+```json
+{
+  "ungate.logs.maxEntries": 1000
+}
+```
+
+Controls, menus and tooltips are checked at 320, 420 and 580 CSS pixels. Tooltips support keyboard focus and Escape and stay within the viewport. Windows forced-colors is checked separately from the editor's high-contrast themes.
+
+Both log panels resize independently with the drag handle or keyboard (Up/Down, Shift for a larger step, Home/End for bounds). Their heights survive page changes and webview content reloads; **Reset height** restores the default. Opening Logs or revealing the retained dashboard starts both panels at the latest entry. Scrolling up pauses following and shows the count of new entries; clicking that count returns to the tail. **Clear** starts a fresh following session, including when the next update is a history snapshot. Increasing the display limit loads older history without counting it as new messages; new live entries still increase the counter.
+
+
 ## Cursor models and SSH
 
 To use built-in Cursor models, open **Cursor Models**, disable Cursor's Base URL override and select the built-in model. The misleading **Use Cursor Models**, **Use Ungate Models** and **Toggle OpenAI Key Fix** commands have been removed, together with the background SQLite reader and toggle loop. Automatic Base URL assignment and independent simultaneous routes are not implemented; no supported public setter/request-routing hook has been confirmed.

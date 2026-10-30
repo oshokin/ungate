@@ -137,13 +137,15 @@ User entry point. Manages the API server and tunnel lifecycle.
 
 - cloudflared: binary downloaded to `~/.ungate/bin/`, managed by tsup bundling
 - Every standalone download goes through `utils/verified-artifact.ts`: one pinned upstream URL plus a SHA-256 allowlist per platform/arch. Bytes are hashed while streaming into a staging directory and compared with `timingSafeEqual`; nothing is copied, chmod-ed or executed before the digest matches, and staging is deleted on failure
-- better-sqlite3 13.0.3 ships N-API prebuilds inside its npm package for x64/arm64 on glibc Linux, musl Linux, macOS and Windows. Packaging includes all eight prebuilds; startup selects the target using the spawned Node runtime's platform/libc/arch and load-tests it. Unsupported tuples fail closed without downloading or compiling native code
+- better-sqlite3 13.0.3 ships N-API prebuilds inside its npm package for x64/arm64 on glibc Linux, musl Linux, macOS and Windows. Packaging includes all eight prebuilds; startup selects the target using the spawned Node runtime's platform/libc/arch and load-tests it. Discovery requires standalone Node >=22 with Node-API >=10 (22.14+), not a Node module-ABI allowlist. `node-runtime-settings.ts` reads only the machine/global path and validates file-picker selections; never honor workspace executable paths. The picker may start an absent API, but must not restart a live shared service. Unsupported tuples fail closed without downloading or compiling native code
 - cloudflared 2026.8.2 remains a standalone verified download. Its managed binary carries a `<binary>.sha256` stamp in `~/.ungate/bin/`; an unstamped or mismatched binary is never executed
 - There is no manual native-binary drop-in override
 
 **Logs:**
 
-- Two ring buffers (500 entries each): API (stdout/stderr) and tunnel (stderr)
+- `[runtime]` identifies runtime discovery; `[sqlite]` identifies native SQLite checks. Do not put component tags in user-facing exception messages. The webview logs must use paired editor background/foreground tokens and remain readable with dark, light and high-contrast themes.
+
+- Shared API/tunnel journal and dashboard view; 500 entries per source by default, controlled by the application-scoped `ungate.logs.maxEntries` preference (100–5000). `packages/shared/src/limits.ts` owns defaults and bounds; file retention is independent. Both processes use `utils/log-file-reader.ts` to publish only complete UTF-8/CRLF lines with a bounded read budget.
 - Health check against `/health` every second, three states: running, stopped, error
 
 ## Dashboard transport and packaging
@@ -155,6 +157,8 @@ Analytics, estimated prices and request persistence were removed. `_0010.sql` dr
 Use Node 24 and `corepack pnpm` for development. `task setup`, `task check`, and `task package` delegate to package scripts. The normal package pipeline validates types, lint, tests, HTTP/process/browser regressions, then stages and checks actual VSIX bytes. Only an explicitly requested install command invokes Cursor. Build and package commands are sequential, not parallel Task dependencies.
 
 ## apps/web — Svelte Web UI
+
+Use semantic `ug-*` classes and paired VS Code theme tokens from `app.css` for every panel, state and control. Keep Tailwind for layout only; do not restore Skeleton/Wintry or independent surface/primary color scales. Native form color-scheme follows the webview body theme class, not the OS preference. Keep normal/light/high-contrast fallbacks readable when optional tokens are missing. `scripts/tests/dashboard-theme.ts` audits the rendered screens with composited text contrast; its plain JavaScript browser-side helper avoids tsx serialization helpers. Cover button hover color pairs, open menus and tooltips at 320/420/580 px, sparse high-contrast tokens, opposing OS color schemes, and Windows forced-colors independently. Tooltips use a viewport-bounded native popover, associated via aria-describedby and dismissible with Escape. Confirmation uses native `<dialog>.showModal()` with themed foreground/background, Escape cancellation and native focus containment.
 
 Dashboard for managing providers, tunnel, settings.
 

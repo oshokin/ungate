@@ -7,6 +7,7 @@ export * from './helpers/provider-labels';
 export * from './helpers/utils';
 export * from './schemas';
 export * from './service';
+export * from './limits';
 
 import type { LogEntry, TunnelState } from './types';
 
@@ -14,8 +15,8 @@ export type ExtensionToWebview =
 	| { type: 'port'; port: number | null }
 	| { type: 'tunnel-status'; state: TunnelState }
 	| { type: 'service-state'; state: import('./service').ServiceState }
-	| { type: 'log'; source: 'api' | 'tunnel'; entry: LogEntry }
-	| { type: 'log-bulk'; source: 'api' | 'tunnel'; entries: LogEntry[] }
+	| { type: 'log'; source: 'api' | 'tunnel'; entry: LogEntry; entryId?: string; maxEntries?: number }
+	| { type: 'log-bulk'; source: 'api' | 'tunnel'; entries: LogEntry[]; entryIds?: string[]; maxEntries?: number }
 	| { type: 'logs-cleared'; source: 'api' | 'tunnel' };
 
 export type WebviewToExtension =

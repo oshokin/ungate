@@ -39,23 +39,23 @@ $effect(() => watchUsageError(usage.error, 'error'));
 	aria-label="Subscription usage">
 	<div class="flex flex-wrap items-start justify-between gap-4">
 		<div
-			><h1 class="text-xl font-semibold">Subscription usage</h1><p class="text-sm text-surface-400 mt-1"
+			><h1 class="text-xl font-semibold">Subscription usage</h1><p class="text-sm ug-description mt-1"
 				>Limits reported by your connected provider accounts.</p
 			></div>
 		<button
-			class="btn preset-filled-primary-500"
+			class="ug-button ug-primary"
 			disabled={usage.loading}
 			onclick={() => void usage.refresh()}>{usage.loading ? 'Refreshing…' : 'Refresh'}</button>
 	</div>
 	{#each providers as providerName (providerName)}
 		{@const provider = providerUsage(providerName)}
-		<article class="card preset-tonal-surface border border-surface-700/30 p-5 space-y-4">
+		<article class="ug-panel p-5 space-y-4">
 			<div class="flex flex-wrap justify-between gap-2">
 				<h2 class="ug-provider-name font-semibold">
 					<ProviderIcon provider={providerName} />
 					{labels[providerName]}
 				</h2>
-				<span class="ug-connection-status text-sm text-surface-400">
+				<span class="ug-connection-status text-sm ug-description">
 					<span
 						class="ug-dot"
 						class:ug-online={provider?.status === 'ok'}></span>
@@ -63,11 +63,10 @@ $effect(() => watchUsageError(usage.error, 'error'));
 				></div>
 			{#if provider}
 				{#if provider.message}<p
-						class="text-sm text-surface-300"
+						class="text-sm ug-description"
 						role={provider.status === 'error' ? 'alert' : undefined}>{provider.message}</p
 					>{/if}
-				{#if provider.stale}<p class="text-sm text-warning-400">Refresh failed. The figures below are from the previous update.</p
-					>{/if}
+				{#if provider.stale}<p class="text-sm ug-warning">Refresh failed. The figures below are from the previous update.</p>{/if}
 				{#each provider.windows as window (window.id)}
 					<div class="space-y-2">
 						<div class="flex flex-wrap justify-between gap-2 text-sm"
@@ -75,18 +74,18 @@ $effect(() => watchUsageError(usage.error, 'error'));
 								>{percent(window.usedPercent)} used · {percent(window.remainingPercent)} remaining</span
 							></div>
 						{#if window.usedPercent !== null}<progress
-								class="w-full"
+								class="ug-progress w-full"
 								aria-label={`${window.label} used`}
 								value={Math.min(window.usedPercent, 100)}
 								max="100"></progress
 							>{/if}
-						<p class="text-xs text-surface-400">Resets: {date(window.resetsAt)}</p>
+						<p class="text-xs ug-description">Resets: {date(window.resetsAt)}</p>
 					</div>
 				{/each}
-				<p class="text-xs text-surface-400">Last data: {date(provider.fetchedAt)} · Checked: {date(provider.checkedAt)}</p>
+				<p class="text-xs ug-description">Last data: {date(provider.fetchedAt)} · Checked: {date(provider.checkedAt)}</p>
 			{:else}
 				<p
-					class="text-sm text-surface-400"
+					class="text-sm ug-description"
 					role="status">Reading subscription limits…</p>
 			{/if}
 		</article>

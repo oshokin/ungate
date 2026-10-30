@@ -148,22 +148,22 @@ async function handleLogout() {
 }
 </script>
 
-<div class="card preset-tonal-surface border border-surface-700/30 p-5 space-y-4">
+<div class="ug-panel p-5 space-y-4">
 	<p class="text-sm font-semibold">ChatGPT</p>
 
 	{#if loading}
-		<div class="flex items-center gap-2 text-sm text-surface-400">
+		<div class="flex items-center gap-2 text-sm ug-description">
 			<IconLoader class="size-4 animate-spin" />
 			Checking status...
 		</div>
 	{:else if authenticated}
 		<div class="space-y-3">
 			<div class="flex items-center gap-2 text-sm">
-				<IconCheck class="size-4 text-success-500" />
+				<IconCheck class="size-4 ug-success" />
 				<span>Connected{email ? ` as ${email}` : ''}</span>
 			</div>
 			<button
-				class="btn btn-sm preset-filled-surface-500 border border-surface-500/50 hover:preset-filled-surface-400 w-fit"
+				class="ug-button w-fit"
 				onclick={handleLogout}>
 				<IconLogOut class="size-4" />
 				Disconnect
@@ -171,13 +171,13 @@ async function handleLogout() {
 		</div>
 	{:else if checking}
 		<div class="space-y-3">
-			<div class="flex items-center gap-2 text-sm text-surface-400">
+			<div class="flex items-center gap-2 text-sm ug-description">
 				<IconLoader class="size-4 animate-spin" />
 				Waiting for authorization...
 			</div>
 			<div class="flex gap-2">
 				<button
-					class="btn btn-sm preset-outlined-surface-700 hover:preset-filled-surface-500"
+					class="ug-button"
 					type="button"
 					onclick={handleCancel}>
 					Cancel
@@ -186,9 +186,9 @@ async function handleLogout() {
 		</div>
 	{:else if cancelled}
 		<div class="space-y-3">
-			<p class="text-sm text-surface-400">Cancelled.</p>
+			<p class="text-sm ug-description">Cancelled.</p>
 			<button
-				class="btn btn-sm preset-filled-primary-500 w-fit"
+				class="ug-button ug-primary w-fit"
 				type="button"
 				onclick={handleRetry}>
 				<IconRotateCcw class="size-4" />
@@ -196,15 +196,15 @@ async function handleLogout() {
 			</button>
 		</div>
 	{:else}
-		<p class="text-sm text-surface-400">Not connected.</p>
+		<p class="text-sm ug-description">Not connected.</p>
 		<button
-			class="btn btn-sm preset-filled-primary-500"
+			class="ug-button ug-primary"
 			onclick={handleLogin}>
 			Connect ChatGPT
 		</button>
 	{/if}
 
 	{#if lastAction}
-		<p class="text-xs text-surface-400">{lastAction}</p>
+		<p class="text-xs ug-description">{lastAction}</p>
 	{/if}
 </div>

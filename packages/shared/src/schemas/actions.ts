@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 /** Labels, command IDs and the webview allowlist share one definition. */
 export const dashboardActions = {
+	'choose-node-runtime': { command: 'ungate.chooseNodeRuntime', title: 'Choose Node.js Executable' },
 	'open-cursor-models': { command: 'ungate.openCursorModels', title: 'Open Cursor Models' },
 	'copy-tunnel-url': { command: 'ungate.copyTunnelUrl', title: 'Copy Tunnel URL' },
 	'copy-api-key': { command: 'ungate.copyApiKey', title: 'Copy API Key' },

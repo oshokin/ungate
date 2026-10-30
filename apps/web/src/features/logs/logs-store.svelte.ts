@@ -1,94 +1,80 @@
+import { LOG_LIMITS, normalizeLogEntryLimit } from '@ungate/shared/frontend';
+
 import { postExtensionMessage } from '$shared/vscode';
 
+import { countNewEntryIds } from './log-tail';
+
+import type { LogSource } from '$shared/vscode';
 import type { ExtensionToWebview, LogEntry } from '@ungate/shared/frontend';
 
-const MAX_LOG_ENTRIES = 500;
-
-interface LogsStore {
-	readonly apiLogs: LogEntry[];
-	readonly tunnelLogs: LogEntry[];
-	clearApi(): void;
-	clearTunnel(): void;
-	copyApi(): Promise<void>;
-	copyTunnel(): Promise<void>;
+interface SourceState {
+	entries: LogEntry[];
+	entryIds: string[];
+	revision: number;
+	maxEntries: number;
+	historyExpanded: boolean;
 }
 
-let apiLogs = $state<LogEntry[]>([]);
-let tunnelLogs = $state<LogEntry[]>([]);
+const logs = $state<Record<LogSource, SourceState>>({
+	api: { entries: [], entryIds: [], revision: 0, maxEntries: LOG_LIMITS.defaultEntries, historyExpanded: false },
+	tunnel: { entries: [], entryIds: [], revision: 0, maxEntries: LOG_LIMITS.defaultEntries, historyExpanded: false }
+});
 
-function handleMessage(event: MessageEvent): void {
-	const message = event.data as ExtensionToWebview;
-
-	if (message.type === 'log') {
-		if (message.source === 'api') {
-			apiLogs = trimLogEntries([...apiLogs, message.entry]);
+window.addEventListener('message', (event: MessageEvent<ExtensionToWebview>) => {
+	const message = event.data;
+	if (
+		!message ||
+		typeof message !== 'object' ||
+		!('source' in message) ||
+		(message.source !== 'api' && message.source !== 'tunnel')
+	)
+		return;
+	const source = logs[message.source];
+	if (message.type === 'log' || message.type === 'log-bulk') {
+		const previousLimit = source.maxEntries;
+		let maxEntries = previousLimit;
+		if (message.maxEntries !== undefined) maxEntries = normalizeLogEntryLimit(message.maxEntries);
+		source.maxEntries = maxEntries;
+		// A live entry can announce the new preference before the expanded history arrives.
+		source.historyExpanded ||= maxEntries > previousLimit;
+		if (message.type === 'log') {
+			source.entries = [...source.entries, message.entry].slice(-maxEntries);
+			source.revision += 1;
+			source.entryIds = [...source.entryIds, message.entryId ?? ''].slice(-maxEntries);
 		} else {
-			tunnelLogs = trimLogEntries([...tunnelLogs, message.entry]);
+			const ids = (message.entryIds ?? []).slice(-maxEntries);
+			source.entries = message.entries.slice(-maxEntries);
+			source.revision += countNewEntryIds(source.entryIds, ids, source.historyExpanded);
+			source.historyExpanded = false;
+			source.entryIds = ids;
 		}
-	}
+	} else if (message.type === 'logs-cleared') reset(message.source);
+});
 
-	if (message.type === 'log-bulk') {
-		if (message.source === 'api') {
-			apiLogs = trimLogEntries(message.entries);
-		} else {
-			tunnelLogs = trimLogEntries(message.entries);
-		}
-	}
-
-	if (message.type === 'logs-cleared') {
-		if (message.source === 'api') {
-			apiLogs = [];
-		} else {
-			tunnelLogs = [];
-		}
-	}
+function reset(source: LogSource): void {
+	logs[source].entries = [];
+	logs[source].entryIds = [];
+	logs[source].historyExpanded = false;
 }
 
-function trimLogEntries(entries: LogEntry[]): LogEntry[] {
-	if (entries.length <= MAX_LOG_ENTRIES) {
-		return entries;
-	}
-
-	return entries.slice(-MAX_LOG_ENTRIES);
+function clear(source: LogSource): void {
+	reset(source);
+	postExtensionMessage({ type: 'clear-logs', source });
 }
 
-window.addEventListener('message', handleMessage);
-
-function clearApi(): void {
-	apiLogs = [];
-	postExtensionMessage({ type: 'clear-logs', source: 'api' });
+async function copy(source: LogSource): Promise<void> {
+	const text = logs[source].entries
+		.map((entry) => `${new Date(entry.timestamp).toISOString()} [${entry.level}] ${entry.message}`)
+		.join('\n');
+	await navigator.clipboard.writeText(text);
 }
 
-function clearTunnel(): void {
-	tunnelLogs = [];
-	postExtensionMessage({ type: 'clear-logs', source: 'tunnel' });
-}
-
-async function copyApi(): Promise<void> {
-	await navigator.clipboard.writeText(formatLogs(apiLogs));
-}
-
-async function copyTunnel(): Promise<void> {
-	await navigator.clipboard.writeText(formatLogs(tunnelLogs));
-}
-
-function formatLogs(entries: LogEntry[]): string {
-	return entries.map((entry) => `${new Date(entry.timestamp).toISOString()} [${entry.level}] ${entry.message}`).join('\n');
-}
-
-export function getLogsStore(): LogsStore {
-	const store: LogsStore = {
-		get apiLogs() {
-			return apiLogs;
+export function getLogsStore() {
+	return {
+		source(source: LogSource): SourceState {
+			return logs[source];
 		},
-		get tunnelLogs() {
-			return tunnelLogs;
-		},
-		clearApi,
-		clearTunnel,
-		copyApi,
-		copyTunnel
+		clear,
+		copy
 	};
-
-	return store;
 }

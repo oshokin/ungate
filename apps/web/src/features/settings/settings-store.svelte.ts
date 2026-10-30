@@ -1,3 +1,5 @@
+import { UI_TIMING } from '@ungate/shared/frontend';
+
 import { runDashboardAction } from '$shared/actions.svelte';
 import { Api } from '$shared/api';
 
@@ -65,7 +67,7 @@ async function save(update: Partial<AppSettings>): Promise<void> {
 			if (!restarting) {
 				statusMessage = null;
 			}
-		}, 2000);
+		}, UI_TIMING.savedFeedbackMs);
 	} catch (e) {
 		error = extractError(e);
 		statusMessage = 'Failed to save settings';

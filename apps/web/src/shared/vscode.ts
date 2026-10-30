@@ -1,10 +1,12 @@
 import type { ModelMappingProvider } from '@ungate/shared/frontend';
 
 export type DashboardPage = 'usage' | 'settings' | 'logs';
+export type LogSource = 'api' | 'tunnel';
 
 interface WebviewState {
 	currentPage?: DashboardPage;
 	scrollPositions?: Partial<Record<DashboardPage, number>>;
+	logPanelHeights?: Partial<Record<LogSource, number>>;
 	selectedSettingsProvider?: ModelMappingProvider;
 	selectedSettingsModelIds?: Partial<Record<ModelMappingProvider, string>>;
 }
@@ -69,6 +71,21 @@ export function saveScrollPosition(page: DashboardPage, scrollPosition: number):
 	};
 
 	updateWebviewState({ scrollPositions });
+}
+
+export function getSavedLogPanelHeight(source: LogSource, fallback: number): number {
+	const height = readWebviewState().logPanelHeights?.[source];
+
+	return typeof height === 'number' && Number.isFinite(height) ? height : fallback;
+}
+
+export function saveLogPanelHeight(source: LogSource, height: number): void {
+	const logPanelHeights = {
+		...readWebviewState().logPanelHeights,
+		[source]: height
+	};
+
+	updateWebviewState({ logPanelHeights });
 }
 
 export function getSavedSettingsProvider(): ModelMappingProvider {

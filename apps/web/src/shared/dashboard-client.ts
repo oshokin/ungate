@@ -1,3 +1,5 @@
+import { DASHBOARD_TRANSPORT } from '@ungate/shared/frontend';
+
 import { postExtensionMessage } from './vscode';
 
 interface Pending {
@@ -41,7 +43,7 @@ export class DashboardClient {
 			const timer = setTimeout(() => {
 				this.pending.delete(id);
 				reject(new Error('The dashboard could not contact Ungate. Reload the panel or open Logs.'));
-			}, 30000);
+			}, DASHBOARD_TRANSPORT.clientTimeoutMs);
 			this.pending.set(id, { resolve, reject, timer });
 			if (!postExtensionMessage({ type: 'api-request', id, method, path, ...(body === undefined ? {} : { body }) })) {
 				clearTimeout(timer);

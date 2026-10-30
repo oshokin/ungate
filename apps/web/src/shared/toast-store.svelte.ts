@@ -1,3 +1,4 @@
+import { UI_TIMING } from '@ungate/shared/frontend';
 import { SvelteSet } from 'svelte/reactivity';
 
 export type ToastTone = 'error' | 'status';
@@ -67,7 +68,7 @@ export function showToast(message: string, tone: ToastTone, action?: ToastAction
 		message,
 		tone,
 		...(action ? { action } : {}),
-		remaining: tone === 'status' && !action ? 4000 : null
+		remaining: tone === 'status' && !action ? UI_TIMING.statusNoticeMs : null
 	};
 	if (!current) {
 		activate(toast);

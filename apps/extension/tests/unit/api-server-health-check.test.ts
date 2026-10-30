@@ -87,6 +87,7 @@ vi.mock('../../src/utils/cross-process-lock', () => ({ CrossProcessLock: { acqui
 
 vi.mock('vscode', () => {
 	return {
+		workspace: { getConfiguration: () => ({ inspect: () => undefined }) },
 		ExtensionMode: {
 			Development: 1,
 			Production: 2
@@ -193,28 +194,18 @@ describe('ApiServer.runHealthCheckCycle', () => {
 		sleepMock.mockImplementation(() => new Promise((resolve) => setTimeout(resolve, 1)));
 		ensureInstalledMock.mockReset();
 		spawnSyncMock.mockReset();
-		spawnSyncMock.mockImplementation((runtime, args) => {
-			if (Array.isArray(args) && args[0] === '-p' && typeof args[1] === 'string' && args[1].includes('process.execPath')) {
-				return {
-					error: undefined,
-					status: 0,
-					stdout: '/usr/local/bin/node',
-					stderr: '',
-					pid: 1,
-					output: [null, '/usr/local/bin/node', ''],
-					signal: null
-				};
-			}
-
-			return {
-				error: undefined,
-				status: 0,
-				stdout: '{"abi":"137","platform":"darwin","arch":"arm64"}',
-				stderr: '',
-				pid: 1,
-				output: [null, '{"abi":"137","platform":"darwin","arch":"arm64"}', ''],
-				signal: null
-			};
+		spawnSyncMock.mockReturnValue({
+			error: undefined,
+			status: 0,
+			stdout: JSON.stringify({
+				version: '24.22.1',
+				napi: 10,
+				abi: '137',
+				platform: process.platform,
+				arch: process.arch,
+				execPath: process.execPath
+			}),
+			stderr: ''
 		});
 		ensureInstalledMock.mockResolvedValue(undefined);
 		vi.unstubAllGlobals();

@@ -1,224 +1,191 @@
-import * as os from 'node:os';
-import * as path from 'node:path';
-
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-const spawnSyncMock = vi.fn();
-const existsSyncMock = vi.fn();
-const readdirSyncMock = vi.fn();
-
-vi.mock('node:child_process', () => {
-	return {
-		spawnSync: (...args: unknown[]) => spawnSyncMock(...args),
-		spawn: vi.fn()
-	};
-});
-
-vi.mock('node:fs', () => {
-	return {
-		existsSync: (...args: unknown[]) => existsSyncMock(...args),
-		readdirSync: (...args: unknown[]) => readdirSyncMock(...args)
-	};
-});
 
 import { NodeResolver } from '../../src/utils/node-resolver';
 
-describe('NodeResolver', () => {
-	const originalPlatform = process.platform;
-	const originalExecPath = process.execPath;
-
-	/**
-	 * The `spawnSync` result `NodeResolver.inspect` parses for a single runtime, e.g.
-	 * runtimeReport('127', 'linux', 'x64') -> { stdout: '{"abi":"127","platform":"linux","arch":"x64"}', ... }
-	 */
-	const runtimeReport = (abi: string, platform: string, arch: string) => {
-		const stdout = JSON.stringify({ abi, platform, arch });
-
-		return { error: undefined, status: 0, stdout, stderr: '', pid: 1, output: [null, stdout, ''], signal: null };
-	};
-
-	beforeEach(() => {
-		spawnSyncMock.mockReset();
-		existsSyncMock.mockReset();
-		readdirSyncMock.mockReset();
-	});
-
-	afterEach(() => {
-		Object.defineProperty(process, 'platform', { value: originalPlatform });
-		Object.defineProperty(process, 'execPath', { value: originalExecPath });
-	});
-
-	it('returns a supported override path when UNGATE_NODE_BIN is provided via resolve argument', () => {
-		spawnSyncMock.mockReturnValue({
-			error: undefined,
-			status: 0,
-			stdout: '{"abi":"137","platform":"win32","arch":"x64"}',
-			stderr: '',
-			pid: 1,
-			output: [null, '{"abi":"137","platform":"win32","arch":"x64"}', ''],
-			signal: null
-		});
-
-		expect(NodeResolver.resolve('C:\\Program Files\\nodejs\\node.exe')).toBe('C:\\Program Files\\nodejs\\node.exe');
-	});
-
-	it('prefers the first usable Windows candidate', () => {
-		Object.defineProperty(process, 'platform', { value: 'win32' });
-		process.env.LOCALAPPDATA = 'C:\\Users\\test\\AppData\\Local';
-		process.env.ProgramFiles = 'C:\\Program Files';
-
-		const programFilesNode = path.join(process.env.ProgramFiles, 'nodejs', 'node.exe');
-
-		spawnSyncMock.mockImplementation((command) => {
-			if (command === 'node') {
-				return { error: new Error('ENOENT'), status: 1, stdout: '', stderr: '', pid: 0, output: [null, '', ''], signal: null };
-			}
-
-			if (command === programFilesNode) {
-				return {
-					error: undefined,
-					status: 0,
-					stdout: '{"abi":"137","platform":"win32","arch":"x64"}',
-					stderr: '',
-					pid: 1,
-					output: [null, '{"abi":"137","platform":"win32","arch":"x64"}', ''],
-					signal: null
-				};
-			}
-
-			return { error: new Error('ENOENT'), status: 1, stdout: '', stderr: '', pid: 0, output: [null, '', ''], signal: null };
-		});
-
-		existsSyncMock.mockImplementation((target) => {
-			return String(target).endsWith('node.exe');
-		});
-
-		expect(NodeResolver.resolve()).toBe(programFilesNode);
-	});
-
-	it('skips an unsupported active Node and finds a supported asdf installation', () => {
-		Object.defineProperty(process, 'platform', { value: 'darwin' });
-		const asdfRoot = path.join(os.homedir(), '.asdf', 'installs', 'nodejs');
-		const supportedNode = path.join(asdfRoot, '24.16.0', 'bin', 'node');
-
-		existsSyncMock.mockImplementation((target) => String(target) === asdfRoot);
-		readdirSyncMock.mockImplementation((target) => (String(target) === asdfRoot ? ['23.9.0', '24.16.0'] : []));
-		spawnSyncMock.mockImplementation((command) => {
-			if (command === 'node') {
-				return {
-					error: undefined,
-					status: 0,
-					stdout: '{"abi":"131","platform":"darwin","arch":"arm64"}',
-					stderr: '',
-					pid: 1,
-					output: [null, '{"abi":"131","platform":"darwin","arch":"arm64"}', ''],
-					signal: null
-				};
-			}
-
-			if (command === supportedNode) {
-				return {
-					error: undefined,
-					status: 0,
-					stdout: '{"abi":"137","platform":"darwin","arch":"arm64"}',
-					stderr: '',
-					pid: 2,
-					output: [null, '{"abi":"137","platform":"darwin","arch":"arm64"}', ''],
-					signal: null
-				};
-			}
-
-			return { error: new Error('ENOENT'), status: 1, stdout: '', stderr: '', pid: 0, output: [null, '', ''], signal: null };
-		});
-
-		expect(NodeResolver.resolve()).toBe(supportedNode);
-	});
-
-	it('falls back to the editor server Node when every system Node has an unsupported ABI', () => {
-		Object.defineProperty(process, 'platform', { value: 'linux' });
-
-		// A remote window forks its extension host from the editor server's own Node.
-		const editorServerNode = '/home/dev/.cursor-server/bin/2fdd31c9/node';
-
-		Object.defineProperty(process, 'execPath', { value: editorServerNode });
-
-		existsSyncMock.mockReturnValue(false);
-		readdirSyncMock.mockReturnValue([]);
-		spawnSyncMock.mockImplementation((command) => {
-			if (command === editorServerNode) {
-				return runtimeReport('127', 'linux', 'x64');
-			}
-
-			// Every system location on this host is the distro's Node 20, which has no prebuild.
-			return runtimeReport('115', 'linux', 'x64');
-		});
-
-		expect(NodeResolver.resolve()).toBe(editorServerNode);
-	});
-
-	it('never inspects the editor executable when the extension host runs inside Electron', () => {
-		Object.defineProperty(process, 'platform', { value: 'linux' });
-
-		// A desktop window reports the editor binary itself, which must not be spawned.
-		const editorExecutable = '/opt/cursor/cursor';
-
-		Object.defineProperty(process, 'execPath', { value: editorExecutable });
-
-		existsSyncMock.mockReturnValue(false);
-		readdirSyncMock.mockReturnValue([]);
-		spawnSyncMock.mockReturnValue(runtimeReport('115', 'linux', 'x64'));
-
-		expect(() => NodeResolver.resolve()).toThrow('No supported Node runtime found');
-		expect(spawnSyncMock).not.toHaveBeenCalledWith(editorExecutable, expect.anything(), expect.anything());
-	});
-
-	it('rejects an unsupported explicit override', () => {
-		spawnSyncMock.mockReturnValue({
-			error: undefined,
-			status: 0,
-			stdout: '{"abi":"131","platform":"darwin","arch":"arm64"}',
-			stderr: '',
-			pid: 1,
-			output: [null, '{"abi":"131","platform":"darwin","arch":"arm64"}', ''],
-			signal: null
-		});
-
-		expect(() => NodeResolver.resolve('/custom/node')).toThrow('must point to Node 22, 24, 25 or 26');
-	});
-
-	it('throws an actionable error when no candidate is supported', () => {
-		Object.defineProperty(process, 'platform', { value: 'darwin' });
-
-		existsSyncMock.mockReturnValue(false);
-		readdirSyncMock.mockReturnValue([]);
-		spawnSyncMock.mockReturnValue({
-			error: undefined,
-			status: 0,
-			stdout: '{"abi":"131","platform":"darwin","arch":"arm64"}',
-			stderr: '',
-			pid: 1,
-			output: [null, '{"abi":"131","platform":"darwin","arch":"arm64"}', ''],
-			signal: null
-		});
-
-		expect(() => NodeResolver.resolve()).toThrow('No supported Node runtime found');
-	});
-
-	it('inspect returns abi platform and arch from runtime output', () => {
-		spawnSyncMock.mockReturnValue({
-			error: undefined,
-			status: 0,
-			stdout: '{"abi":"137","platform":"win32","arch":"x64"}',
-			stderr: '',
-			pid: 1,
-			output: [null, '{"abi":"137","platform":"win32","arch":"x64"}', ''],
-			signal: null
-		});
-
-		expect(NodeResolver.inspect('C:\\Program Files\\nodejs\\node.exe')).toEqual({
+const mocks = vi.hoisted(() => ({ spawn: vi.fn(), exists: vi.fn(), read: vi.fn() }));
+vi.mock('node:child_process', () => ({ spawnSync: mocks.spawn }));
+vi.mock('node:fs', () => ({ existsSync: mocks.exists, readdirSync: mocks.read }));
+vi.mock('node:os', () => ({ homedir: () => (process.platform === 'win32' ? 'C:\\Users\\test' : '/home/test') }));
+const originalPlatform = process.platform;
+const originalExec = process.execPath;
+function report(execPath = '/usr/bin/node', extra: Record<string, unknown> = {}) {
+	return {
+		status: 0,
+		stdout: JSON.stringify({
+			version: '24.22.1',
+			napi: 10,
 			abi: '137',
-			platform: 'win32',
-			arch: 'x64'
+			platform: process.platform,
+			arch: 'x64',
+			execPath,
+			...extra
+		}),
+		stderr: ''
+	};
+}
+function windows() {
+	Object.defineProperty(process, 'platform', { value: 'win32' });
+	Object.defineProperty(process, 'execPath', { value: 'C:\\Cursor\\Cursor.exe' });
+}
+beforeEach(() => {
+	vi.resetAllMocks();
+	Object.defineProperty(process, 'platform', { value: 'linux' });
+	Object.defineProperty(process, 'execPath', { value: '/opt/cursor/cursor' });
+	for (const key of [
+		'PATH',
+		'Path',
+		'NVM_HOME',
+		'NVM_SYMLINK',
+		'NVM_DIR',
+		'ASDF_DATA_DIR',
+		'FNM_DIR',
+		'FNM_MULTISHELL_PATH',
+		'ProgramFiles',
+		'PROGRAMFILES',
+		'ProgramW6432',
+		'APPDATA',
+		'LOCALAPPDATA',
+		'VOLTA_HOME'
+	])
+		vi.stubEnv(key, '');
+	mocks.spawn.mockReturnValue({
+		status: 1,
+		stdout: '',
+		stderr: '',
+		error: Object.assign(new Error('missing'), { code: 'ENOENT' })
+	});
+	mocks.exists.mockReturnValue(false);
+	mocks.read.mockReturnValue([]);
+});
+afterEach(() => {
+	vi.unstubAllEnvs();
+	Object.defineProperty(process, 'platform', { value: originalPlatform });
+	Object.defineProperty(process, 'execPath', { value: originalExec });
+});
+
+describe('standalone Node discovery', () => {
+	it('returns a canonical executable instead of keeping a version-manager shim', () => {
+		mocks.spawn.mockReturnValue(report('/opt/node/bin/node'));
+		expect(NodeResolver.resolve('"/home/test/.volta/bin/node"')).toBe('/opt/node/bin/node');
+	});
+	it('accepts a new module ABI when the Node-API contract is compatible', () => {
+		mocks.spawn.mockReturnValue(report('/opt/node/bin/node', { version: '26.1.0', abi: '999', napi: 10 }));
+		expect(NodeResolver.resolve('/opt/node/bin/node')).toBe('/opt/node/bin/node');
+	});
+	it('rejects old Node-API even when its module ABI used to be allowlisted', () => {
+		mocks.spawn.mockReturnValue(report('/opt/node/bin/node', { version: '22.13.0', napi: 9, abi: '127' }));
+		const log = vi.fn();
+		expect(() => NodeResolver.resolve('/opt/node/bin/node', log)).toThrow('configured Node.js');
+		expect(log.mock.calls.flat().join(' ')).toContain('Node-API 10');
+	});
+	it('does not silently bypass an invalid explicit override', () => {
+		mocks.spawn.mockReturnValue(report('/opt/node/bin/node', { version: '20.18.0' }));
+		expect(() => NodeResolver.resolve('/custom/node')).toThrow('configured Node.js');
+		expect(mocks.spawn).toHaveBeenCalledTimes(1);
+	});
+	it('finds standard Windows installation even with stale PATH and differently cased environment keys', () => {
+		windows();
+		vi.stubEnv('ProgramFiles', undefined);
+		vi.stubEnv('PROGRAMFILES', 'C:\\Program Files');
+		const node = 'C:\\Program Files\\nodejs\\node.exe';
+		mocks.exists.mockImplementation((p) => p === node);
+		mocks.spawn.mockImplementation((p) =>
+			p === node ? report(node) : { error: Object.assign(new Error(), { code: 'ENOENT' }) }
+		);
+		expect(NodeResolver.resolve()).toBe(node);
+	});
+	it('passes a Windows executable with spaces and Cyrillic directly without a shell', () => {
+		windows();
+		const node = String.raw`C:\Пользователи\Олег Шокин\Node.js\node.exe`;
+		mocks.spawn.mockReturnValue(report(node));
+		expect(NodeResolver.resolve(`"${node}"`)).toBe(node);
+		expect(mocks.spawn).toHaveBeenCalledWith(
+			node,
+			expect.any(Array),
+			expect.objectContaining({ windowsHide: true, shell: false })
+		);
+	});
+
+	it('uses the nvm-windows version root without an invented bin directory', () => {
+		windows();
+		vi.stubEnv('NVM_HOME', 'D:\\nvm');
+		const node = 'D:\\nvm\\v24.22.1\\node.exe';
+		mocks.read.mockImplementation((p) => (p === 'D:\\nvm' ? ['v24.22.1'] : []));
+		mocks.exists.mockImplementation((p) => p === node);
+		mocks.spawn.mockImplementation((p) => (p === node ? report(node) : { error: new Error('missing') }));
+		expect(NodeResolver.resolve()).toBe(node);
+		expect(mocks.spawn.mock.calls.map((c: unknown[]) => c[0])).not.toContain('D:\\nvm\\v24.22.1\\bin\\node.exe');
+	});
+	it('finds fnm on Windows without requiring a login shell', () => {
+		windows();
+		vi.stubEnv('FNM_DIR', 'D:\\fnm');
+		const node = 'D:\\fnm\\node-versions\\v24.22.1\\installation\\node.exe';
+		mocks.read.mockImplementation((p) => (p === 'D:\\fnm\\node-versions' ? ['v24.22.1'] : []));
+		mocks.exists.mockImplementation((p) => p === node);
+		mocks.spawn.mockImplementation((p) => (p === node ? report(node) : { error: new Error('missing') }));
+		expect(NodeResolver.resolve()).toBe(node);
+	});
+	it('tries later PATH installations after an incompatible first Node', () => {
+		vi.stubEnv('PATH', '/old/bin:/new/bin');
+		mocks.exists.mockReturnValue(true);
+		mocks.spawn.mockImplementation((p) =>
+			p === '/new/bin/node' ? report('/new/bin/node') : report('/old/bin/node', { version: '20.18.0' })
+		);
+		expect(NodeResolver.resolve()).toBe('/new/bin/node');
+	});
+	it('respects NVM_DIR and sorts installed versions numerically', () => {
+		vi.stubEnv('NVM_DIR', '/custom/nvm');
+		mocks.read.mockImplementation((p) => (p === '/custom/nvm/versions/node' ? ['v24.9.0', 'v24.22.1'] : []));
+		mocks.exists.mockImplementation((p) => String(p).startsWith('/custom/nvm/versions/node/'));
+		mocks.spawn.mockImplementation((p) => (p === 'node' ? { error: new Error('missing') } : report(String(p))));
+		expect(NodeResolver.resolve()).toBe('/custom/nvm/versions/node/v24.22.1/bin/node');
+	});
+	it('finds Homebrew Node on macOS', () => {
+		Object.defineProperty(process, 'platform', { value: 'darwin' });
+		mocks.exists.mockImplementation((p) => p === '/opt/homebrew/bin/node');
+		mocks.spawn.mockImplementation((p) => (p === 'node' ? { error: new Error('missing') } : report('/opt/homebrew/bin/node')));
+		expect(NodeResolver.resolve()).toBe('/opt/homebrew/bin/node');
+	});
+	it('uses the editor server only when it is a standalone Node binary', () => {
+		Object.defineProperty(process, 'execPath', { value: '/server/bin/commit/node' });
+		mocks.exists.mockImplementation((p) => p === '/server/bin/commit/node');
+		mocks.spawn.mockImplementation((p) => (p === 'node' ? { error: new Error('missing') } : report('/server/bin/commit/node')));
+		expect(NodeResolver.resolve()).toBe('/server/bin/commit/node');
+	});
+	it('never starts the desktop editor to probe for Node', () => {
+		expect(() => NodeResolver.resolve()).toThrow('Node.js was not found');
+		expect(mocks.spawn.mock.calls.map((c: unknown[]) => c[0])).not.toContain('/opt/cursor/cursor');
+	});
+	it('rejects .cmd launchers without running a shell', () => {
+		windows();
+		expect(() => NodeResolver.resolve('D:\\node.cmd')).toThrow('configured Node.js');
+		expect(mocks.spawn).not.toHaveBeenCalled();
+	});
+	it('keeps permission errors in diagnostics without exposing a native-prefix error to users', () => {
+		mocks.spawn.mockReturnValue({ error: Object.assign(new Error('denied'), { code: 'EACCES' }) });
+		const log = vi.fn();
+		expect(() => NodeResolver.resolve(undefined, log)).toThrow('Node.js was not found');
+		expect(log.mock.calls.flat().join(' ')).toContain('EACCES');
+	});
+	it('does not crash discovery because a manager directory is unreadable', () => {
+		mocks.read.mockImplementation(() => {
+			throw new Error('EACCES');
 		});
+		mocks.spawn.mockReturnValue(report());
+		expect(NodeResolver.resolve()).toBe('/usr/bin/node');
+	});
+	it.each(['not JSON', '{}', 'null'])('rejects invalid runtime reports: %s', (stdout) => {
+		mocks.spawn.mockReturnValue({ status: 0, stdout });
+		expect(() => NodeResolver.resolve('/custom/node')).toThrow('configured Node.js');
+	});
+	it('bounds probes and does not interpolate a path containing shell metacharacters', () => {
+		const node = '/a path/$(do-not-run)/node';
+		mocks.spawn.mockReturnValue(report(node));
+		expect(NodeResolver.resolve(node)).toBe(node);
+		expect(mocks.spawn).toHaveBeenCalledWith(
+			node,
+			expect.any(Array),
+			expect.objectContaining({ timeout: 3000, shell: false, windowsHide: true })
+		);
 	});
 });
