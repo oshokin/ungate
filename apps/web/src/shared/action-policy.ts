@@ -1,5 +1,6 @@
 import { dashboardActions, type DashboardAction } from '@ungate/shared/frontend';
 
+/** Actions that copy a value and must leave the rest of the dashboard usable. */
 const NON_BLOCKING_ACTIONS = new Set<DashboardAction>(['copy-api-key', 'copy-tunnel-url']);
 
 /** Clipboard actions must not dim or disable the rest of the dashboard while the extension responds. */

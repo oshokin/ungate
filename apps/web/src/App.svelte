@@ -14,6 +14,8 @@ import Toast from '$shared/Toast.svelte';
 import { type DashboardPage, getSavedPage, getSavedScrollPosition, savePage, saveScrollPosition } from '$shared/vscode';
 
 const service = getServiceStore();
+/** Repeat the scroll restore after layout settles. One frame is not enough. */
+const SCROLL_RESTORE_DELAYS_MS = [100, 300, 750];
 let currentPage = $state<DashboardPage>(getSavedPage());
 let restoreFrame: number | null = null;
 let restoreTimers: number[] = [];
@@ -57,7 +59,7 @@ async function restoreScrollPosition(page: DashboardPage): Promise<void> {
 	};
 
 	restore();
-	restoreTimers = [100, 300, 750].map((delay) => window.setTimeout(restore, delay));
+	restoreTimers = SCROLL_RESTORE_DELAYS_MS.map((delay) => window.setTimeout(restore, delay));
 }
 
 async function selectPage(page: DashboardPage): Promise<void> {

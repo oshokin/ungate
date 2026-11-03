@@ -1,9 +1,13 @@
+import { MAX_MODEL_ID_CHARS } from 'src/schemas/proxy-requests';
+
 import type { DiscoveredModel } from '@ungate/shared';
 
+/** Largest catalog response body accepted from one provider page. */
 const MAX_RESPONSE_BYTES = 1024 * 1024;
+/** Models retained from one provider catalog. */
 export const MAX_MODELS = 1000;
+/** Catalog pages followed before discovery stops. */
 export const MAX_PAGES = 10;
-export const REQUEST_TIMEOUT_MS = 8000;
 
 export interface ProviderCatalog {
 	models: DiscoveredModel[];
@@ -48,8 +52,8 @@ export async function readJson(response: Response): Promise<unknown> {
 export function model(id: unknown, label: unknown): DiscoveredModel | null {
 	if (typeof id !== 'string') return null;
 	const upstreamModel = id.trim();
-	if (!upstreamModel || upstreamModel.length > 256) return null;
-	const displayLabel = typeof label === 'string' && label.trim() ? label.trim().slice(0, 256) : upstreamModel;
+	if (!upstreamModel || upstreamModel.length > MAX_MODEL_ID_CHARS) return null;
+	const displayLabel = typeof label === 'string' && label.trim() ? label.trim().slice(0, MAX_MODEL_ID_CHARS) : upstreamModel;
 
 	return { id: upstreamModel, label: displayLabel, upstreamModel };
 }

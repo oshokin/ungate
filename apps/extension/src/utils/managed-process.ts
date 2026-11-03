@@ -3,6 +3,10 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
+import { UNGATE_DIR } from '@ungate/shared';
+
+import { PROCESS_PROBE_TIMEOUT_MS } from './process-limits';
+
 /** PID alone is not ownership: check both the executable and a unique per-launch argument. */
 export class ManagedProcess {
 	static isAlive(pid: number): boolean {
@@ -34,7 +38,7 @@ export class ManagedProcess {
 						'-Command',
 						`Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}' | Select-Object ExecutablePath,CommandLine | ConvertTo-Json -Compress`
 					],
-					{ encoding: 'utf8', timeout: 3000, windowsHide: true }
+					{ encoding: 'utf8', timeout: PROCESS_PROBE_TIMEOUT_MS, windowsHide: true }
 				);
 				const result = JSON.parse(raw) as { ExecutablePath?: string; CommandLine?: string };
 
@@ -42,11 +46,11 @@ export class ManagedProcess {
 			}
 			const command = execFileSync('ps', ['-p', String(pid), '-o', 'command='], {
 				encoding: 'utf8',
-				timeout: 3000
+				timeout: PROCESS_PROBE_TIMEOUT_MS
 			}).trim();
 			const resolvedExecutable = execFileSync('ps', ['-p', String(pid), '-o', 'comm='], {
 				encoding: 'utf8',
-				timeout: 3000
+				timeout: PROCESS_PROBE_TIMEOUT_MS
 			}).trim();
 
 			return (
@@ -62,5 +66,5 @@ export class ManagedProcess {
 }
 
 export function getCloudflaredBinPath(): string {
-	return path.join(os.homedir(), '.ungate', 'bin', process.platform === 'win32' ? 'cloudflared.exe' : 'cloudflared');
+	return path.join(os.homedir(), UNGATE_DIR, 'bin', process.platform === 'win32' ? 'cloudflared.exe' : 'cloudflared');
 }

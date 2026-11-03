@@ -16,8 +16,10 @@ import { DashboardApiBridge } from './dashboard-api-bridge';
 import { dashboardLogEntryLimit } from './dashboard-settings';
 import { SharedLogStore } from './runtime-state/shared-log-store';
 
+/** How often the webview is sent newly appended log lines. */
 const LOG_POLL_INTERVAL_MS = 500;
 
+/** Webview messages that carry no payload. */
 const MSGS_SIMPLE = ['webview-ready', 'restart-server', 'start-tunnel', 'stop-tunnel', 'restart-tunnel'] as const;
 
 export type Msg =

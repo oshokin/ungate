@@ -3,6 +3,7 @@ import { logger } from 'src/utils/logger';
 import type { Tool } from '../types';
 import type { ToolMapResult } from '../types/proxy';
 
+/** Cursor tool names rewritten to the Claude Code names Anthropic allows. */
 const TOOL_NAME_MAPPING: Record<string, string> = {
 	// Cursor-specific tools (PascalCase)
 	Shell: 'Bash',
@@ -67,6 +68,7 @@ const TOOL_NAME_MAPPING: Record<string, string> = {
 	browser_action: 'WebFetch'
 };
 
+/** Tool names Anthropic accepts on the Claude Code OAuth path. */
 const VALID_CLAUDE_CODE_TOOLS = new Set([
 	'Task',
 	'TaskOutput',

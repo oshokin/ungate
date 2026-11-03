@@ -1,5 +1,6 @@
 import type { ModelMappingProvider } from '../types';
 
+/** Dashboard names for the three providers. */
 export const PROVIDER_LABELS: Record<ModelMappingProvider, string> = {
 	claude: 'Claude',
 	openai: 'OpenAI',

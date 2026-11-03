@@ -9,6 +9,7 @@ export interface ClaudeCliVersionOption {
 	tooltip: string;
 }
 
+/** Choices shown for the Claude Code version setting. */
 export const CLAUDE_CLI_VERSION_OPTIONS: ClaudeCliVersionOption[] = [
 	{
 		mode: 'stable',

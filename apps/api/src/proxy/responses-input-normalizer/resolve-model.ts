@@ -1,10 +1,12 @@
 import type { CodexReasoningEffort, ResolvedChatGptModel } from './types';
 
+/** Older Codex ids that imply a reasoning effort when the request has no suffix. */
 const LEGACY_MODEL_REASONING_DEFAULTS: Record<string, CodexReasoningEffort> = {
 	'gpt-5.3-codex': 'medium',
 	'gpt-5.1-codex-mini': 'medium'
 };
 
+/** Short model prefixes rewritten to the Codex id Cursor actually sends upstream. */
 const LEGACY_MODEL_PREFIX_ALIASES: Record<string, ResolvedChatGptModel> = {
 	'gpt-5.3': { model: 'gpt-5.3-codex', reasoningEffort: 'medium' },
 	'gpt-5.1': { model: 'gpt-5.1-codex-mini', reasoningEffort: 'medium' }

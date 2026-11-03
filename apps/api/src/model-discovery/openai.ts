@@ -8,8 +8,9 @@ import {
 } from '@ungate/shared';
 
 import { config } from '../config';
+import { PROVIDER_READ_TIMEOUT_MS } from '../security/outbound-request';
 
-import { MAX_MODELS, REQUEST_TIMEOUT_MS, model, readJson, uniqueModels, type ProviderCatalog } from './common';
+import { MAX_MODELS, model, readJson, uniqueModels, type ProviderCatalog } from './common';
 
 interface CodexCatalog {
 	models?: unknown;
@@ -67,7 +68,7 @@ export async function discoverOpenAiModels(accessToken: string, accountId: strin
 	const response = await fetch(url, {
 		method: 'GET',
 		redirect: 'error',
-		signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+		signal: AbortSignal.timeout(PROVIDER_READ_TIMEOUT_MS),
 		headers: {
 			Accept: 'application/json',
 			Authorization: `Bearer ${accessToken}`,

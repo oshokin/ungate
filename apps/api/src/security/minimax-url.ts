@@ -4,6 +4,7 @@ import { MINIMAX_BASE_URLS } from '@ungate/shared';
 
 import { isPublicIpAddress } from './outbound-request';
 
+/** Origins a user-supplied MiniMax base URL is allowed to use. */
 const KNOWN_ORIGINS = new Set(Object.values(MINIMAX_BASE_URLS).map((value) => new URL(value).origin));
 
 export async function validateMiniMaxBaseUrl(value: string): Promise<string> {

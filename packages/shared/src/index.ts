@@ -9,3 +9,4 @@ export * from './schemas';
 export { getAdminToken } from './helpers/admin-token';
 export * from './service';
 export * from './limits';
+export * from './fs-access';

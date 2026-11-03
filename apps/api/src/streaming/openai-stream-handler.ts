@@ -4,6 +4,8 @@ import { AnthropicToOpenai } from '../adapter/anthropic-to-openai';
 import { ToolNormalizer } from '../tools/normalizer';
 import { type ToolUseBlock, type StreamResult, type RequestContext } from '../types/proxy';
 
+import { DEFAULT_MAX_SSE_EVENT_BYTES, DEFAULT_MAX_TOOL_ARGUMENT_BYTES, providerByteLimit } from './stream-limits';
+
 import type { AnthropicStopReason, AnthropicStreamEvent } from '../types/anthropic-stream';
 
 interface StreamHandlerOptions {
@@ -28,8 +30,10 @@ interface StreamUsage {
 	cache_creation_input_tokens: number;
 }
 
-const MAX_SSE_EVENT_BYTES = Number(process.env.PROVIDER_MAX_SSE_EVENT_BYTES) || 1024 * 1024;
-const MAX_TOOL_ARGUMENT_BYTES = Number(process.env.PROVIDER_MAX_TOOL_ARGUMENT_BYTES) || 4 * 1024 * 1024;
+/** Claude stream event cap, overridable with PROVIDER_MAX_SSE_EVENT_BYTES. */
+const MAX_SSE_EVENT_BYTES = providerByteLimit(process.env.PROVIDER_MAX_SSE_EVENT_BYTES, DEFAULT_MAX_SSE_EVENT_BYTES);
+/** Claude tool-argument cap, overridable with PROVIDER_MAX_TOOL_ARGUMENT_BYTES. */
+const MAX_TOOL_ARGUMENT_BYTES = providerByteLimit(process.env.PROVIDER_MAX_TOOL_ARGUMENT_BYTES, DEFAULT_MAX_TOOL_ARGUMENT_BYTES);
 
 export class OpenAIStreamHandler {
 	static createStreamResponse(response: Response, streamId: string, modelName: string, context: RequestContext): StreamResult {

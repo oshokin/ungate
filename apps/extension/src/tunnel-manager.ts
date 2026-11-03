@@ -5,24 +5,38 @@ import * as fs from 'node:fs';
 import * as https from 'node:https';
 import * as path from 'node:path';
 
-import { isTunnelProtocol, sleep, type TunnelProtocol } from '@ungate/shared';
+import {
+	isTunnelProtocol,
+	PRIVATE_FILE_MODE,
+	QUICK_TUNNEL_CONFIG,
+	QUICK_TUNNEL_CONFIG_NAME,
+	sleep,
+	type TunnelProtocol
+} from '@ungate/shared';
 
+import { tunnelConnectTimeoutMs } from './dashboard-settings';
 import { RuntimeStateStore } from './runtime-state';
 import { config } from './runtime-state/config';
 import { CLOUDFLARED_VERSION, CloudflaredInstaller } from './utils/cloudflared-installer';
 import { CrossProcessLock } from './utils/cross-process-lock';
-import { LogFileReader } from './utils/log-file-reader';
+import { capAppendOnlyLog, LogFileReader } from './utils/log-file-reader';
 import { getCloudflaredBinPath, ManagedProcess } from './utils/managed-process';
 
 export { getCloudflaredBinPath } from './utils/managed-process';
 
 import type { LogEntry, TunnelState } from '@ungate/shared/frontend';
 
+/** SIGTERM grace before the tunnel process is killed. */
 const TUNNEL_STOP_GRACE_MS = 2000;
+/** Final wait for cloudflared to exit after stop is requested. */
 const TUNNEL_STOP_DEADLINE_MS = 10000;
+/** How often the public tunnel URL is probed after connect. */
 const PUBLIC_PROBE_INTERVAL_MS = 5000;
+/** One public probe must finish within this time. */
 const PUBLIC_PROBE_TIMEOUT_MS = 3000;
+/** Consecutive probe failures before the tunnel is reported down. */
 const PUBLIC_PROBE_FAILURE_THRESHOLD = 3;
+/** Local DNS failures. The public resolver gets the next attempt, and repeated misses count toward the tunnel being down. */
 const TRANSIENT_DNS_ERRORS = new Set(['EAI_AGAIN', 'ENOTFOUND']);
 
 function errorCode(error: unknown): string | null {
@@ -42,6 +56,14 @@ function errorMessage(error: unknown): string {
 	const message = error instanceof Error ? error.message : String(error);
 
 	return code ? `${message} (${code})` : message;
+}
+
+/** Node reports a failed IPv4 lookup as "queryA ENOTFOUND <host>". The status bar shows a plain sentence instead. */
+function publicDnsFailureMessage(error: unknown): string {
+	const code = errorCode(error);
+	if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') return 'Tunnel address does not resolve. Restart the tunnel.';
+
+	return errorMessage(error);
 }
 
 async function fetchQuickTunnelHealth(url: string): Promise<unknown> {
@@ -225,7 +247,9 @@ export class TunnelManager {
 				await CloudflaredInstaller.install(binary);
 			}
 			const logPath = path.join(config.baseDir, `tunnel-${randomUUID()}.log`);
-			fs.writeFileSync(logPath, '', { mode: 0o600, flag: 'wx' });
+			const configPath = path.join(config.baseDir, QUICK_TUNNEL_CONFIG_NAME);
+			fs.writeFileSync(logPath, '', { mode: PRIVATE_FILE_MODE, flag: 'wx' });
+			fs.writeFileSync(configPath, QUICK_TUNNEL_CONFIG, { mode: PRIVATE_FILE_MODE });
 			const child = spawn(
 				binary,
 				[
@@ -233,7 +257,7 @@ export class TunnelManager {
 					'--url',
 					`http://127.0.0.1:${port}`,
 					'--config',
-					process.platform === 'win32' ? 'NUL' : '/dev/null',
+					configPath,
 					'--no-autoupdate',
 					'--edge-ip-version',
 					'4',
@@ -271,7 +295,8 @@ export class TunnelManager {
 
 				return current;
 			});
-			const deadline = Date.now() + config.tunnelManager.startupTimeoutMs;
+			const timeoutMs = tunnelConnectTimeoutMs();
+			const deadline = Date.now() + timeoutMs;
 			while (Date.now() < deadline) {
 				const log = fs.readFileSync(logPath, 'utf8');
 				const url = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/.exec(log)?.[0];
@@ -293,7 +318,7 @@ export class TunnelManager {
 					throw new Error('cloudflared exited before connecting. See tunnel logs.');
 				await sleep(config.tunnelManager.startupPollIntervalMs);
 			}
-			throw new Error('Tunnel did not connect within 45 seconds. Check VPN/firewall access to TCP port 7844.');
+			throw new Error(`Tunnel did not connect within ${timeoutMs / 1000} seconds. Check VPN/firewall access to TCP port 7844.`);
 		} catch (error) {
 			this.pollLogs();
 			const message = error instanceof Error ? error.message : String(error);
@@ -403,6 +428,7 @@ export class TunnelManager {
 	private pollLogs(): void {
 		const logPath = RuntimeStateStore.read().tunnel.logPath;
 		if (logPath) for (const line of this.logReader.read(logPath)) this.log(line);
+		if (logPath) capAppendOnlyLog(logPath);
 	}
 
 	private async probePublicHealth(force = false): Promise<void> {
@@ -432,7 +458,7 @@ export class TunnelManager {
 					const raw = await fetchQuickTunnelHealth(identity.url);
 					await this.commitPublicProbe(identity, isValidPublicHealth(raw) ? null : 'Public health returned an invalid response.');
 				} catch (fallbackError) {
-					await this.commitPublicProbe(identity, errorMessage(fallbackError), false);
+					await this.commitPublicProbe(identity, publicDnsFailureMessage(fallbackError));
 				}
 			} else await this.commitPublicProbe(identity, errorMessage(error));
 		} finally {
@@ -442,32 +468,43 @@ export class TunnelManager {
 
 	private async commitPublicProbe(
 		identity: { pid: number; startedAt: number; url: string },
-		error: string | null,
-		countFailure = true
+		error: string | null
 	): Promise<void> {
-		if (error && countFailure) this.consecutivePublicProbeFailures += 1;
+		if (error) this.consecutivePublicProbeFailures += 1;
 		else this.consecutivePublicProbeFailures = 0;
 		const publicStatus =
-			error && countFailure && this.consecutivePublicProbeFailures >= PUBLIC_PROBE_FAILURE_THRESHOLD
+			error && this.consecutivePublicProbeFailures >= PUBLIC_PROBE_FAILURE_THRESHOLD
 				? 'unreachable'
 				: error
 					? 'checking'
 					: 'reachable';
-		let changed = false;
-		await RuntimeStateStore.mutate((current) => {
-			if (
-				current.tunnel.pid !== identity.pid ||
-				current.tunnel.startedAt !== identity.startedAt ||
-				current.tunnel.url !== identity.url ||
-				current.tunnel.status !== 'running'
-			)
-				return current;
-			changed = current.tunnel.publicStatus !== publicStatus || current.tunnel.publicError !== error;
-			current.tunnel.publicStatus = publicStatus;
-			current.tunnel.publicCheckedAt = Date.now();
-			current.tunnel.publicError = error;
+		const current = RuntimeStateStore.read().tunnel;
+		if (
+			current.pid === identity.pid &&
+			current.startedAt === identity.startedAt &&
+			current.url === identity.url &&
+			current.status === 'running' &&
+			current.publicStatus === publicStatus &&
+			current.publicError === error
+		)
+			return;
 
-			return current;
+		let changed = false;
+		await RuntimeStateStore.mutate((state) => {
+			if (
+				state.tunnel.pid !== identity.pid ||
+				state.tunnel.startedAt !== identity.startedAt ||
+				state.tunnel.url !== identity.url ||
+				state.tunnel.status !== 'running' ||
+				(state.tunnel.publicStatus === publicStatus && state.tunnel.publicError === error)
+			)
+				return state;
+			changed = true;
+			state.tunnel.publicStatus = publicStatus;
+			state.tunnel.publicCheckedAt = Date.now();
+			state.tunnel.publicError = error;
+
+			return state;
 		});
 		if (changed) this.onStateChange(this.getState());
 	}
@@ -484,6 +521,6 @@ export class TunnelManager {
 			.map((name) => path.join(config.baseDir, name))
 			.filter((file) => file !== active)
 			.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
-		for (const file of logs.slice(5)) fs.rmSync(file, { force: true });
+		for (const file of logs.slice(config.apiServer.retainedProcessLogs)) fs.rmSync(file, { force: true });
 	}
 }

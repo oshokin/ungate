@@ -1,7 +1,8 @@
 import { MINIMAX_BASE_URLS } from '@ungate/shared';
 import { validateMiniMaxBaseUrl } from 'src/security/minimax-url';
+import { PROVIDER_READ_TIMEOUT_MS } from 'src/security/outbound-request';
 
-import { MAX_MODELS, REQUEST_TIMEOUT_MS, model, readJson, uniqueModels, type ProviderCatalog } from './common';
+import { MAX_MODELS, model, readJson, uniqueModels, type ProviderCatalog } from './common';
 
 interface MiniMaxCatalog {
 	data?: unknown;
@@ -14,7 +15,7 @@ export async function discoverMiniMaxModels(accessToken: string, baseUrl: string
 	const response = await fetch(url, {
 		method: 'GET',
 		redirect: 'error',
-		signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+		signal: AbortSignal.timeout(PROVIDER_READ_TIMEOUT_MS),
 		headers: {
 			Accept: 'application/json',
 			...(china ? { 'X-Api-Key': accessToken } : { Authorization: `Bearer ${accessToken}` })

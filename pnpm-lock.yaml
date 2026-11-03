@@ -277,6 +277,9 @@ importers:
 
   scripts:
     dependencies:
+      '@ungate/shared':
+        specifier: workspace:*
+        version: link:../packages/shared
       cloudflared:
         specifier: ~0.7.3
         version: 0.7.3

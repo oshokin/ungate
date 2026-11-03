@@ -1,7 +1,9 @@
+import { PROVIDER_READ_TIMEOUT_MS } from 'src/security/outbound-request';
+
 import { config } from '../config';
 import { RequestBuilder } from '../proxy/request-builder';
 
-import { MAX_MODELS, MAX_PAGES, REQUEST_TIMEOUT_MS, model, readJson, uniqueModels, type ProviderCatalog } from './common';
+import { MAX_MODELS, MAX_PAGES, model, readJson, uniqueModels, type ProviderCatalog } from './common';
 
 import type { DiscoveredModel } from '@ungate/shared';
 
@@ -22,7 +24,7 @@ export async function discoverClaudeModels(accessToken: string): Promise<Provide
 		const response = await fetch(url, {
 			method: 'GET',
 			redirect: 'error',
-			signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+			signal: AbortSignal.timeout(PROVIDER_READ_TIMEOUT_MS),
 			headers: RequestBuilder.getClaudeOAuthHeaders(accessToken)
 		});
 		const rawPayload = await readJson(response);

@@ -3,6 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
+import { LOG_LIMITS, QUICK_TUNNEL_CONFIG, QUICK_TUNNEL_CONFIG_NAME } from '@ungate/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { config } from '../../src/runtime-state/config';
@@ -50,6 +51,7 @@ vi.mock('node:dns/promises', () => ({
 	}
 }));
 vi.mock('node:https', () => ({ request: mocks.httpsRequest }));
+vi.mock('vscode', () => ({ workspace: { getConfiguration: () => ({ inspect: () => ({}) }) } }));
 
 const original = config.baseDir;
 let temporary: string;
@@ -96,6 +98,10 @@ describe('detached tunnel lifecycle', () => {
 			expect.arrayContaining(['http://127.0.0.1:47821', '--protocol', 'http2']),
 			expect.objectContaining({ detached: true, stdio: 'ignore' })
 		);
+		const args = mocks.spawn.mock.calls[0][1] as string[];
+		const configPath = args[args.indexOf('--config') + 1];
+		expect(configPath).toBe(path.join(temporary, QUICK_TUNNEL_CONFIG_NAME));
+		expect(fs.readFileSync(configPath, 'utf8')).toBe(QUICK_TUNNEL_CONFIG);
 		expect(manager.getState()).toEqual({
 			status: 'running',
 			url: 'https://one.trycloudflare.com',
@@ -201,7 +207,7 @@ describe('detached tunnel lifecycle', () => {
 		expect(manager.getState()).toMatchObject({ status: 'running', publicStatus: 'unreachable' });
 	});
 
-	it('keeps a registered tunnel connecting while the local resolver negatively caches its hostname', async () => {
+	it('marks the tunnel unreachable when public DNS has no record for its hostname', async () => {
 		mocks.alive = true;
 		(mocks.state as { tunnel: Record<string, unknown> }).tunnel = {
 			status: 'running',
@@ -220,6 +226,7 @@ describe('detached tunnel lifecycle', () => {
 			code: 'ENOTFOUND'
 		});
 		vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('fetch failed', { cause: dnsError })));
+		mocks.resolve4.mockRejectedValue(Object.assign(new Error('queryA ENOTFOUND one.trycloudflare.com'), { code: 'ENOTFOUND' }));
 		const probe = (
 			manager as unknown as {
 				probePublicHealth(force: boolean): Promise<void>;
@@ -227,12 +234,18 @@ describe('detached tunnel lifecycle', () => {
 		).probePublicHealth.bind(manager);
 
 		await probe(true);
-		await probe(true);
-		await probe(true);
 		expect(manager.getState()).toMatchObject({
 			status: 'running',
 			publicStatus: 'checking',
-			publicError: 'DNS fallback unavailable'
+			publicError: 'Tunnel address does not resolve. Restart the tunnel.'
+		});
+		await probe(true);
+		expect(manager.getState().publicStatus).toBe('checking');
+		await probe(true);
+		expect(manager.getState()).toMatchObject({
+			status: 'running',
+			publicStatus: 'unreachable',
+			publicError: 'Tunnel address does not resolve. Restart the tunnel.'
 		});
 	});
 
@@ -280,6 +293,9 @@ describe('detached tunnel lifecycle', () => {
 
 		await probe(true);
 		expect(manager.getState()).toMatchObject({ status: 'running', publicStatus: 'reachable', publicError: null });
+		const checkedAt = mocks.state?.tunnel.publicCheckedAt;
+		await probe(true);
+		expect(mocks.state?.tunnel.publicCheckedAt).toBe(checkedAt);
 		expect(mocks.httpsRequest).toHaveBeenCalledWith(
 			expect.objectContaining({
 				hostname: '104.16.230.132',
@@ -288,5 +304,27 @@ describe('detached tunnel lifecycle', () => {
 			}),
 			expect.any(Function)
 		);
+	});
+
+	it('caps the live tunnel log while polling and keeps only the newest inactive logs', async () => {
+		const active = path.join(temporary, 'tunnel-active.log');
+		fs.writeFileSync(active, 'x'.repeat(LOG_LIMITS.maxFileBytes));
+		mocks.state!.tunnel.logPath = active;
+		manager.syncMonitor(true);
+		await vi.waitFor(() => expect(fs.statSync(active).size).toBe(0));
+		manager.syncMonitor(false);
+
+		const stale = Array.from({ length: config.apiServer.retainedProcessLogs + 1 }, (_, index) => {
+			const file = path.join(temporary, `tunnel-old-${index}.log`);
+			fs.writeFileSync(file, 'old');
+			const time = new Date(1_700_000_000_000 + index * 1000);
+			fs.utimesSync(file, time, time);
+
+			return file;
+		});
+		await manager.stop();
+		expect(fs.existsSync(active)).toBe(true);
+		expect(stale.slice(0, 2).every((file) => !fs.existsSync(file))).toBe(true);
+		expect(stale.slice(2).every((file) => fs.existsSync(file))).toBe(true);
 	});
 });

@@ -9,6 +9,8 @@ import { promisify } from 'node:util';
 import BetterSqlite3 from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 
+import { FILE_PERMISSION_BITS, PRIVATE_DIR_MODE, PRIVATE_FILE_MODE } from '@ungate/shared';
+
 const execFileAsync = promisify(execFile);
 
 interface WorkerResult {
@@ -52,8 +54,8 @@ describe('database parallel startup', () => {
 			sqlite.close();
 
 			if (process.platform !== 'win32') {
-				expect(statSync(directory).mode & 0o777).toBe(0o700);
-				expect(statSync(dbPath).mode & 0o777).toBe(0o600);
+				expect(statSync(directory).mode & FILE_PERMISSION_BITS).toBe(PRIVATE_DIR_MODE);
+				expect(statSync(dbPath).mode & FILE_PERMISSION_BITS).toBe(PRIVATE_FILE_MODE);
 			}
 			expect(readFileSync(dbPath).byteLength).toBeGreaterThan(0);
 		} finally {

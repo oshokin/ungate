@@ -55,3 +55,16 @@ export class LogFileReader {
 		}
 	}
 }
+
+/**
+ * Bound a log whose writer keeps the file open. Append mode continues at the new
+ * end, and the reader treats a shorter file as a new stream.
+ */
+export function capAppendOnlyLog(file: string): void {
+	try {
+		if (fs.statSync(file).size < LOG_LIMITS.maxFileBytes) return;
+		fs.truncateSync(file, 0);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+	}
+}

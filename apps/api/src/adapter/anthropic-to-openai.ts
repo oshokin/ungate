@@ -1,5 +1,8 @@
 import { logger } from 'src/utils/logger';
 
+/** Characters of tool arguments written to the stream diagnostic log. */
+const LOGGED_TOOL_ARGUMENT_CHARS = 200;
+
 import { ToolTranslator } from '../tools/translator';
 
 import type { ContentBlock, AnthropicResponse } from '../types';
@@ -143,7 +146,7 @@ export class AnthropicToOpenai {
 		};
 
 		logger.log(
-			`[EMIT TOOL CALL CHUNK] index=${toolCallIndex}, id=${toolCallId ?? '-'}, name=${functionName ?? '-'}, args=${functionArgs ? functionArgs.slice(0, 200) : '-'}`
+			`[EMIT TOOL CALL CHUNK] index=${toolCallIndex}, id=${toolCallId ?? '-'}, name=${functionName ?? '-'}, args=${functionArgs ? functionArgs.slice(0, LOGGED_TOOL_ARGUMENT_CHARS) : '-'}`
 		);
 
 		return `data: ${JSON.stringify(chunk)}\n\n`;

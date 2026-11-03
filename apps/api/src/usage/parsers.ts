@@ -1,4 +1,17 @@
+import { secondsToMilliseconds } from 'date-fns';
+
 import type { UsageWindow } from '@ungate/shared';
+
+/** Seconds in one hour, used to label provider usage windows. */
+const SECONDS_PER_HOUR = 60 * 60;
+/** Seconds in one civil day. */
+const SECONDS_PER_DAY = 24 * SECONDS_PER_HOUR;
+/** Claude five-hour usage window when the payload omits a duration. */
+const FIVE_HOUR_WINDOW_SECONDS = 5 * SECONDS_PER_HOUR;
+/** Claude weekly usage window when the payload omits a duration. */
+const SEVEN_DAY_WINDOW_SECONDS = 7 * SECONDS_PER_DAY;
+/** ECMAScript time values must stay within ±8.64e15 milliseconds. */
+const MAX_TIME_VALUE_MS = 8.64e15;
 
 function record(value: unknown): Record<string, unknown> {
 	return value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
@@ -8,9 +21,9 @@ function number(value: unknown): number | null {
 }
 function reset(value: unknown, seconds = false): string | null {
 	if (typeof value !== 'string' && typeof value !== 'number') return null;
-	const at = typeof value === 'number' ? value * (seconds ? 1000 : 1) : Date.parse(value);
+	const at = typeof value === 'number' ? (seconds ? secondsToMilliseconds(value) : value) : Date.parse(value);
 
-	return Number.isFinite(at) && at > 0 && at <= 8.64e15 ? new Date(at).toISOString() : null;
+	return Number.isFinite(at) && at > 0 && at <= MAX_TIME_VALUE_MS ? new Date(at).toISOString() : null;
 }
 
 export function parseClaudeUsage(payload: unknown): UsageWindow[] {
@@ -33,7 +46,7 @@ export function parseClaudeUsage(payload: unknown): UsageWindow[] {
 			usedPercent: used,
 			remainingPercent: Math.max(0, 100 - used),
 			resetsAt: reset(raw.resets_at),
-			windowSeconds: id === 'five_hour' ? 18000 : 604800
+			windowSeconds: id === 'five_hour' ? FIVE_HOUR_WINDOW_SECONDS : SEVEN_DAY_WINDOW_SECONDS
 		});
 	}
 
@@ -56,9 +69,9 @@ export function parseOpenAiUsage(payload: unknown): UsageWindow[] {
 			const windowLabel =
 				duration === null
 					? name.replace('_', ' ')
-					: duration % 86400 === 0
-						? `${duration / 86400} days`
-						: `${duration / 3600} hours`;
+					: duration % SECONDS_PER_DAY === 0
+						? `${duration / SECONDS_PER_DAY} days`
+						: `${duration / SECONDS_PER_HOUR} hours`;
 			windows.push({
 				id: `${pool}.${name}`,
 				label: `${label} · ${windowLabel}`,

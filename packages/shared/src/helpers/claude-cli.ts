@@ -2,6 +2,7 @@ import { CLAUDE_CLI_LATEST_VERSION, CLAUDE_CLI_STABLE_VERSION, CLAUDE_CLI_USER_A
 
 import type { ClaudeCliVersionMode } from '../types/settings';
 
+/** Shown when a custom Claude Code version is not major.minor.patch. */
 const CUSTOM_VERSION_ERROR = 'Custom Claude Code version must look like 2.1.280';
 
 export class ClaudeCliVersion {

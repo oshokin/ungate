@@ -8,7 +8,10 @@ import { Settings } from '../database/app-settings';
 
 import type { AnthropicRequest, ContentBlock, ThinkingEffort } from '../types';
 
+/** Effort values Claude accepts in output_config. Anything else is dropped. */
 const VALID_EFFORTS: readonly ThinkingEffort[] = ['low', 'medium', 'high', 'xhigh', 'max'];
+/** Part of the Claude Code request fingerprint. Changing it changes what Anthropic accepts. */
+const STAINLESS_TIMEOUT_SECONDS = '600';
 
 // Opus 4.7/4.8 reject manual budget_tokens (400). They use adaptive thinking,
 // controlled by the `effort` parameter in a top-level `output_config` object.
@@ -62,7 +65,7 @@ export class RequestBuilder {
 			'x-stainless-retry-count': '0',
 			'x-stainless-runtime': 'node',
 			'x-stainless-runtime-version': process.version,
-			'x-stainless-timeout': '600'
+			'x-stainless-timeout': STAINLESS_TIMEOUT_SECONDS
 		};
 	}
 

@@ -1,5 +1,7 @@
 import { logger } from 'src/utils/logger';
 
+import { DEFAULT_MAX_TOKENS, REASONING_MAX_TOKENS } from '../proxy/token-budgets';
+
 import type { AnthropicRequest, AnthropicMessage, ContentBlock } from '../types';
 import type { OpenAIContentPart, OpenAIChatRequest } from '../types/openai';
 import type { ReasoningBudgetTier } from '@ungate/shared';
@@ -193,7 +195,7 @@ export function openaiToAnthropic(request: OpenAIChatRequest, override?: Anthrop
 	}
 
 	const requestedMaxTokens = request.max_tokens ?? request.max_completion_tokens;
-	const maxTokens = requestedMaxTokens ?? (normalized.reasoningBudget ? 32_000 : 4096);
+	const maxTokens = requestedMaxTokens ?? (normalized.reasoningBudget ? REASONING_MAX_TOKENS : DEFAULT_MAX_TOKENS);
 	const maxTokensSource =
 		request.max_tokens != null
 			? 'max_tokens'

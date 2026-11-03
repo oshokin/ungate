@@ -1,6 +1,7 @@
 import { createServer, type Server, type ServerResponse } from 'node:http';
 
 import { sleep } from '@ungate/shared';
+import { OAUTH_LOGIN_TTL_MS } from 'src/auth/oauth-limits';
 import { config } from 'src/config';
 
 export class OpenAICallbackServer {
@@ -34,7 +35,7 @@ export class OpenAICallbackServer {
 
 		this.callbackShutdownAbort = new AbortController();
 		const shutdownSignal = this.callbackShutdownAbort.signal;
-		void sleep(10 * 60 * 1000, shutdownSignal)
+		void sleep(OAUTH_LOGIN_TTL_MS, shutdownSignal)
 			.then(() => this.stop())
 			.catch(() => {});
 	}

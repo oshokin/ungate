@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import openaiPlugin from 'src/routes/openai';
+import { MAX_CHAT_MESSAGES } from 'src/schemas/proxy-requests';
 
 import { withPlugin } from '../test-harness';
 
@@ -65,6 +66,38 @@ describe('routes-openai', () => {
 				})
 			).statusCode
 		).toBe(403);
+		await app.close();
+	});
+
+	it('accepts an agent transcript past the old 1024-message cap', async () => {
+		resolveForChatCompletionMock.mockReturnValueOnce(undefined);
+		const app = await withPlugin(openaiPlugin, { apiKey: 'secret' });
+		const messages = Array.from({ length: 1025 }, () => ({ role: 'user', content: 'x' }));
+		const response = await app.inject({
+			method: 'POST',
+			url: '/v1/chat/completions',
+			headers: { 'x-api-key': 'secret' },
+			payload: { model: 'gpt-5.6-sol', messages }
+		});
+
+		expect(response.statusCode).toBe(404);
+		expect(response.json()).toEqual({
+			error: { message: 'Model not found', type: 'model_not_found', code: 'model_not_found' }
+		});
+		await app.close();
+	});
+
+	it('rejects a chat transcript above the message cap', async () => {
+		const app = await withPlugin(openaiPlugin, { apiKey: 'secret' });
+		const messages = Array.from({ length: MAX_CHAT_MESSAGES + 1 }, () => ({ role: 'user', content: 'x' }));
+		const response = await app.inject({
+			method: 'POST',
+			url: '/v1/chat/completions',
+			headers: { 'x-api-key': 'secret' },
+			payload: { model: 'gpt-5.6-sol', messages }
+		});
+
+		expect(response.statusCode).toBe(400);
 		await app.close();
 	});
 

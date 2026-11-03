@@ -1,5 +1,8 @@
 import { randomBytes } from 'node:crypto';
 
+import { secondsToMilliseconds } from 'date-fns';
+
+import { DEFAULT_ACCESS_TOKEN_TTL_SECONDS, OAUTH_LOGIN_TTL_MS } from 'src/auth/oauth-limits';
 import { config } from 'src/config';
 import { ProviderSettings } from 'src/database/provider-settings';
 import { logger } from 'src/utils/logger';
@@ -27,7 +30,7 @@ export class OpenAIOAuthService {
 		OpenAIPkceSessionStore.set(sessionId, {
 			codeVerifier: verifier,
 			state: verifier,
-			expiresAt: Date.now() + 10 * 60 * 1000
+			expiresAt: Date.now() + OAUTH_LOGIN_TTL_MS
 		});
 
 		await OpenAICallbackServer.start((requestUrl, path, response) => this.handleCallbackRequest(requestUrl, path, response));
@@ -75,11 +78,11 @@ export class OpenAIOAuthService {
 			accountId = OpenAIOAuthUtils.resolveWorkspace(parsed.authInfo);
 		}
 
-		const expiresIn = typeof tokens.expires_in === 'number' ? tokens.expires_in : 3600;
+		const expiresIn = typeof tokens.expires_in === 'number' ? tokens.expires_in : DEFAULT_ACCESS_TOKEN_TTL_SECONDS;
 		const credentials: OAuthCredentials = {
 			accessToken: tokens.access_token as string,
 			refreshToken: (tokens.refresh_token as string) || '',
-			expiresAt: Date.now() + expiresIn * 1000,
+			expiresAt: Date.now() + secondsToMilliseconds(expiresIn),
 			email: email ?? undefined,
 			accountId: accountId ?? undefined
 		};
@@ -134,11 +137,11 @@ export class OpenAIOAuthService {
 		)
 			return null;
 		if (typeof tokens.access_token !== 'string' || !tokens.access_token.trim()) return null;
-		const expiresIn = typeof tokens.expires_in === 'number' ? tokens.expires_in : 3600;
+		const expiresIn = typeof tokens.expires_in === 'number' ? tokens.expires_in : DEFAULT_ACCESS_TOKEN_TTL_SECONDS;
 		const credentials: OAuthCredentials = {
 			accessToken: tokens.access_token,
 			refreshToken: (tokens.refresh_token as string | null) ?? refreshTokenValue,
-			expiresAt: Date.now() + expiresIn * 1000,
+			expiresAt: Date.now() + secondsToMilliseconds(expiresIn),
 			email: existingCredentials?.email ?? undefined,
 			accountId: existingCredentials?.accountId ?? undefined
 		};

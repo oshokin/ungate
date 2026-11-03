@@ -6,6 +6,7 @@ import { validateMiniMaxBaseUrl } from '../security/minimax-url';
 
 import type { FastifyPluginCallback, FastifyReply } from 'fastify';
 
+/** Content Security Policy for the small HTML page that finishes OAuth. */
 const OAUTH_HTML_CSP =
 	"default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'";
 

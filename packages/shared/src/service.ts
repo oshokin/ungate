@@ -1,5 +1,6 @@
 /** One release identity for API, extension and dashboard. Packaging checks the manifest. */
 export const UNGATE_VERSION = '1.7.14';
+/** Management protocol. The dashboard rejects an API whose protocol is older or newer. */
 export const API_PROTOCOL_VERSION = 3;
 
 export interface ApiHealth {

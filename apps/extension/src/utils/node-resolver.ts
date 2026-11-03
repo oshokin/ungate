@@ -3,6 +3,8 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
+import { PROCESS_PROBE_MAX_BUFFER_BYTES, PROCESS_PROBE_TIMEOUT_MS } from './process-limits';
+
 export interface RuntimeInfo {
 	version: string;
 	napi: number;
@@ -48,8 +50,8 @@ export class NodeResolver {
 			'JSON.stringify({version:process.versions.node,napi:Number(process.versions.napi),abi:process.versions.modules,platform:process.platform,arch:process.arch,execPath:process.execPath,electron:process.versions.electron})';
 		const result = cp.spawnSync(runtime, ['-p', script], {
 			encoding: 'utf8',
-			timeout: 3000,
-			maxBuffer: 65536,
+			timeout: PROCESS_PROBE_TIMEOUT_MS,
+			maxBuffer: PROCESS_PROBE_MAX_BUFFER_BYTES,
 			windowsHide: true,
 			shell: false
 		});

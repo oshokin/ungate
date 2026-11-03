@@ -20,18 +20,28 @@ export class RuntimeStateStore {
 	}
 
 	public static async touchClient(windowId: string): Promise<RuntimeState> {
-		return await this.mutate((current) => {
-			const now = Date.now();
-			const clients = RuntimeStateNormalizer.filterLiveClients(current.clients, now);
-			const previous = clients[windowId];
+		const now = Date.now();
+		const current = RuntimeStateFileStore.read();
+		const live = RuntimeStateNormalizer.filterLiveClients(current.clients, now);
+		const previous = live[windowId];
+		// A live window stays fresh for the whole stale window. Persist only after half of
+		// it, so a crash is still noticed and an idle heartbeat does not rewrite the file.
+		const stillFresh = previous !== undefined && now - previous.lastSeenAt < config.runtimeState.staleClientMs / 2;
+		const diskHasExpiredClient = RuntimeStateFileStore.storedClientIds().some((id) => live[id] === undefined);
+		if (stillFresh && !diskHasExpiredClient) return current;
 
-			if (!previous || now - previous.lastSeenAt >= config.runtimeState.heartbeatThrottleMs) {
-				clients[windowId] = { lastSeenAt: now };
+		return await this.mutate((state) => {
+			const seenAt = Date.now();
+			const clients = RuntimeStateNormalizer.filterLiveClients(state.clients, seenAt);
+			const seen = clients[windowId];
+
+			if (!seen || seenAt - seen.lastSeenAt >= config.runtimeState.heartbeatThrottleMs) {
+				clients[windowId] = { lastSeenAt: seenAt };
 			}
 
-			current.clients = clients;
+			state.clients = clients;
 
-			return current;
+			return state;
 		});
 	}
 
@@ -140,7 +150,7 @@ export class RuntimeStateStore {
 			if (state.api.port !== current.api.port || state.api.lastSeenAt !== current.api.lastSeenAt) return state;
 			if (
 				state.api.status === 'starting' &&
-				now - state.api.lastSeenAt < 120000 &&
+				now - state.api.lastSeenAt < config.extensionController.apiStartFreshMs &&
 				state.api.ownerWindowId &&
 				this.getLiveClientIds(state).includes(state.api.ownerWindowId)
 			)

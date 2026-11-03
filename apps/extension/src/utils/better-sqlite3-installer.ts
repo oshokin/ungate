@@ -5,9 +5,18 @@ import { promisify } from 'node:util';
 
 import { RuntimeStateStore } from '../runtime-state';
 
+import {
+	PROCESS_PROBE_MAX_BUFFER_BYTES,
+	SQLITE_BINDING_LOAD_TIMEOUT_MS,
+	SQLITE_RUNTIME_INSPECT_TIMEOUT_MS
+} from './process-limits';
+
 const execFile = promisify(cp.execFile);
+/** better-sqlite3 version whose prebuilds are shipped inside the extension. */
 const BUNDLED_VERSION = '13.0.3';
+/** Platforms that have a packaged better-sqlite3 prebuild. */
 const SUPPORTED_PLATFORMS = new Set(['darwin', 'linux', 'win32']);
+/** CPU architectures that have a packaged better-sqlite3 prebuild. */
 const SUPPORTED_ARCHITECTURES = new Set(['arm64', 'x64']);
 
 interface InstallCallbacks {
@@ -78,7 +87,11 @@ export class BetterSqlite3Installer {
 	private static inspectRuntime(runtime: string): RuntimeTarget {
 		const script =
 			"JSON.stringify({platform:process.platform,arch:process.arch,isMusl:process.platform==='linux'&&!process.report.getReport().header.glibcVersionRuntime})";
-		const result = cp.spawnSync(runtime, ['-p', script], { encoding: 'utf8', timeout: 5000, windowsHide: true });
+		const result = cp.spawnSync(runtime, ['-p', script], {
+			encoding: 'utf8',
+			timeout: SQLITE_RUNTIME_INSPECT_TIMEOUT_MS,
+			windowsHide: true
+		});
 
 		if (result.error) throw result.error;
 		if (result.status !== 0) throw new Error(result.stderr.trim() || `Failed to inspect runtime: ${runtime}`);
@@ -96,7 +109,12 @@ export class BetterSqlite3Installer {
 		const script = `const Database=require('better-sqlite3'); const db=new Database(':memory:', { nativeBinding: ${bindingLiteral} }); db.pragma('journal_mode = WAL'); db.close();`;
 
 		try {
-			await execFile(runtime, ['-e', script], { cwd: apiDir, timeout: 10000, maxBuffer: 65536, windowsHide: true });
+			await execFile(runtime, ['-e', script], {
+				cwd: apiDir,
+				timeout: SQLITE_BINDING_LOAD_TIMEOUT_MS,
+				maxBuffer: PROCESS_PROBE_MAX_BUFFER_BYTES,
+				windowsHide: true
+			});
 
 			return true;
 		} catch (error) {

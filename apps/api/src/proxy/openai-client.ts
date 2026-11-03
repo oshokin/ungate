@@ -1,5 +1,8 @@
 import { logger } from 'src/utils/logger';
 
+/** Characters of a non-JSON Codex error body appended to the proxy error. */
+const LOGGED_UPSTREAM_ERROR_CHARS = 500;
+
 import { OpenAIOAuthService } from '../auth/openai/openai-oauth-service';
 import { config } from '../config';
 import { Settings } from '../database/app-settings';
@@ -18,6 +21,7 @@ import type { RequestContext } from '../types/proxy';
 const CODEX_INSTRUCTIONS_FALLBACK =
 	'You are a coding assistant integrated with the user editor. Follow the conversation and use tools when appropriate.';
 
+/** Optional operator override for the Codex instructions field. */
 const ENV_CHATGPT_INSTRUCTIONS = process.env.CHATGPT_INSTRUCTIONS?.trim();
 
 interface ProxyOpenAiResult {
@@ -152,7 +156,7 @@ export class OpenAiClient {
 			}
 		} catch {
 			if (errorText.trim()) {
-				errorMessage = `${errorMessage}: ${errorText.slice(0, 500)}`;
+				errorMessage = `${errorMessage}: ${errorText.slice(0, LOGGED_UPSTREAM_ERROR_CHARS)}`;
 			}
 		}
 

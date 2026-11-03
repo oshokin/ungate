@@ -14,6 +14,9 @@ import { groupModelFamilies } from './model-discovery';
 import { getModelDiscoveryStore } from './model-discovery-store.svelte';
 import { getSettingsFormStore } from './settings-form-store.svelte';
 
+/** How long the copied-model checkmark stays visible. */
+const MODEL_ID_COPIED_MS = 1500;
+
 import type { GroupedModelItem, ModelFamilyGroup } from './model-discovery';
 import type { ModelMappingConfig, ModelMappingProvider } from '@ungate/shared/frontend';
 
@@ -238,7 +241,7 @@ async function copyModelId(id: string) {
 	await navigator.clipboard.writeText(id);
 	copiedId = id;
 	void (async () => {
-		await sleep(1500);
+		await sleep(MODEL_ID_COPIED_MS);
 
 		if (copiedId === id) {
 			copiedId = null;

@@ -1,9 +1,16 @@
+/** Pixel bounds for the resizable log panel. */
 export const LOG_PANEL = {
+	/** Height used before the user drags the panel. */
 	defaultHeight: 288,
+	/** Smallest height the drag handle can set. */
 	minHeight: 192,
+	/** Largest height the drag handle can set. */
 	maxHeight: 720,
+	/** Keyboard resize step. */
 	resizeStep: 16,
+	/** Keyboard resize step with the larger modifier. */
 	largeResizeStep: 48,
+	/** Distance from the bottom that still counts as following the tail. */
 	tailThreshold: 24
 } as const;
 

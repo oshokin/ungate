@@ -13,6 +13,7 @@
 		"test:dashboard": "node --import tsx tests/dashboard-browser.ts"
 	},
 	"dependencies": {
+		"@ungate/shared": "workspace:*",
 		"cloudflared": "~0.7.3"
 	},
 	"devDependencies": {

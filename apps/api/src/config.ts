@@ -2,6 +2,7 @@ import { MINIMAX_BASE_URLS, type AppSettings } from '@ungate/shared';
 
 import type { ProxyConfig } from './types';
 
+/** Provider URLs and OAuth client values. These are upstream contracts, not local preferences. */
 export const config = {
 	claude: {
 		clientId: '9d1c250a-e61b-44d9-88ed-5944d1962f5e',

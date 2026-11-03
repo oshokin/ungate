@@ -4,8 +4,16 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-import { getAdminToken, sleep, type ApiStatus as ServerStatus, type LogEntry } from '@ungate/shared';
-import { describeService } from '@ungate/shared/frontend';
+import {
+	getAdminToken,
+	PRIVATE_DIR_MODE,
+	PRIVATE_FILE_MODE,
+	sleep,
+	UNGATE_DIR,
+	type ApiStatus as ServerStatus,
+	type LogEntry
+} from '@ungate/shared';
+import { describeService, type RuntimeState } from '@ungate/shared/frontend';
 import * as vscode from 'vscode';
 
 import { readApiHealth, assertCompatibleApi } from './local-api';
@@ -14,7 +22,7 @@ import { RuntimeStateStore } from './runtime-state';
 import { config } from './runtime-state/config';
 import { BetterSqlite3Installer } from './utils/better-sqlite3-installer';
 import { CrossProcessLock } from './utils/cross-process-lock';
-import { LogFileReader } from './utils/log-file-reader';
+import { capAppendOnlyLog, LogFileReader } from './utils/log-file-reader';
 import { ManagedProcess } from './utils/managed-process';
 import { NodeResolver } from './utils/node-resolver';
 
@@ -262,7 +270,7 @@ export class ApiServer {
 		const cwd = this.getServerCwd();
 		this.stdoutBuffer = '';
 		const logPath = path.join(config.baseDir, `api-${randomUUID()}.log`);
-		const logFd = fs.openSync(logPath, 'ax', 0o600);
+		const logFd = fs.openSync(logPath, 'ax', PRIVATE_FILE_MODE);
 		this.attachLog(logPath);
 
 		const isDev = this.context.extensionMode === vscode.ExtensionMode.Development;
@@ -274,7 +282,7 @@ export class ApiServer {
 			...process.env,
 			UNGATE_ADMIN_TOKEN: getAdminToken(),
 			UNGATE_BETTER_SQLITE3_NATIVE_BINDING: BetterSqlite3Installer.resolveBindingPath(cwd, runtime),
-			...(isDev ? { DB_PATH: path.join(os.homedir(), '.ungate', 'data-dev.db') } : { DRIZZLE_PATH: path.join(cwd, 'drizzle') })
+			...(isDev ? { DB_PATH: path.join(os.homedir(), UNGATE_DIR, 'data-dev.db') } : { DRIZZLE_PATH: path.join(cwd, 'drizzle') })
 		};
 
 		const nodeArgs = isDev ? ['-r', 'source-map-support/register', 'dist/main.js'] : ['bundle/main.cjs'];
@@ -500,16 +508,12 @@ export class ApiServer {
 	}
 
 	private async writeRuntimeState(status: ServerStatus, errorMessage: string | null): Promise<void> {
-		await RuntimeStateStore.mutate((current) => {
-			if (
-				current.api.ownerWindowId &&
-				current.api.ownerWindowId !== this.callbacks.getWindowId() &&
-				RuntimeStateStore.getLiveClientIds(current).includes(current.api.ownerWindowId)
-			) {
-				return current;
-			}
+		const snapshot = RuntimeStateStore.read();
+		if (this.anotherLiveWindowOwnsApi(snapshot) || this.apiRecordMatches(snapshot, status, errorMessage)) return;
 
-			const now = Date.now();
+		await RuntimeStateStore.mutate((current) => {
+			if (this.anotherLiveWindowOwnsApi(current) || this.apiRecordMatches(current, status, errorMessage)) return current;
+
 			let pid: number | null = this.attachedPid ?? current.api.pid;
 
 			if (this.process?.pid) {
@@ -520,7 +524,7 @@ export class ApiServer {
 			current.api.port = this.port;
 			current.api.logPath = status === 'stopped' ? undefined : (this.logPath ?? current.api.logPath);
 			current.api.status = status;
-			current.api.lastSeenAt = now;
+			current.api.lastSeenAt = Date.now();
 			current.api.lastError = errorMessage;
 			if (status === 'running') current.api.startSuppressed = false;
 
@@ -532,6 +536,35 @@ export class ApiServer {
 
 			return current;
 		});
+	}
+
+	/** A healthy check repeats the same API record. Rewriting it only to bump lastSeenAt updates the data directory. */
+	private apiRecordMatches(state: RuntimeState, status: ServerStatus, errorMessage: string | null): boolean {
+		const api = state.api;
+		let pid: number | null = this.attachedPid ?? api.pid;
+		if (this.process?.pid) pid = this.process.pid;
+		const owner =
+			status === 'starting' || status === 'running'
+				? this.callbacks.getWindowId()
+				: status === 'stopped' || status === 'error'
+					? null
+					: api.ownerWindowId;
+
+		return (
+			api.pid === (status === 'stopped' ? null : pid) &&
+			api.port === this.port &&
+			api.logPath === (status === 'stopped' ? undefined : (this.logPath ?? api.logPath)) &&
+			api.status === status &&
+			api.lastError === errorMessage &&
+			api.ownerWindowId === owner &&
+			api.startSuppressed === (status === 'running' ? false : api.startSuppressed)
+		);
+	}
+
+	private anotherLiveWindowOwnsApi(state: RuntimeState): boolean {
+		const owner = state.api.ownerWindowId;
+
+		return !!owner && owner !== this.callbacks.getWindowId() && RuntimeStateStore.getLiveClientIds(state).includes(owner);
 	}
 
 	private async checkPortHealth(port: number): Promise<boolean> {
@@ -619,6 +652,7 @@ export class ApiServer {
 		if (!this.logPath) return;
 		const lines = this.logReader.read(this.logPath);
 		if (lines.length) this.onStdout(Buffer.from(`${lines.join('\n')}\n`));
+		capAppendOnlyLog(this.logPath);
 	}
 
 	private rotateLogs(): void {
@@ -634,8 +668,8 @@ export class ApiServer {
 	}
 
 	private ensureBaseDir(): void {
-		fs.mkdirSync(config.baseDir, { recursive: true, mode: 0o700 });
-		if (process.platform !== 'win32') fs.chmodSync(config.baseDir, 0o700);
+		fs.mkdirSync(config.baseDir, { recursive: true, mode: PRIVATE_DIR_MODE });
+		if (process.platform !== 'win32') fs.chmodSync(config.baseDir, PRIVATE_DIR_MODE);
 	}
 
 	private async ensureNativeDeps(): Promise<void> {

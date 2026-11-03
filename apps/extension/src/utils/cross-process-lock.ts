@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
-import { sleep } from '@ungate/shared';
+import { PRIVATE_DIR_MODE, PRIVATE_FILE_MODE, sleep } from '@ungate/shared';
 
 import { config } from '../runtime-state/config';
 
@@ -13,7 +13,7 @@ interface Owner {
 
 export class CrossProcessLock {
 	static async acquire(lockName: string, timeoutMs = config.runtimeState.lockTimeoutMs): Promise<() => void> {
-		fs.mkdirSync(config.baseDir, { recursive: true, mode: 0o700 });
+		fs.mkdirSync(config.baseDir, { recursive: true, mode: PRIVATE_DIR_MODE });
 		const target = path.join(config.baseDir, lockName);
 		const guard = `${target}.recovery`;
 		const owner: Owner = { pid: process.pid, token: randomUUID() };
@@ -22,9 +22,9 @@ export class CrossProcessLock {
 			if (!fs.existsSync(guard)) {
 				let created = false;
 				try {
-					fs.mkdirSync(target, { mode: 0o700 });
+					fs.mkdirSync(target, { mode: PRIVATE_DIR_MODE });
 					created = true;
-					fs.writeFileSync(this.ownerPath(target), JSON.stringify(owner), { mode: 0o600, flag: 'wx' });
+					fs.writeFileSync(this.ownerPath(target), JSON.stringify(owner), { mode: PRIVATE_FILE_MODE, flag: 'wx' });
 					let released = false;
 
 					return () => {
@@ -85,7 +85,7 @@ export class CrossProcessLock {
 
 	private static recoverDeadOwner(target: string, guard: string): void {
 		try {
-			fs.mkdirSync(guard, { mode: 0o700 });
+			fs.mkdirSync(guard, { mode: PRIVATE_DIR_MODE });
 		} catch (error) {
 			if (!this.isContention(error)) throw error;
 

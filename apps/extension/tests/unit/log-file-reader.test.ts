@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { LOG_LIMITS } from '@ungate/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { LogFileReader } from '../../src/utils/log-file-reader';
+import { capAppendOnlyLog, LogFileReader } from '../../src/utils/log-file-reader';
 
 let directory: string;
 let file: string;
@@ -48,6 +48,18 @@ describe('process log reader', () => {
 		const reader = new LogFileReader();
 		fs.writeFileSync(file, `${'x'.repeat(LOG_LIMITS.readChunkBytes + 10)}\nrecent\n`);
 		expect(reader.read(file)).toEqual(['recent']);
+	});
+	it('truncates an append-only log at the file budget without replaying the discarded lines', () => {
+		const reader = new LogFileReader();
+		fs.writeFileSync(file, `${'x'.repeat(LOG_LIMITS.maxFileBytes)}\nkept\n`);
+		expect(reader.read(file)).toEqual(['kept']);
+		capAppendOnlyLog(file);
+		expect(fs.statSync(file).size).toBe(0);
+		fs.appendFileSync(file, 'after\n');
+		expect(reader.read(file)).toEqual(['after']);
+		fs.writeFileSync(file, 'small\n');
+		capAppendOnlyLog(file);
+		expect(fs.readFileSync(file, 'utf8')).toBe('small\n');
 	});
 	it('does not publish the tail of an oversized unfinished line as a new message', () => {
 		const reader = new LogFileReader();

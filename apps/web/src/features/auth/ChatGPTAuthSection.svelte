@@ -9,6 +9,9 @@ import { Api } from '$shared/api';
 import { createToastWatcher } from '$shared/toast-store.svelte';
 import { postExtensionMessage } from '$shared/vscode';
 
+/** How often the dashboard checks whether the Codex login finished. */
+const AUTH_STATUS_POLL_MS = 1000;
+
 interface Props {
 	onAuthStatusChange?: () => void;
 	onConnected?: () => void | Promise<void>;
@@ -89,7 +92,7 @@ async function handleLogin() {
 					lastAction = 'Status check failed';
 				}
 			})();
-		}, 1000);
+		}, AUTH_STATUS_POLL_MS);
 
 		if (timeoutAbort) {
 			timeoutAbort.abort();

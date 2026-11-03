@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
+import { PRIVATE_FILE_MODE } from '@ungate/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { baseDir } = vi.hoisted(() => {
@@ -45,14 +46,14 @@ describe('RuntimeStateFileStore corruption handling', () => {
 	});
 
 	it('throws on corrupt state instead of silently returning defaults', () => {
-		fs.writeFileSync(path.join(baseDir, 'runtime-state.json'), '{not json', { mode: 0o600 });
+		fs.writeFileSync(path.join(baseDir, 'runtime-state.json'), '{not json', { mode: PRIVATE_FILE_MODE });
 
 		expect(() => RuntimeStateFileStore.read()).toThrow('Cannot read runtime state');
 	});
 
 	it('quarantines corrupt state under the mutation lock and does not overwrite it', async () => {
 		const statePath = path.join(baseDir, 'runtime-state.json');
-		fs.writeFileSync(statePath, '{not json', { mode: 0o600 });
+		fs.writeFileSync(statePath, '{not json', { mode: PRIVATE_FILE_MODE });
 
 		await expect(RuntimeStateFileStore.mutate((state) => state)).rejects.toThrow('Cannot read runtime state');
 		expect(fs.existsSync(statePath)).toBe(false);

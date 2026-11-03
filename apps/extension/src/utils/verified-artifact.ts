@@ -3,9 +3,15 @@ import * as fs from 'node:fs';
 import { Readable } from 'node:stream';
 import { finished, pipeline } from 'node:stream/promises';
 
+import { ARTIFACT_DOWNLOAD_TIMEOUT_MS } from './process-limits';
+
+/** User-Agent sent when downloading a pinned upstream binary. */
 const USER_AGENT = 'ungate-extension';
+/** Length of a lowercase hex SHA-256 digest. */
 const SHA256_HEX_LENGTH = 64;
+/** Sidecar written next to a verified binary so later launches can recheck it. */
 const STAMP_SUFFIX = '.sha256';
+/** Largest pinned download accepted. cloudflared and the SQLite prebuilds fit under this. */
 export const MAX_ARTIFACT_BYTES = 128 * 1024 * 1024;
 
 export interface PinnedArtifact {
@@ -31,7 +37,7 @@ export class VerifiedArtifact {
 		const response = await fetch(artifact.url, {
 			headers: { 'User-Agent': USER_AGENT },
 			redirect: 'follow',
-			signal: AbortSignal.timeout(120000)
+			signal: AbortSignal.timeout(ARTIFACT_DOWNLOAD_TIMEOUT_MS)
 		});
 
 		if (!response.ok) {

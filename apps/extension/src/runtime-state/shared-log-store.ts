@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
-import { LOG_LIMITS, normalizeLogEntryLimit } from '@ungate/shared';
+import { FILE_PERMISSION_BITS, LOG_LIMITS, normalizeLogEntryLimit, PRIVATE_DIR_MODE, PRIVATE_FILE_MODE } from '@ungate/shared';
 
 import { config } from './config';
 
@@ -109,7 +109,7 @@ export class SharedLogStore {
 
 	private static appendRecord(record: SharedLogRecord): void {
 		const file = this.currentFile();
-		const fd = fs.openSync(file, fs.constants.O_APPEND | fs.constants.O_CREAT | fs.constants.O_WRONLY, 0o600);
+		const fd = fs.openSync(file, fs.constants.O_APPEND | fs.constants.O_CREAT | fs.constants.O_WRONLY, PRIVATE_FILE_MODE);
 		try {
 			fs.writeSync(fd, `${JSON.stringify(record)}\n`, undefined, 'utf8');
 		} finally {
@@ -154,11 +154,11 @@ export class SharedLogStore {
 	}
 
 	private static ensureDirectory(): void {
-		fs.mkdirSync(config.baseDir, { recursive: true, mode: 0o700 });
-		fs.mkdirSync(logDir, { recursive: true, mode: 0o700 });
-		if (process.platform !== 'win32') {
-			fs.chmodSync(config.baseDir, 0o700);
-			fs.chmodSync(logDir, 0o700);
+		fs.mkdirSync(config.baseDir, { recursive: true, mode: PRIVATE_DIR_MODE });
+		fs.mkdirSync(logDir, { recursive: true, mode: PRIVATE_DIR_MODE });
+		if (process.platform === 'win32') return;
+		for (const directory of [config.baseDir, logDir]) {
+			if ((fs.statSync(directory).mode & FILE_PERMISSION_BITS) !== PRIVATE_DIR_MODE) fs.chmodSync(directory, PRIVATE_DIR_MODE);
 		}
 	}
 }

@@ -1,3 +1,6 @@
+/** Threshold at which a latency switches from milliseconds to seconds. */
+const MILLISECONDS_PER_SECOND = 1000;
+
 export class Formatter {
 	static number(value: number): string {
 		return value.toLocaleString();
@@ -23,10 +26,10 @@ export class Formatter {
 			return '';
 		}
 
-		if (ms < 1000) {
+		if (ms < MILLISECONDS_PER_SECOND) {
 			return `${ms}ms`;
 		}
 
-		return `${(ms / 1000).toFixed(1)}s`;
+		return `${(ms / MILLISECONDS_PER_SECOND).toFixed(1)}s`;
 	}
 }

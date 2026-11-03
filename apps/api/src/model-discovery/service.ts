@@ -18,6 +18,7 @@ interface CacheEntry {
 	result: ModelDiscoveryResponse;
 }
 
+/** How long a discovered model catalog is reused for the same account. */
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const allowedMiniMaxRoots = new Set<string>(Object.values(MINIMAX_BASE_URLS));
 

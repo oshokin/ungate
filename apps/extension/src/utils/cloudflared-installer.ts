@@ -3,6 +3,8 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
+import { EXECUTABLE_FILE_MODE } from '@ungate/shared';
+
 import { InstallStamp, VerifiedArtifact, type PinnedArtifact } from './verified-artifact';
 
 /**
@@ -12,6 +14,7 @@ import { InstallStamp, VerifiedArtifact, type PinnedArtifact } from './verified-
  */
 export const CLOUDFLARED_VERSION = '2026.8.2';
 
+/** Release directory for the one pinned cloudflared version. */
 const RELEASE_BASE = `https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}`;
 
 interface CloudflaredEntry {
@@ -114,7 +117,7 @@ export class CloudflaredInstaller {
 			fs.copyFileSync(stagedBinary, binaryPath);
 
 			if (process.platform !== 'win32') {
-				fs.chmodSync(binaryPath, 0o755);
+				fs.chmodSync(binaryPath, EXECUTABLE_FILE_MODE);
 			}
 
 			InstallStamp.write(binaryPath, artifact);

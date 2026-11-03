@@ -35,6 +35,20 @@ describe('ExtensionStatusBar', () => {
 		).toBe('offline');
 	});
 
+	it('stops the spinner when the public route is unreachable', () => {
+		expect(
+			ExtensionStatusBar.connectionStatus(
+				'running',
+				tunnel({
+					status: 'running',
+					url: 'https://example.trycloudflare.com',
+					publicStatus: 'unreachable',
+					publicError: 'Tunnel address does not resolve. Restart the tunnel.'
+				})
+			)
+		).toBe('offline');
+	});
+
 	it('uses connecting for active startup and public-route checks', () => {
 		expect(ExtensionStatusBar.connectionStatus('starting', tunnel())).toBe('connecting');
 		expect(
@@ -71,5 +85,24 @@ describe('ExtensionStatusBar', () => {
 		expect(result.value).toContain('API health check timed out.');
 		expect(result.value).toContain('`https://example.trycloudflare.com/v1`');
 		expect(result.value).toContain('Public health check timed out.');
+	});
+
+	it('replaces a raw DNS resolver error with a restart instruction', () => {
+		const result = ExtensionStatusBar.createTooltip(
+			'offline',
+			'running',
+			'http://127.0.0.1:47821',
+			null,
+			tunnel({
+				status: 'running',
+				url: 'https://example.trycloudflare.com',
+				publicStatus: 'unreachable',
+				publicError: 'queryA ENOTFOUND example.trycloudflare.com (ENOTFOUND)'
+			}),
+			'https://example.trycloudflare.com/v1'
+		);
+
+		expect(result.value).toContain('Tunnel address does not resolve. Restart the tunnel.');
+		expect(result.value).not.toContain('queryA');
 	});
 });

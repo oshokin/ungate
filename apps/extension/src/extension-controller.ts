@@ -26,6 +26,9 @@ import { SharedServiceController } from './shared-service-controller';
 import { TunnelManager } from './tunnel-manager';
 import { ManagedProcess } from './utils/managed-process';
 
+/** Right-side status bar priority. Higher values sit closer to the right edge. */
+const STATUS_BAR_PRIORITY = 100;
+
 class ActionCancelledError extends Error {}
 
 export class ExtensionController {
@@ -68,7 +71,11 @@ export class ExtensionController {
 		// A Remote SSH window replaces its bootstrap local extension host after
 		// authority resolution. Keep a stable item identity so Cursor replaces
 		// the disposed bootstrap item instead of losing the recreated one.
-		this.statusBar = vscode.window.createStatusBarItem('ungate.connectionStatus', vscode.StatusBarAlignment.Right, 100);
+		this.statusBar = vscode.window.createStatusBarItem(
+			'ungate.connectionStatus',
+			vscode.StatusBarAlignment.Right,
+			STATUS_BAR_PRIORITY
+		);
 		this.statusBar.command = extensionCommands.openDashboard;
 		this.context.subscriptions.push(this.statusBar);
 		// Render immediately in every local and Remote SSH window. Runtime-state
@@ -259,7 +266,7 @@ export class ExtensionController {
 		this.statusBarWarningTimer = setTimeout(() => {
 			this.statusBarWarningTimer = null;
 			this.statusBar.backgroundColor = undefined;
-		}, 8000);
+		}, config.extensionController.statusBarWarningMs);
 	}
 
 	private handleApiServerPortDetected(port: number): void {
@@ -435,7 +442,7 @@ export class ExtensionController {
 			this.runtimeStateSyncDebounce = setTimeout(() => {
 				this.runtimeStateSyncDebounce = null;
 				void this.syncFromRuntimeState().catch(() => {});
-			}, 100);
+			}, config.extensionController.runtimeStateDebounceMs);
 		};
 
 		this.runtimeStateWatcher.onDidChange(scheduleSync);

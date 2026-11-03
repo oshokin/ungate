@@ -1,3 +1,4 @@
+/** Cursor parameter names rewritten to the Claude Code names Anthropic allows. */
 const PARAMETER_NAME_MAP: Record<string, string> = {
 	path: 'target_file',
 	file: 'target_file',

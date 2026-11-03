@@ -1,3 +1,4 @@
+import { OAUTH_HTTP_TIMEOUT_MS } from 'src/auth/oauth-limits';
 import { config } from 'src/config';
 import { logger } from 'src/utils/logger';
 
@@ -9,7 +10,7 @@ export class OpenAIOAuthClient {
 		try {
 			const response = await fetch(oauthConfig.tokenUrl, {
 				method: 'POST',
-				signal: AbortSignal.timeout(10000),
+				signal: AbortSignal.timeout(OAUTH_HTTP_TIMEOUT_MS),
 				headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
 				body: new URLSearchParams({
 					grant_type: 'authorization_code',
@@ -44,7 +45,7 @@ export class OpenAIOAuthClient {
 		try {
 			const response = await fetch(oauthConfig.tokenUrl, {
 				method: 'POST',
-				signal: AbortSignal.timeout(10000),
+				signal: AbortSignal.timeout(OAUTH_HTTP_TIMEOUT_MS),
 				headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
 				body: new URLSearchParams({
 					grant_type: 'refresh_token',

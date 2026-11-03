@@ -71,11 +71,10 @@ vi.mock('../../src/utils/better-sqlite3-installer', () => {
 	};
 });
 
-vi.mock('@ungate/shared', () => {
-	return {
-		sleep: sleepMock,
-		getAdminToken: () => 'test-admin'
-	};
+vi.mock('@ungate/shared', async (original) => {
+	const actual = await original<typeof import('@ungate/shared')>();
+
+	return { ...actual, sleep: sleepMock, getAdminToken: () => 'test-admin' };
 });
 
 vi.mock('../../src/local-api', () => ({
@@ -210,6 +209,20 @@ describe('ApiServer.runHealthCheckCycle', () => {
 		ensureInstalledMock.mockResolvedValue(undefined);
 		vi.unstubAllGlobals();
 		vi.useRealTimers();
+	});
+
+	it('does not rewrite runtime state while the api stays running', async () => {
+		const runtimeState = createRuntimeState(['test-window']);
+		runtimeState.api.ownerWindowId = 'test-window';
+		const { server } = createServer();
+		const internals = getInternals(server);
+		runtimeReadMock.mockReturnValue(runtimeState);
+		runtimeHasLiveClientsMock.mockReturnValue(true);
+		Object.assign(internals, { port: 4783, lastStatus: 'running', process: null });
+
+		await internals.runHealthCheckCycle();
+
+		expect(runtimeMutateMock).not.toHaveBeenCalled();
 	});
 
 	it('does not mark attached running api as stopped after a transient health-check failure', async () => {
@@ -643,9 +656,10 @@ describe('ApiServer.onExit', () => {
 	});
 
 	it('attaches to an already running api after EADDRINUSE instead of staying in error', async () => {
-		const runtimeState = createRuntimeState();
+		const runtimeState = createRuntimeState([], null);
 		const { server, onPortDetected, onStatusChange } = createServer();
 		const internals = getInternals(server);
+		runtimeReadMock.mockReturnValue(runtimeState);
 		runtimeMutateMock.mockImplementation((mutator) => {
 			const nextState = mutator(structuredClone(runtimeState));
 

@@ -3,7 +3,8 @@ import { readFileSync } from 'node:fs';
 import { LOG_LIMITS, normalizeLogEntryLimit, UNGATE_VERSION } from '@ungate/shared';
 import { describe, expect, it, vi } from 'vitest';
 
-import { dashboardLogEntryLimit } from '../../src/dashboard-settings';
+import { dashboardLogEntryLimit, tunnelConnectTimeoutMs } from '../../src/dashboard-settings';
+import { normalizeTunnelConnectTimeoutMs, TUNNEL_CONNECT } from '../../src/tunnel-connect';
 
 const inspect = vi.hoisted(() => vi.fn());
 vi.mock('vscode', () => ({ workspace: { getConfiguration: () => ({ inspect }) } }));
@@ -31,5 +32,20 @@ describe('dashboard preferences and release identity', () => {
 			maximum: LOG_LIMITS.maxEntries,
 			scope: 'application'
 		});
+		expect(manifest.contributes.configuration.properties['ungate.tunnel.connectTimeoutSeconds']).toMatchObject({
+			default: TUNNEL_CONNECT.defaultSeconds,
+			minimum: TUNNEL_CONNECT.minSeconds,
+			maximum: TUNNEL_CONNECT.maxSeconds,
+			scope: 'machine'
+		});
+	});
+	it('uses the machine tunnel timeout and ignores a workspace override', () => {
+		inspect.mockReturnValue({ workspaceValue: 120 });
+		expect(tunnelConnectTimeoutMs()).toBe(TUNNEL_CONNECT.defaultSeconds * 1000);
+		inspect.mockReturnValue({ globalValue: 90, workspaceValue: 15 });
+		expect(tunnelConnectTimeoutMs()).toBe(90_000);
+	});
+	it.each([undefined, null, '45', 14, 121, 45.5, Infinity, NaN])('rejects invalid tunnel timeout %s', (value) => {
+		expect(normalizeTunnelConnectTimeoutMs(value)).toBe(TUNNEL_CONNECT.defaultSeconds * 1000);
 	});
 });

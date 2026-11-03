@@ -136,6 +136,14 @@
 					"scope": "machine",
 					"description": "Absolute path to the local Node.js executable (node.exe on Windows). Empty uses UNGATE_NODE_BIN, then automatic detection. Use Ungate: Choose Node.js Executable to validate and save a path."
 				},
+				"ungate.tunnel.connectTimeoutSeconds": {
+					"type": "integer",
+					"default": 45,
+					"minimum": 15,
+					"maximum": 120,
+					"scope": "machine",
+					"description": "How long to wait for cloudflared to publish a tunnel URL, in seconds. Increase this when a VPN or firewall slows the connection to TCP port 7844. Applies to the next tunnel start."
+				},
 				"ungate.logs.maxEntries": {
 					"type": "integer",
 					"default": 500,

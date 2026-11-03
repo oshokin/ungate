@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 
 import { describe, expect, it } from 'vitest';
 
+import { CALL_ID_HASH_HEX_CHARS, CALL_ID_PREFIX_CHARS, MAX_CODEX_CALL_ID_CHARS } from 'src/proxy/codex-call-id';
 import { CodexInputUtils } from 'src/proxy/codex-input-utils';
 import { ResponsesInputShape } from 'src/proxy/responses-input-normalizer/input-shape';
 
@@ -93,10 +94,10 @@ describe('proxy-codex-chat-input', () => {
 		]);
 		const callIds = input.filter((item) => item.type === 'function_call').map((item) => item.call_id);
 
-		expect(firstId.slice(0, 47)).toBe(secondId.slice(0, 47));
+		expect(firstId.slice(0, CALL_ID_PREFIX_CHARS)).toBe(secondId.slice(0, CALL_ID_PREFIX_CHARS));
 		expect(callIds).toEqual([expectedNormalizedCallId(firstId), expectedNormalizedCallId(secondId)]);
 		expect(callIds[0]).not.toBe(callIds[1]);
-		expect(callIds.every((id) => typeof id === 'string' && id.length === 64)).toBe(true);
+		expect(callIds.every((id) => typeof id === 'string' && id.length === MAX_CODEX_CALL_ID_CHARS)).toBe(true);
 	});
 
 	it('maps Responses-shaped call/output pairs to the same 64-char id', () => {
@@ -210,9 +211,9 @@ describe('proxy-codex-chat-input', () => {
 			{ type: 'function_call_output', call_id: overId, output: 'over' }
 		]);
 
-		expect(exactId).toHaveLength(64);
-		expect(overId).toHaveLength(65);
-		expect(remappedId).toHaveLength(64);
+		expect(exactId).toHaveLength(MAX_CODEX_CALL_ID_CHARS);
+		expect(overId).toHaveLength(MAX_CODEX_CALL_ID_CHARS + 1);
+		expect(remappedId).toHaveLength(MAX_CODEX_CALL_ID_CHARS);
 		expect(remappedId).not.toBe(overId);
 		expect(input.find((item) => item.type === 'function_call' && item.name === 'Read')?.call_id).toBe(exactId);
 		expect(input.find((item) => item.type === 'function_call' && item.name === 'Write')?.call_id).toBe(remappedId);
@@ -234,14 +235,14 @@ describe('proxy-codex-chat-input', () => {
 		expect(typeof synthesizedId).toBe('string');
 		expect(synthesizedId).not.toBe('');
 		expect((synthesizedId as string).length).toBeGreaterThanOrEqual(1);
-		expect((synthesizedId as string).length).toBeLessThanOrEqual(64);
+		expect((synthesizedId as string).length).toBeLessThanOrEqual(MAX_CODEX_CALL_ID_CHARS);
 	});
 });
 
 function expectedNormalizedCallId(id: string): string {
-	if (id.length <= 64) {
+	if (id.length <= MAX_CODEX_CALL_ID_CHARS) {
 		return id;
 	}
 
-	return `${id.slice(0, 47)}_${createHash('sha256').update(id).digest('hex').slice(0, 16)}`;
+	return `${id.slice(0, CALL_ID_PREFIX_CHARS)}_${createHash('sha256').update(id).digest('hex').slice(0, CALL_ID_HASH_HEX_CHARS)}`;
 }

@@ -3,16 +3,24 @@ import { createHash } from 'node:crypto';
 import { OAuth } from '../auth/oauth';
 import { OpenAIOAuthService } from '../auth/openai';
 import { ProviderSettings } from '../database/provider-settings';
+import { PROVIDER_READ_TIMEOUT_MS } from '../security/outbound-request';
 
 import { parseClaudeUsage, parseMiniMaxUsage, parseOpenAiUsage } from './parsers';
 
 import type { ModelMappingProvider, ProviderUsage, SubscriptionUsage } from '@ungate/shared';
 
+/** Provider usage endpoints. internal means the path is not a public documented API. */
 const definitions = {
 	claude: { url: 'https://api.anthropic.com/api/oauth/usage', contract: 'internal', parse: parseClaudeUsage },
 	openai: { url: 'https://chatgpt.com/backend-api/wham/usage', contract: 'internal', parse: parseOpenAiUsage },
 	minimax: { url: 'https://www.minimax.io/v1/token_plan/remains', contract: 'public', parse: parseMiniMaxUsage }
 } as const;
+
+/** How long a successful usage snapshot is reused before the provider is asked again. */
+const USAGE_CACHE_TTL_MS = 60_000;
+/** Largest usage response body kept in memory. */
+const MAX_USAGE_BODY_BYTES = 256 * 1024;
+
 interface CacheEntry {
 	identity: string;
 	expiresAt: number;
@@ -44,7 +52,7 @@ export class SubscriptionUsageService {
 		if (active) return active;
 		const flight = this.fetchProvider(provider, credentials, previous?.identity === identity ? previous.result : undefined)
 			.then((result) => {
-				this.cache.set(provider, { identity, result, expiresAt: Date.now() + 60000 });
+				this.cache.set(provider, { identity, result, expiresAt: Date.now() + USAGE_CACHE_TTL_MS });
 
 				return result;
 			})
@@ -101,7 +109,7 @@ export class SubscriptionUsageService {
 			const response = await fetch(definition.url, {
 				method: 'GET',
 				redirect: 'error',
-				signal: AbortSignal.timeout(8000),
+				signal: AbortSignal.timeout(PROVIDER_READ_TIMEOUT_MS),
 				headers: {
 					Authorization: `Bearer ${token.accessToken}`,
 					Accept: 'application/json',
@@ -129,7 +137,7 @@ export class SubscriptionUsageService {
 					const part = await reader.read();
 					if (part.done) break;
 					bytes += part.value.byteLength;
-					if (bytes > 256 * 1024) {
+					if (bytes > MAX_USAGE_BODY_BYTES) {
 						await reader.cancel();
 						throw new Error('Usage body exceeds limit');
 					}

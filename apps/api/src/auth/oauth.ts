@@ -1,11 +1,13 @@
 import { randomBytes } from 'node:crypto';
 
-import { minutesToMilliseconds } from 'date-fns';
+import { minutesToMilliseconds, secondsToMilliseconds } from 'date-fns';
 
 import { logger } from 'src/utils/logger';
 
 import { config } from '../config';
 import { ProviderSettings } from '../database/provider-settings';
+
+import { OAUTH_HTTP_TIMEOUT_MS } from './oauth-limits';
 
 import type { TokenInfo, TokenRefreshResponse, AuthStatus, LoginStart } from '../types/index';
 
@@ -108,7 +110,7 @@ export class OAuth {
 		try {
 			const response = await fetch(config.claude.oauth.tokenUrl, {
 				method: 'POST',
-				signal: AbortSignal.timeout(10000),
+				signal: AbortSignal.timeout(OAUTH_HTTP_TIMEOUT_MS),
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					grant_type: 'authorization_code',
@@ -128,7 +130,7 @@ export class OAuth {
 			}
 
 			const data: TokenExchangeResponse = await response.json();
-			const expiresAt = Date.now() + data.expires_in * 1000;
+			const expiresAt = Date.now() + secondsToMilliseconds(data.expires_in);
 			const email = data.account?.email_address;
 
 			ProviderSettings.upsertOAuth('claude', {
@@ -172,7 +174,7 @@ export class OAuth {
 
 			const response = await fetch(config.claude.oauth.tokenUrl, {
 				method: 'POST',
-				signal: AbortSignal.timeout(10000),
+				signal: AbortSignal.timeout(OAUTH_HTTP_TIMEOUT_MS),
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					grant_type: 'refresh_token',
@@ -189,7 +191,7 @@ export class OAuth {
 			}
 
 			const data: TokenRefreshResponse = await response.json();
-			const expiresAt = Date.now() + data.expires_in * 1000;
+			const expiresAt = Date.now() + secondsToMilliseconds(data.expires_in);
 
 			const current = ProviderSettings.get('claude');
 			if (!current || current.accessToken !== owner?.accessToken || current.refreshToken !== refreshTokenValue) return null;

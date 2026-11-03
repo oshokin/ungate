@@ -6,6 +6,15 @@ import type { ApiStatus as ApiBarStatus, TunnelState } from '@ungate/shared/fron
 
 export type UngateConnectionStatus = 'ready' | 'connecting' | 'offline';
 
+/** Node's resolver names an IPv4 lookup "queryA". The tooltip shows what to do instead. */
+function readablePublicError(error: string | null | undefined): string {
+	if (!error) return 'health check failed';
+	if (error.includes('queryA') || error.includes('ENOTFOUND') || error.includes('EAI_AGAIN'))
+		return 'Tunnel address does not resolve. Restart the tunnel.';
+
+	return error;
+}
+
 export class ExtensionStatusBar {
 	public static connectionStatus(apiState: ApiBarStatus, tunnel: TunnelState): UngateConnectionStatus {
 		if (apiState === 'running' && tunnel.status === 'running' && tunnel.publicStatus === 'reachable') {
@@ -66,7 +75,7 @@ export class ExtensionStatusBar {
 				tunnel.publicStatus === 'reachable'
 					? '$(check) Public route: reachable'
 					: tunnel.publicStatus === 'unreachable'
-						? `$(error) Public route: unavailable (${tunnel.publicError ?? 'health check failed'})`
+						? `$(error) Public route: unavailable (${readablePublicError(tunnel.publicError)})`
 						: '$(sync~spin) Public route: checking';
 
 			return `$(globe) Tunnel process: running\n\n${publicRoute}\n\n\`${tunnelApiUrl}\``;

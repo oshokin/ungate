@@ -6,6 +6,8 @@ import { ProviderSettings } from '../database/provider-settings';
 import { validateMiniMaxBaseUrl } from '../security/minimax-url';
 import { fetchWithHeaderTimeout } from '../security/outbound-request';
 
+import { DEFAULT_MAX_TOKENS } from './token-budgets';
+
 import type { OpenAIChatRequest } from '../types/openai';
 import type { RequestContext } from '../types/proxy';
 
@@ -51,7 +53,7 @@ export async function proxyMiniMaxRequest(
 				include_usage: true
 			}
 		}),
-		max_completion_tokens: body.max_completion_tokens ?? body.max_tokens ?? 4096,
+		max_completion_tokens: body.max_completion_tokens ?? body.max_tokens ?? DEFAULT_MAX_TOKENS,
 		temperature: body.temperature,
 		top_p: body.top_p,
 		...(body.tools && body.tools.length > 0 && { tools: body.tools }),

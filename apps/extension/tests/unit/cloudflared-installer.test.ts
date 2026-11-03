@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
+import { EXECUTABLE_FILE_MODE, FILE_PERMISSION_BITS } from '@ungate/shared';
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 
 import { CLOUDFLARED_VERSION, CloudflaredInstaller } from '../../src/utils/cloudflared-installer';
@@ -50,9 +51,10 @@ describe('CloudflaredInstaller', () => {
 
 		expect(installed).toBe(binaryPath);
 		expect(fs.readFileSync(binaryPath, 'utf8')).toBe('verified-cloudflared');
-		const expectedMode = originalPlatform === 'win32' ? fs.statSync(binaryPath).mode & 0o777 : 0o755;
+		const expectedMode =
+			originalPlatform === 'win32' ? fs.statSync(binaryPath).mode & FILE_PERMISSION_BITS : EXECUTABLE_FILE_MODE;
 
-		expect(fs.statSync(binaryPath).mode & 0o777).toBe(expectedMode);
+		expect(fs.statSync(binaryPath).mode & FILE_PERMISSION_BITS).toBe(expectedMode);
 		expect(fs.readFileSync(`${binaryPath}.sha256`, 'utf8')).toBe(LINUX_X64_SHA256);
 		expect(CloudflaredInstaller.isPinnedInstall(binaryPath)).toBe(true);
 

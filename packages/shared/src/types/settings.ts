@@ -4,9 +4,13 @@ export type ModelMappingProvider = 'claude' | 'minimax' | 'openai';
 export type ModelServiceTier = 'default' | 'priority';
 export type TunnelProtocol = 'http2' | 'quic' | 'auto';
 
+/** Providers a model row can point at. */
 export const MODEL_MAPPING_PROVIDERS = ['claude', 'minimax', 'openai'] as const;
+/** Service tiers accepted on an OpenAI model row. */
 export const MODEL_SERVICE_TIERS = ['default', 'priority'] as const;
+/** cloudflared protocols the tunnel manager can start. */
 export const TUNNEL_PROTOCOLS = ['http2', 'quic', 'auto'] as const;
+/** Reasoning tiers stored on a model row. The suffix in the model id selects one. */
 export const REASONING_BUDGET_TIERS = [
 	'none',
 	'minimal',
@@ -19,6 +23,7 @@ export const REASONING_BUDGET_TIERS = [
 	'persistent'
 ] as const;
 
+/** How the Claude Code version in the User-Agent is chosen. */
 export const CLAUDE_CLI_VERSION_MODES = ['stable', 'latest', 'custom'] as const;
 
 export type ClaudeCliVersionMode = (typeof CLAUDE_CLI_VERSION_MODES)[number];

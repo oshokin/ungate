@@ -1,6 +1,10 @@
 import { isIP } from 'node:net';
 
+/** How long to wait for upstream response headers before aborting the proxy call. */
 const DEFAULT_HEADER_TIMEOUT_MS = 30_000;
+
+/** Shared deadline for catalog discovery and subscription usage reads. */
+export const PROVIDER_READ_TIMEOUT_MS = 8_000;
 
 export function createRequestAbortSignal(
 	request: { raw: NodeJS.EventEmitter & { aborted?: boolean } },

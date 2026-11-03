@@ -1,5 +1,7 @@
 import { logger } from 'src/utils/logger';
 
+import { DEFAULT_MAX_SSE_EVENT_BYTES, DEFAULT_MAX_TOOL_ARGUMENT_BYTES, providerByteLimit } from './stream-limits';
+
 import type { RequestContext, StreamResult } from '../types/proxy';
 
 type MiniMaxStreamState = 'content' | 'thinking';
@@ -30,7 +32,9 @@ interface MiniMaxStreamEvent {
 	};
 }
 
+/** Opening tag MiniMax uses for reasoning text inside the content stream. */
 const THINK_OPEN = '<think>';
+/** Closing tag MiniMax uses for reasoning text inside the content stream. */
 const THINK_CLOSE = '</think>';
 
 function buildChunk(
@@ -168,8 +172,8 @@ export class MiniMaxStreamHandler {
 		let cancelled = false;
 		let resumePull: (() => void) | undefined;
 		let pullRequested = false;
-		const maxSseEventBytes = Number(process.env.PROVIDER_MAX_SSE_EVENT_BYTES) || 1024 * 1024;
-		const maxToolArgumentBytes = Number(process.env.PROVIDER_MAX_TOOL_ARGUMENT_BYTES) || 4 * 1024 * 1024;
+		const maxSseEventBytes = providerByteLimit(process.env.PROVIDER_MAX_SSE_EVENT_BYTES, DEFAULT_MAX_SSE_EVENT_BYTES);
+		const maxToolArgumentBytes = providerByteLimit(process.env.PROVIDER_MAX_TOOL_ARGUMENT_BYTES, DEFAULT_MAX_TOOL_ARGUMENT_BYTES);
 
 		return new ReadableStream(
 			{

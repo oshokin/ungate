@@ -1,6 +1,7 @@
 import type { StreamProcessResult, StreamState } from './stream-state';
 import type { ChatCompletionUsage } from 'src/types/openai';
 
+/** Characters of tool arguments emitted in one OpenAI stream chunk. */
 const TOOL_ARGS_STREAM_CHUNK = 96;
 
 export class StreamChunkMapper {

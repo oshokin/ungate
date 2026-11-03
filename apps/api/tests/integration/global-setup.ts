@@ -1,7 +1,9 @@
 import { mkdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-const TEST_DB_PATH = join(process.env.HOME ?? '', '.ungate', 'ungate-test.db');
+import { UNGATE_DIR } from '@ungate/shared';
+
+const TEST_DB_PATH = join(process.env.HOME ?? '', UNGATE_DIR, 'ungate-test.db');
 const KEEP_DB_AFTER_TESTS = process.env.UNGATE_KEEP_TEST_DB === '1';
 
 function removeTestDb(): void {

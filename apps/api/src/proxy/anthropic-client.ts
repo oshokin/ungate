@@ -8,6 +8,11 @@ import { fetchWithHeaderTimeout } from '../security/outbound-request';
 import { RequestBuilder } from './request-builder';
 import { ToolMapper } from './tool-mapper';
 
+/** Characters of a Claude 400 body kept in the rare-error log. */
+const LOGGED_API_ERROR_CHARS = 300;
+/** Tool names recorded beside a Claude 400, enough to see the mapping. */
+const LOGGED_TOOL_NAMES = 100;
+
 import type { RequestSource, AnthropicRequest, AnthropicError, Tool } from '../types';
 import type { ProxyResult } from '../types/proxy';
 
@@ -104,7 +109,7 @@ async function makeClaudeCodeRequest(
 			logger.error(`API 400 Error: type=${errorType || 'unknown'} messageLength=${errorMessage.length}`);
 
 			if (errorMessage.includes('illegal value') || errorMessage.includes('invalid') || errorMessage.includes('argument')) {
-				logger.rareError(errorMessage.slice(0, 300), {
+				logger.rareError(errorMessage.slice(0, LOGGED_API_ERROR_CHARS), {
 					errorType,
 					requestBody: {
 						model: preparedBody.model,
@@ -112,7 +117,7 @@ async function makeClaudeCodeRequest(
 						toolsCount: preparedBody.tools?.length ?? 0,
 						stream: preparedBody.stream
 					},
-					toolNames: preparedBody.tools?.map((tool: Tool) => tool.name).slice(0, 100) ?? []
+					toolNames: preparedBody.tools?.map((tool: Tool) => tool.name).slice(0, LOGGED_TOOL_NAMES) ?? []
 				});
 			}
 

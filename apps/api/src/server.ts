@@ -3,11 +3,15 @@ import Fastify from 'fastify';
 
 import { logger, setQuietMode } from 'src/utils/logger';
 
+/** Largest request body accepted by the proxy before Fastify rejects it. */
 const BODY_LIMIT_BYTES = 32 * 1024 * 1024;
+/** How long shutdown waits for open connections before the process exits. */
+const SHUTDOWN_FORCE_EXIT_MS = 1000;
 
 import { getConfig } from './config';
 import { getDb } from './database/index';
 import { Settings } from './database/settings';
+import { registerApiErrorHandler } from './http/api-error-handler';
 import { protectAdministration } from './plugins/administration';
 import anthropicPlugin from './routes/anthropic';
 import authPlugin from './routes/auth';
@@ -34,7 +38,7 @@ export async function startServer(): Promise<void> {
 		setImmediate(() => {
 			// Fastify waits for keep-alive connections during close(). A detached API must
 			// still terminate promptly so its replacement can bind the same port.
-			const forceExit = setTimeout(() => process.exit(0), 1000);
+			const forceExit = setTimeout(() => process.exit(0), SHUTDOWN_FORCE_EXIT_MS);
 			forceExit.unref();
 			void app.close().finally(() => process.exit(0));
 		});
@@ -53,24 +57,7 @@ export async function startServer(): Promise<void> {
 
 		done();
 	});
-	app.setErrorHandler((error, _request, reply) => {
-		const apiError = error as { validation?: unknown; code?: string; statusCode?: number };
-		if (apiError.validation) {
-			return reply.code(400).send({
-				error: { message: 'Request validation failed', type: 'invalid_request_error', code: 'invalid_request' }
-			});
-		}
-		if (apiError.code === 'FST_ERR_CTP_BODY_TOO_LARGE') {
-			return reply.code(413).send({
-				error: { message: 'Request body too large', type: 'invalid_request_error', code: 'request_too_large' }
-			});
-		}
-		logger.error('Unhandled API error');
-
-		return reply.code(apiError.statusCode && apiError.statusCode < 500 ? apiError.statusCode : 500).send({
-			error: { message: 'Request failed', type: 'api_error' }
-		});
-	});
+	registerApiErrorHandler(app);
 
 	await app.register(healthPlugin);
 	await app.register(authPlugin);

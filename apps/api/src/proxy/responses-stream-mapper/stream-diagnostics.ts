@@ -1,5 +1,8 @@
 import { logger } from 'src/utils/logger';
 
+/** Characters of the SSE event summary kept on one log line. */
+const MAX_SSE_SUMMARY_CHARS = 900;
+
 import type { StreamState } from './stream-state';
 import type { ChatCompletionUsage } from 'src/types/openai';
 
@@ -76,8 +79,8 @@ export class StreamDiagnostics {
 			.join(' ');
 		let summary = top;
 
-		if (top.length > 900) {
-			summary = `${top.slice(0, 900)}…`;
+		if (top.length > MAX_SSE_SUMMARY_CHARS) {
+			summary = `${top.slice(0, MAX_SSE_SUMMARY_CHARS)}…`;
 		}
 
 		const addedTypes = [...state.outputItemTypeAdded.entries()].map(([t, n]) => `${t}:${n}`).join(',');

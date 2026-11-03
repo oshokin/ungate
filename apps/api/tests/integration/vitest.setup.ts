@@ -2,6 +2,8 @@ import { basename, join } from 'node:path';
 
 import { afterEach, beforeEach, vi } from 'vitest';
 
+import { UNGATE_DIR } from '@ungate/shared';
+
 import { getCurrentDbPath, getDb, getSqlite, schema } from 'src/database';
 
 export function resetIntegrationDatabase(): void {
@@ -23,7 +25,7 @@ export function resetIntegrationDatabase(): void {
 }
 
 beforeEach(() => {
-	const expectedTestDb = join(process.env.HOME ?? '', '.ungate', 'ungate-test.db');
+	const expectedTestDb = join(process.env.HOME ?? '', UNGATE_DIR, 'ungate-test.db');
 	const actualDbPath = getCurrentDbPath();
 
 	if (actualDbPath !== expectedTestDb || basename(actualDbPath) !== 'ungate-test.db') {
