@@ -1,5 +1,5 @@
 <script lang="ts">
-import { sleep } from '@ungate/shared/frontend';
+import { MILLISECONDS_PER_SECOND, sleep } from '@ungate/shared/frontend';
 import IconCheck from 'virtual:icons/lucide/check';
 import IconLoader from 'virtual:icons/lucide/loader-circle';
 import IconLogOut from 'virtual:icons/lucide/log-out';
@@ -10,7 +10,7 @@ import { createToastWatcher } from '$shared/toast-store.svelte';
 import { postExtensionMessage } from '$shared/vscode';
 
 /** How often the dashboard checks whether the Codex login finished. */
-const AUTH_STATUS_POLL_MS = 1000;
+const AUTH_STATUS_POLL_MS = MILLISECONDS_PER_SECOND;
 
 interface Props {
 	onAuthStatusChange?: () => void;

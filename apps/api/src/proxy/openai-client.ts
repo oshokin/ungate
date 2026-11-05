@@ -12,7 +12,6 @@ import { ResponsesBodyBuilder } from './responses-input-normalizer/build-body';
 import { ResponsesModelResolver } from './responses-input-normalizer/resolve-model';
 import { ResponsesSseProcessor, StreamDiagnostics, StreamStateFactory } from './responses-stream-mapper';
 import { CompletionAccumulator } from './responses-stream-mapper/completion-accumulator';
-import { StreamChunkMapper } from './responses-stream-mapper/stream-openai-chunks';
 
 import type { OpenAIChatRequest } from '../types/openai';
 import type { RequestContext } from '../types/proxy';
@@ -118,7 +117,8 @@ export class OpenAiClient {
 				},
 				body: JSON.stringify(requestBody)
 			},
-			signal
+			signal,
+			'openai'
 		);
 	}
 
@@ -217,11 +217,20 @@ export class OpenAiClient {
 						}
 					}
 					if (!done && !state.completed) return;
+					if (done && !state.completed) {
+						for (const result of ResponsesSseProcessor.flush(state, decoder.decode())) {
+							controller.enqueue(
+								encoder.encode(result.type === 'done' ? 'data: [DONE]\n\n' : `data: ${JSON.stringify(result.data)}\n\n`)
+							);
+						}
+					}
 					finalized = true;
 					if (!state.completed) {
-						state.pendingFunctionCalls.clear();
-						controller.enqueue(encoder.encode(`data: ${JSON.stringify(StreamChunkMapper.chunk(state, {}, 'length'))}\n\n`));
-						controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+						for (const result of ResponsesSseProcessor.failTruncated(state)) {
+							controller.enqueue(
+								encoder.encode(result.type === 'done' ? 'data: [DONE]\n\n' : `data: ${JSON.stringify(result.data)}\n\n`)
+							);
+						}
 					}
 					controller.close();
 				} catch (error) {
@@ -269,10 +278,16 @@ export class OpenAiClient {
 			accumulator.consume(results);
 		}
 
-		const trailing = decoder.decode();
-		if (trailing) accumulator.consume(ResponsesSseProcessor.process(state, trailing));
+		accumulator.consume(ResponsesSseProcessor.flush(state, decoder.decode()));
+		if (!state.completed) accumulator.consume(ResponsesSseProcessor.failTruncated(state));
 		reader.releaseLock();
 		StreamDiagnostics.logFinished(state, 'buffer');
+		if (state.error) {
+			return new Response(JSON.stringify({ error: state.error }), {
+				status: 502,
+				headers: { 'Content-Type': 'application/json' }
+			});
+		}
 
 		return new Response(JSON.stringify(accumulator.response(state)), {
 			status: 200,

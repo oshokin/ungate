@@ -1,3 +1,4 @@
+import { ANTHROPIC_API_VERSION } from '@ungate/shared';
 import { logger } from 'src/utils/logger';
 
 import type { IncomingHttpHeaders } from 'node:http';
@@ -15,7 +16,7 @@ export class HeadersExtractor {
 			}
 		}
 
-		result['anthropic-version'] ??= '2023-06-01';
+		result['anthropic-version'] ??= ANTHROPIC_API_VERSION;
 
 		return result;
 	}

@@ -36,7 +36,8 @@ export class Dashboard {
 
 	constructor(
 		private readonly context: vscode.ExtensionContext,
-		private readonly onMessage: (message: Msg) => void
+		private readonly onMessage: (message: Msg) => void,
+		private readonly expectedArtifactDigest?: string
 	) {
 		this.prepare();
 	}
@@ -65,7 +66,8 @@ export class Dashboard {
 			() => this.currentPort,
 			(response) => {
 				void panel.webview.postMessage(response);
-			}
+			},
+			this.expectedArtifactDigest
 		);
 
 		this.panel.webview.onDidReceiveMessage((message: unknown) => {

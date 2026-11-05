@@ -36,15 +36,9 @@ describe('CompletionModelRouting', () => {
 		expect(flat.reasoning).toBeUndefined();
 		expect(flat.reasoning_effort).toBe('low');
 	});
-	it('detects minimax model prefixes case-insensitively', () => {
-		expect(CompletionModelRouting.isMiniMaxModel('MiniMax-x')).toBe(true);
-		expect(CompletionModelRouting.isMiniMaxModel('  mini-max-1  ')).toBe(true);
-		expect(CompletionModelRouting.isMiniMaxModel('gpt-4')).toBe(false);
-	});
-
-	it('routes minimax when mapping says minimax or model prefix matches', () => {
+	it('routes minimax only when its mapping explicitly owns the model', () => {
 		expect(CompletionModelRouting.shouldRouteMiniMax(mapping({ provider: 'minimax', upstreamModel: 'u' }), 'x')).toBe(true);
-		expect(CompletionModelRouting.shouldRouteMiniMax(null, 'minimax-pro')).toBe(true);
+		expect(CompletionModelRouting.shouldRouteMiniMax(null, 'minimax-pro')).toBe(false);
 		expect(CompletionModelRouting.shouldRouteMiniMax(null, 'claude')).toBe(false);
 	});
 

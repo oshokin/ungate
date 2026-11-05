@@ -15,9 +15,12 @@ import { appSettings } from './schema';
 
 import { getDb } from './index';
 
+/** Bytes of entropy in a generated Ungate API key. */
+const ADMIN_API_KEY_BYTES = 32;
+
 export class Settings {
 	private static generateApiKey(): string {
-		return randomBytes(32).toString('hex');
+		return randomBytes(ADMIN_API_KEY_BYTES).toString('hex');
 	}
 
 	static get(): AppSettings {

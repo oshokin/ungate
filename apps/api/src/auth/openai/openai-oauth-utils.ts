@@ -1,3 +1,5 @@
+import { OAUTH_RANDOM_BYTES } from 'src/auth/oauth-limits';
+
 import type { CodexAuthInfo } from './types';
 
 export class OpenAIOAuthUtils {
@@ -61,7 +63,7 @@ export class OpenAIOAuthUtils {
 	}
 
 	public static async generatePkce(): Promise<{ verifier: string; challenge: string }> {
-		const verifier = this.base64urlEncode(Buffer.from(crypto.getRandomValues(new Uint8Array(32))));
+		const verifier = this.base64urlEncode(Buffer.from(crypto.getRandomValues(new Uint8Array(OAUTH_RANDOM_BYTES))));
 		const encoder = new TextEncoder();
 		const digest = await crypto.subtle.digest('SHA-256', encoder.encode(verifier));
 		const challenge = this.base64urlEncode(Buffer.from(digest));

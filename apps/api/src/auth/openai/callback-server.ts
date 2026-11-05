@@ -1,6 +1,6 @@
 import { createServer, type Server, type ServerResponse } from 'node:http';
 
-import { sleep } from '@ungate/shared';
+import { LOOPBACK_HOST, sleep } from '@ungate/shared';
 import { OAUTH_LOGIN_TTL_MS } from 'src/auth/oauth-limits';
 import { config } from 'src/config';
 
@@ -22,7 +22,7 @@ export class OpenAICallbackServer {
 
 		await new Promise<void>((resolve, reject) => {
 			server.once('error', reject);
-			server.listen(port, '127.0.0.1', () => {
+			server.listen(port, LOOPBACK_HOST, () => {
 				server.off('error', reject);
 				resolve();
 			});

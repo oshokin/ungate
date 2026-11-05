@@ -1,5 +1,4 @@
-/** Threshold at which a latency switches from milliseconds to seconds. */
-const MILLISECONDS_PER_SECOND = 1000;
+import { MILLISECONDS_PER_SECOND } from '@ungate/shared/frontend';
 
 export class Formatter {
 	static number(value: number): string {

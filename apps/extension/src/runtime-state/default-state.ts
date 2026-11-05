@@ -12,7 +12,8 @@ export class RuntimeStateDefaults {
 				lastSeenAt: now,
 				lastError: null,
 				ownerWindowId: null,
-				startSuppressed: false
+				startSuppressed: false,
+				logHealth: { status: 'available', logPath: null, message: null }
 			},
 			tunnel: {
 				status: 'stopped',

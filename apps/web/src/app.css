@@ -241,6 +241,32 @@ button:disabled {
 .ug-button:hover:not(:disabled) {
 	background: var(--vscode-button-secondaryHoverBackground, var(--ug-bg));
 }
+.ug-compact {
+	min-height: 28px;
+	padding: 3px 9px;
+	border-color: var(--vscode-button-border, var(--ug-border));
+	background: var(--vscode-button-secondaryBackground, var(--ug-bg));
+	color: var(--vscode-button-secondaryForeground, var(--ug-fg));
+	font-size: 12px;
+}
+.ug-compact:hover:not(:disabled) {
+	border-color: var(--vscode-contrastActiveBorder, var(--ug-focus));
+	background: var(--vscode-button-secondaryHoverBackground, var(--ug-bg));
+	color: var(--vscode-button-secondaryForeground, var(--ug-fg));
+}
+.ug-caution:hover:not(:disabled),
+.ug-caution:focus-visible {
+	border-color: var(--ug-error);
+	background: var(--ug-bg);
+	color: var(--ug-error);
+}
+.ug-service-controls {
+	gap: 8px;
+}
+.ug-service-control {
+	min-height: 32px;
+	padding: 4px 0;
+}
 .ug-primary {
 	background: var(--ug-button-bg);
 	color: var(--ug-button-fg);
@@ -621,6 +647,12 @@ body.vscode-high-contrast-light .ug-border {
 	}
 	.ug-form-grid {
 		grid-template-columns: 1fr;
+	}
+	.ug-service-control {
+		align-items: flex-start;
+	}
+	.ug-service-control > .ug-toolbar {
+		width: 100%;
 	}
 }
 @media (prefers-reduced-motion: reduce) {

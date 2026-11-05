@@ -5,7 +5,7 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-import { getAdminToken, UNGATE_VERSION } from '@ungate/shared';
+import { getAdminToken, LOOPBACK_HOST, UNGATE_VERSION } from '@ungate/shared';
 import { describe, expect, it, vi } from 'vitest';
 
 import { ApiServer } from '../../src/api-server';
@@ -27,7 +27,7 @@ vi.mock('@ungate/shared', async (original) => {
 
 async function freePort(): Promise<number> {
 	const socket = createServer();
-	await new Promise<void>((resolvePort) => socket.listen(0, '127.0.0.1', resolvePort));
+	await new Promise<void>((resolvePort) => socket.listen(0, LOOPBACK_HOST, resolvePort));
 	const address = socket.address();
 	if (!address || typeof address === 'string') throw new Error('No port');
 	await new Promise<void>((resolveClose) => socket.close(() => resolveClose()));
@@ -77,7 +77,7 @@ describe('upgrade of a detached shared API', () => {
 
 				return state;
 			});
-			const oldUsage = await fetch(`http://127.0.0.1:${port}/usage`);
+			const oldUsage = await fetch(`http://${LOOPBACK_HOST}:${port}/usage`);
 			expect(oldUsage.status).toBe(404);
 			const send = vi.fn<(value: { status: number; error?: string }) => void>();
 			await new DashboardApiBridge(() => port, send).handle({
@@ -105,7 +105,9 @@ describe('upgrade of a detached shared API', () => {
 			expect(health.pid).not.toBe(legacy.pid);
 			expect(tunnel.restart).not.toHaveBeenCalled();
 			expect(RuntimeStateStore.read().tunnel.url).toBe('https://unchanged.trycloudflare.com');
-			const response = await fetch(`http://127.0.0.1:${port}/usage`, { headers: { Authorization: `Bearer ${getAdminToken()}` } });
+			const response = await fetch(`http://${LOOPBACK_HOST}:${port}/usage`, {
+				headers: { Authorization: `Bearer ${getAdminToken()}` }
+			});
 			expect(response.status).toBe(200);
 			await services.run('stop-services');
 			expect(RuntimeStateStore.isApiStartSuppressed()).toBe(true);

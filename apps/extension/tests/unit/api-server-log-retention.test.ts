@@ -88,4 +88,48 @@ describe('API process log retention', () => {
 		expect(stale.slice(1).every((file) => existsSync(file))).toBe(true);
 		server.detach();
 	});
+
+	it('never removes the runtime-state log when this window is attached to another path', () => {
+		const runtimeActive = join(directory, 'api-runtime-active.log');
+		writeFileSync(runtimeActive, 'live');
+		const state = RuntimeStateDefaults.create();
+		state.api.port = 9;
+		state.api.logPath = runtimeActive;
+		RuntimeStateFileStore.write(state);
+		const server = new ApiServer({} as never, {
+			onLog: () => {},
+			onPortDetected: () => {},
+			onStatusChange: () => {},
+			isLeaderWindow: () => true,
+			isExtensionHostActive: () => true,
+			getWindowId: () => 'window'
+		});
+		(server as never as { logPath: string; rotateLogs(): void }).logPath = active;
+		for (let index = 0; index <= config.apiServer.retainedProcessLogs; index++)
+			writeFileSync(join(directory, `api-stale-${index}.log`), 'old');
+		(server as never as { rotateLogs(): void }).rotateLogs();
+		expect(existsSync(runtimeActive)).toBe(true);
+		expect(existsSync(active)).toBe(true);
+	});
+
+	it('reports one missing-log transition and reconnects when the path returns', async () => {
+		const onLog = vi.fn();
+		const server = new ApiServer({} as never, {
+			onLog,
+			onPortDetected: () => {},
+			onStatusChange: () => {},
+			isLeaderWindow: () => true,
+			isExtensionHostActive: () => true,
+			getWindowId: () => 'window'
+		});
+		rmSync(active);
+		(server as never as { logPath: string; pollLogs(): void }).logPath = active;
+		(server as never as { pollLogs(): void }).pollLogs();
+		(server as never as { pollLogs(): void }).pollLogs();
+		expect(onLog).toHaveBeenCalledTimes(1);
+		await vi.waitFor(() => expect(RuntimeStateFileStore.read().api.logHealth?.status).toBe('unavailable'));
+		writeFileSync(active, 'restored\n');
+		(server as never as { pollLogs(): void }).pollLogs();
+		await vi.waitFor(() => expect(RuntimeStateFileStore.read().api.logHealth?.status).toBe('available'));
+	});
 });

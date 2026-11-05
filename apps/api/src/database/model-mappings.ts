@@ -14,6 +14,10 @@ import { modelMappings } from './schema';
 
 import { getDb } from './index';
 
+function tokenLimit(value: unknown): number | null {
+	return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : null;
+}
+
 export class ModelMappings {
 	private static clone(models: ModelMappingConfig[]): ModelMappingConfig[] {
 		return cloneDeep(models);
@@ -52,7 +56,9 @@ export class ModelMappings {
 				upstreamModel: trimmedUpstreamModel,
 				sortOrder: index,
 				reasoningBudget,
-				serviceTier
+				serviceTier,
+				contextWindow: tokenLimit(model.contextWindow),
+				maxOutputTokens: tokenLimit(model.maxOutputTokens)
 			});
 		}
 
@@ -74,7 +80,9 @@ export class ModelMappings {
 								upstreamModel: row.upstreamModel,
 								sortOrder: row.sortOrder,
 								reasoningBudget: isReasoningBudgetTier(row.reasoningBudget) ? row.reasoningBudget : null,
-								serviceTier: isModelServiceTier(row.serviceTier) ? row.serviceTier : null
+								serviceTier: isModelServiceTier(row.serviceTier) ? row.serviceTier : null,
+								contextWindow: tokenLimit(row.contextWindow),
+								maxOutputTokens: tokenLimit(row.maxOutputTokens)
 							}
 						]
 					: []
@@ -155,7 +163,9 @@ export class ModelMappings {
 						upstreamModel: model.upstreamModel,
 						sortOrder: model.sortOrder,
 						reasoningBudget: model.reasoningBudget,
-						serviceTier: model.serviceTier
+						serviceTier: model.serviceTier,
+						contextWindow: model.contextWindow,
+						maxOutputTokens: model.maxOutputTokens
 					})
 					.run();
 			}

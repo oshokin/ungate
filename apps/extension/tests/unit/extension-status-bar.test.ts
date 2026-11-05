@@ -85,6 +85,8 @@ describe('ExtensionStatusBar', () => {
 		expect(result.value).toContain('API health check timed out.');
 		expect(result.value).toContain('`https://example.trycloudflare.com/v1`');
 		expect(result.value).toContain('Public health check timed out.');
+		expect(result.value).toContain('[$(debug-restart) Restart API](command:ungate.restartServices)');
+		expect(result.value).toContain('[$(debug-restart) Restart tunnel](command:ungate.restartTunnel)');
 	});
 
 	it('replaces a raw DNS resolver error with a restart instruction', () => {

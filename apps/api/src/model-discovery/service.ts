@@ -1,6 +1,12 @@
 import { createHash } from 'node:crypto';
 
-import { MINIMAX_BASE_URLS, type ModelDiscoveryResponse, type ModelMappingProvider } from '@ungate/shared';
+import {
+	MILLISECONDS_PER_SECOND,
+	MINIMAX_BASE_URLS,
+	SECONDS_PER_MINUTE,
+	type ModelDiscoveryResponse,
+	type ModelMappingProvider
+} from '@ungate/shared';
 
 import { OAuth } from '../auth/oauth';
 import { OpenAIOAuthService } from '../auth/openai';
@@ -19,7 +25,7 @@ interface CacheEntry {
 }
 
 /** How long a discovered model catalog is reused for the same account. */
-const CACHE_TTL_MS = 5 * 60 * 1000;
+const CACHE_TTL_MS = 5 * SECONDS_PER_MINUTE * MILLISECONDS_PER_SECOND;
 const allowedMiniMaxRoots = new Set<string>(Object.values(MINIMAX_BASE_URLS));
 
 export class ModelDiscoveryService {

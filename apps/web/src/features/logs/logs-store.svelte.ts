@@ -2,6 +2,7 @@ import { LOG_LIMITS, normalizeLogEntryLimit } from '@ungate/shared/frontend';
 
 import { postExtensionMessage } from '$shared/vscode';
 
+import { formatLogEntry } from './log-format';
 import { countNewEntryIds } from './log-tail';
 
 import type { LogSource } from '$shared/vscode';
@@ -63,9 +64,7 @@ function clear(source: LogSource): void {
 }
 
 async function copy(source: LogSource): Promise<void> {
-	const text = logs[source].entries
-		.map((entry) => `${new Date(entry.timestamp).toISOString()} [${entry.level}] ${entry.message}`)
-		.join('\n');
+	const text = logs[source].entries.map(formatLogEntry).join('\n');
 	await navigator.clipboard.writeText(text);
 }
 

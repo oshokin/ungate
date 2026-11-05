@@ -9,6 +9,7 @@ import { extname, join, resolve, sep } from 'node:path';
 
 import { chromium } from 'playwright';
 
+import { LOOPBACK_HOST } from '../../packages/shared/src/constants';
 import { describeService, UNGATE_VERSION, API_PROTOCOL_VERSION } from '../../packages/shared/src/service';
 import { repoDir } from '../build-package/process';
 
@@ -93,7 +94,7 @@ try {
 		});
 	});
 	await new Promise<void>((resolveServer) => {
-		server.listen(0, '127.0.0.1', resolveServer);
+		server.listen(0, LOOPBACK_HOST, resolveServer);
 	});
 	const address = server.address();
 	assert.ok(address && typeof address === 'object');
@@ -133,7 +134,8 @@ try {
 		service: 'ungate',
 		pid: child.pid!,
 		version: UNGATE_VERSION,
-		protocolVersion: API_PROTOCOL_VERSION
+		protocolVersion: API_PROTOCOL_VERSION,
+		artifactDigest: null
 	});
 	const emit = (message: unknown) => page.evaluate((value) => window.postMessage(value, '*'), message);
 	await page.exposeBinding('ungateBridge', async (_source, raw: unknown) => {
@@ -162,7 +164,7 @@ try {
         };
     })();`);
 
-	await page.goto(`http://127.0.0.1:${address.port}/`);
+	await page.goto(`http://${LOOPBACK_HOST}:${address.port}/`);
 	await page.getByRole('heading', { name: 'Providers & models', exact: true }).waitFor();
 	assert.equal(await page.getByRole('button', { name: 'Use a Cursor model once', exact: true }).count(), 0);
 	assert.equal(await page.getByRole('button', { name: 'Analytics', exact: true }).count(), 0);
@@ -246,7 +248,7 @@ try {
 	// An older API gets a recovery action, never a dead-end 404 Usage screen.
 	await emit({
 		type: 'service-state',
-		state: describeService({ service: 'ungate', pid: 123, version: null, protocolVersion: null })
+		state: describeService({ service: 'ungate', pid: 123, version: null, protocolVersion: null, artifactDigest: null })
 	});
 	await page.getByText('Shared API update required', { exact: true }).waitFor();
 	await page.getByRole('button', { name: 'Update shared API', exact: true }).click();
@@ -256,6 +258,26 @@ try {
 	if (screenshotDirectory) await page.screenshot({ path: join(screenshotDirectory, 'api-update.png'), fullPage: true });
 	await emit({ type: 'service-state', state: readyState });
 	await page.getByRole('heading', { name: 'Providers & models', exact: true }).waitFor();
+	const serviceControls = page.getByRole('group', { name: 'Service controls', exact: true });
+	await serviceControls.getByRole('button', { name: 'Restart API', exact: true }).waitFor();
+	await serviceControls.getByRole('button', { name: 'Restart tunnel', exact: true }).waitFor();
+	await serviceControls.getByRole('button', { name: 'Stop', exact: true }).waitFor();
+	for (const buttonName of ['Restart API', 'Restart tunnel', 'Stop'])
+		assert.equal(
+			await serviceControls
+				.getByRole('button', { name: buttonName, exact: true })
+				.evaluate((button) => getComputedStyle(button).borderStyle),
+			'solid'
+		);
+	await page.getByRole('button', { name: 'Restart API', exact: true }).click();
+	await page.getByText('Restart Shared API: done', { exact: true }).waitFor();
+	assert.ok(actionRequests.includes('restart-services'));
+	const degradedLogsState = { ...readyState, logsConnected: false };
+	await emit({ type: 'service-state', state: degradedLogsState });
+	await page.getByText('API logging is disconnected', { exact: true }).waitFor();
+	await page.getByText('The API is running, but new diagnostic messages cannot be displayed.', { exact: true }).waitFor();
+	await page.getByRole('button', { name: 'Restart shared API', exact: true }).waitFor();
+	await emit({ type: 'service-state', state: readyState });
 	await page.getByRole('button', { name: 'Manage Claude', exact: true }).click();
 	await page.getByRole('button', { name: 'Close Claude', exact: true }).waitFor();
 	const familyButton = page.locator('button[aria-controls^="model-family-"]').first();
@@ -303,7 +325,8 @@ try {
 			version: null,
 			expectedVersion: UNGATE_VERSION,
 			canUpdate: false,
-			message: 'Node.js was not found or is incompatible.'
+			message: 'Node.js was not found or is incompatible.',
+			logsConnected: true
 		}
 	});
 	await page.getByRole('button', { name: 'Choose Node.js', exact: true }).click();

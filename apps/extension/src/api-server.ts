@@ -6,6 +6,8 @@ import * as path from 'node:path';
 
 import {
 	getAdminToken,
+	LOOPBACK_HOST,
+	MILLISECONDS_PER_SECOND,
 	PRIVATE_DIR_MODE,
 	PRIVATE_FILE_MODE,
 	sleep,
@@ -16,6 +18,7 @@ import {
 import { describeService, type RuntimeState } from '@ungate/shared/frontend';
 import * as vscode from 'vscode';
 
+import { apiArtifactDigest } from './api-artifact';
 import { readApiHealth, assertCompatibleApi } from './local-api';
 import { configuredNodePath } from './node-runtime-settings';
 import { RuntimeStateStore } from './runtime-state';
@@ -52,11 +55,15 @@ export class ApiServer {
 	private restartInProgress = false;
 	private healthFailures = 0;
 	private attachedPid: number | null = null;
+	private readonly expectedArtifactDigest: string | undefined;
+	private logConnected = true;
 
 	constructor(
 		private readonly context: vscode.ExtensionContext,
 		private readonly callbacks: ApiServerCallbacks
-	) {}
+	) {
+		this.expectedArtifactDigest = apiArtifactDigest(context);
+	}
 
 	async start(): Promise<void> {
 		if (this.isAutoStartBlocked()) {
@@ -95,7 +102,7 @@ export class ApiServer {
 			if (existingPort) {
 				const health = await readApiHealth(existingPort).catch(() => null);
 				if (health) {
-					const state = describeService(health);
+					const state = describeService(health, this.expectedArtifactDigest);
 					if (state.status === 'incompatible' && !state.canUpdate) throw new Error(state.message!);
 				}
 			}
@@ -129,7 +136,7 @@ export class ApiServer {
 		const port = this.port ?? RuntimeStateStore.read().api.port;
 		const healthy = port ? await this.checkPortHealth(port) : false;
 		if (port && healthy) {
-			const response = await fetch(`http://127.0.0.1:${port}/admin/shutdown`, {
+			const response = await fetch(`http://${LOOPBACK_HOST}:${port}/admin/shutdown`, {
 				method: 'POST',
 				headers: { Authorization: `Bearer ${getAdminToken()}` },
 				signal: AbortSignal.timeout(config.apiServer.shutdownRequestTimeoutMs)
@@ -161,6 +168,10 @@ export class ApiServer {
 
 	getPort(): number | null {
 		return this.port;
+	}
+
+	getExpectedArtifactDigest(): string | undefined {
+		return this.expectedArtifactDigest;
 	}
 
 	syncLeaderHealthMonitor(isLeader: boolean): void {
@@ -202,7 +213,7 @@ export class ApiServer {
 				this.port = existingPort;
 				this.callbacks.onPortDetected(existingPort);
 				try {
-					await assertCompatibleApi(existingPort);
+					await assertCompatibleApi(existingPort, { expectedArtifactDigest: this.expectedArtifactDigest });
 				} catch (error) {
 					const message = error instanceof Error ? error.message : String(error);
 					await this.recordApiFailure(message);
@@ -233,10 +244,13 @@ export class ApiServer {
 				this.pollLogs();
 				const healthy = this.port ? await this.checkPortHealth(this.port) : false;
 				if (healthy) break;
-				if (!this.process || Date.now() > deadline) throw new Error('Ungate API did not become ready within 30 seconds.');
+				if (!this.process || Date.now() > deadline)
+					throw new Error(
+						`Ungate API did not become ready within ${config.apiServer.startupTimeoutMs / MILLISECONDS_PER_SECOND} seconds.`
+					);
 				await sleep(config.apiServer.pollIntervalMs);
 			}
-			if (this.port) await assertCompatibleApi(this.port);
+			if (this.port) await assertCompatibleApi(this.port, { expectedArtifactDigest: this.expectedArtifactDigest });
 			await this.setStatus('running');
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
@@ -403,7 +417,7 @@ export class ApiServer {
 
 		this.port = port;
 		this.callbacks.onPortDetected(port);
-		await assertCompatibleApi(port);
+		await assertCompatibleApi(port, { expectedArtifactDigest: this.expectedArtifactDigest });
 		await this.setStatus('running');
 		this.startHealthCheck();
 	}
@@ -462,7 +476,7 @@ export class ApiServer {
 
 		try {
 			try {
-				await assertCompatibleApi(this.port);
+				await assertCompatibleApi(this.port, { expectedArtifactDigest: this.expectedArtifactDigest });
 				this.healthFailures = 0;
 				const wasDown = this.lastStatus !== 'running';
 
@@ -523,6 +537,9 @@ export class ApiServer {
 			current.api.pid = status === 'stopped' ? null : pid;
 			current.api.port = this.port;
 			current.api.logPath = status === 'stopped' ? undefined : (this.logPath ?? current.api.logPath);
+			if (status === 'stopped') current.api.logHealth = { status: 'available', logPath: null, message: null };
+			else if (current.api.logPath !== current.api.logHealth?.logPath)
+				current.api.logHealth = { status: 'available', logPath: current.api.logPath ?? null, message: null };
 			current.api.status = status;
 			current.api.lastSeenAt = Date.now();
 			current.api.lastError = errorMessage;
@@ -580,7 +597,7 @@ export class ApiServer {
 
 	private async isPortListening(port: number): Promise<boolean> {
 		try {
-			await fetch(`http://127.0.0.1:${port}/health`, {
+			await fetch(`http://${LOOPBACK_HOST}:${port}/health`, {
 				signal: AbortSignal.timeout(config.apiServer.portHealthRequestTimeoutMs)
 			});
 
@@ -646,23 +663,54 @@ export class ApiServer {
 		if (!logPath || this.logPath === logPath) return;
 		this.logPath = logPath;
 		this.stdoutBuffer = '';
+		this.setLogConnection(fs.existsSync(logPath));
 	}
 
 	private pollLogs(): void {
 		if (!this.logPath) return;
+		if (!fs.existsSync(this.logPath)) {
+			this.setLogConnection(false);
+
+			return;
+		}
+		this.setLogConnection(true);
 		const lines = this.logReader.read(this.logPath);
 		if (lines.length) this.onStdout(Buffer.from(`${lines.join('\n')}\n`));
 		capAppendOnlyLog(this.logPath);
 	}
 
+	private setLogConnection(connected: boolean): void {
+		if (this.logConnected === connected) return;
+		this.logConnected = connected;
+		if (!connected)
+			this.callbacks.onLog(
+				'warn',
+				'[process] API log stream disconnected. Restart the shared API to restore diagnostic logging.'
+			);
+		const observedPath = this.logPath;
+		const observedPid = this.attachedPid ?? this.process?.pid ?? null;
+		void RuntimeStateStore.mutate((current) => {
+			if (current.api.logPath !== observedPath || (observedPid !== null && current.api.pid !== observedPid)) return current;
+			current.api.logHealth = {
+				status: connected ? 'available' : 'unavailable',
+				logPath: observedPath,
+				message: connected
+					? null
+					: 'The API is running, but new diagnostic messages cannot be displayed. Restart the shared API to restore logging.'
+			};
+
+			return current;
+		}).catch(() => {});
+	}
+
 	private rotateLogs(): void {
 		this.ensureBaseDir();
-		const active = this.logPath;
+		const active = new Set([this.logPath, RuntimeStateStore.read().api.logPath].filter((value): value is string => !!value));
 		const logs = fs
 			.readdirSync(config.baseDir)
 			.filter((name) => name.startsWith('api-') && name.endsWith('.log'))
 			.map((name) => path.join(config.baseDir, name))
-			.filter((file) => file !== active)
+			.filter((file) => !active.has(file))
 			.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
 		for (const file of logs.slice(config.apiServer.retainedProcessLogs)) fs.rmSync(file, { force: true });
 	}

@@ -110,6 +110,22 @@ describe('proxy-responses-input-normalizer', () => {
 		expect(payload.parallel_tool_calls).toBe(false);
 	});
 
+	it('forwards only an explicit client prompt cache key', () => {
+		const withKey = ResponsesBodyBuilder.buildBody(
+			{ model: 'gpt-5.6-sol', messages: [{ role: 'user', content: 'hello' }], prompt_cache_key: 'chat-key' },
+			'gpt-5.6-sol',
+			{ instructionsFallback: 'fallback' }
+		).payload;
+		const withoutKey = ResponsesBodyBuilder.buildBody(
+			{ model: 'gpt-5.6-sol', messages: [{ role: 'user', content: 'hello' }] },
+			'gpt-5.6-sol',
+			{ instructionsFallback: 'fallback' }
+		).payload;
+
+		expect(withKey.prompt_cache_key).toBe('chat-key');
+		expect(withoutKey).not.toHaveProperty('prompt_cache_key');
+	});
+
 	it.each(['none', 'minimal'] as const)('raises unsupported %s reasoning to low', (effort) => {
 		const { payload } = ResponsesBodyBuilder.buildBody(
 			{

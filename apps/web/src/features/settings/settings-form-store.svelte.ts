@@ -1,4 +1,4 @@
-import { ClaudeCliVersion, isReasoningBudgetTier, isTunnelProtocol } from '@ungate/shared/frontend';
+import { ClaudeCliVersion, isReasoningBudgetTier, isTunnelProtocol, TCP_PORT_MAX, TCP_PORT_MIN } from '@ungate/shared/frontend';
 
 import type {
 	AppSettings,
@@ -128,8 +128,8 @@ function setTunnelProtocol(value: string): void {
 function validate(): string | null {
 	const parsedPort = parseInt(port, 10);
 
-	if (!Number.isInteger(parsedPort) || parsedPort < 1 || parsedPort > 65535) {
-		return 'Port must be an integer between 1 and 65535.';
+	if (!Number.isInteger(parsedPort) || parsedPort < TCP_PORT_MIN || parsedPort > TCP_PORT_MAX) {
+		return `Port must be an integer between ${TCP_PORT_MIN} and ${TCP_PORT_MAX}.`;
 	}
 
 	if (!apiKey.trim()) return 'An Ungate API key is required. Copy the saved key into Cursor Settings → Models.';

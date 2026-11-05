@@ -48,6 +48,7 @@ export interface OpenAIChatRequest {
 	presence_penalty?: number;
 	frequency_penalty?: number;
 	user?: string;
+	prompt_cache_key?: string;
 	service_tier?: 'default' | 'priority';
 	tools?: OpenAITool[];
 	tool_choice?: 'none' | 'auto' | 'required' | { type: 'function'; function: { name: string } };

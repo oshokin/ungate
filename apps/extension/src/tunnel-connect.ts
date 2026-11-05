@@ -1,3 +1,5 @@
+import { MILLISECONDS_PER_SECOND } from '@ungate/shared';
+
 /** How long cloudflared may take to publish a tunnel URL. */
 export const TUNNEL_CONNECT = {
 	/** Seconds used when ungate.tunnel.connectTimeoutSeconds is unset or invalid. */
@@ -14,6 +16,6 @@ export function normalizeTunnelConnectTimeoutMs(value: unknown): number {
 		Number.isInteger(value) &&
 		value >= TUNNEL_CONNECT.minSeconds &&
 		value <= TUNNEL_CONNECT.maxSeconds
-		? value * 1000
-		: TUNNEL_CONNECT.defaultSeconds * 1000;
+		? value * MILLISECONDS_PER_SECOND
+		: TUNNEL_CONNECT.defaultSeconds * MILLISECONDS_PER_SECOND;
 }

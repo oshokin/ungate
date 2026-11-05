@@ -170,7 +170,7 @@
 		"@types/node": "~22.20.5",
 		"@types/vscode": "~1.105.0",
 		"@ungate/dev-kit": "workspace:*",
-		"@vscode/vsce": "~4.0.0",
+		"@vscode/vsce": "~4.1.0",
 		"ovsx": "~1.3.0",
 		"tsup": "~9.0.0",
 		"typescript": "~6.0.3",

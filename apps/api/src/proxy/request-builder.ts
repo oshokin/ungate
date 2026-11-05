@@ -1,6 +1,6 @@
 import { platform, arch } from 'node:os';
 
-import { ClaudeCliVersion } from '@ungate/shared';
+import { ANTHROPIC_API_VERSION, ClaudeCliVersion } from '@ungate/shared';
 import { logger } from 'src/utils/logger';
 
 import { config } from '../config';
@@ -86,7 +86,7 @@ export class RequestBuilder {
 				config.anthropic.beta.interleavedThinking
 			].join(','),
 			'anthropic-dangerous-direct-browser-access': 'true',
-			'anthropic-version': '2023-06-01',
+			'anthropic-version': ANTHROPIC_API_VERSION,
 			'Content-Type': 'application/json',
 			'User-Agent': this.getClaudeOAuthUserAgent(),
 			'x-app': 'cli',

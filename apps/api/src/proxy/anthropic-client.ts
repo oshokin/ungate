@@ -51,7 +51,8 @@ async function makeClaudeCodeRequest(
 				headers: RequestBuilder.getClaudeOAuthHeaders(token.accessToken),
 				body: JSON.stringify(preparedBody)
 			},
-			signal
+			signal,
+			'claude'
 		);
 
 		if (response.status === 429) {
@@ -78,7 +79,8 @@ async function makeClaudeCodeRequest(
 							headers: RequestBuilder.getClaudeOAuthHeaders(refreshed.accessToken),
 							body: JSON.stringify(preparedBody)
 						},
-						signal
+						signal,
+						'claude'
 					);
 
 					logger.log(`Retry after refresh: ${retryResponse.status}`);

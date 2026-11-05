@@ -7,7 +7,7 @@ import { logger } from 'src/utils/logger';
 import { config } from '../config';
 import { ProviderSettings } from '../database/provider-settings';
 
-import { OAUTH_HTTP_TIMEOUT_MS } from './oauth-limits';
+import { OAUTH_HTTP_TIMEOUT_MS, OAUTH_RANDOM_BYTES } from './oauth-limits';
 
 import type { TokenInfo, TokenRefreshResponse, AuthStatus, LoginStart } from '../types/index';
 
@@ -43,7 +43,7 @@ export class OAuth {
 	}
 
 	private static async generatePkce(): Promise<{ verifier: string; challenge: string }> {
-		const verifier = this.base64urlEncode(randomBytes(32));
+		const verifier = this.base64urlEncode(randomBytes(OAUTH_RANDOM_BYTES));
 		const enc = new TextEncoder();
 		const digest = await crypto.subtle.digest('SHA-256', enc.encode(verifier));
 		const challenge = this.base64urlEncode(Buffer.from(digest));
@@ -53,8 +53,8 @@ export class OAuth {
 
 	static async startLogin(): Promise<LoginStart> {
 		const { verifier, challenge } = await this.generatePkce();
-		const sessionId = this.base64urlEncode(randomBytes(32));
-		const state = this.base64urlEncode(randomBytes(32));
+		const sessionId = this.base64urlEncode(randomBytes(OAUTH_RANDOM_BYTES));
+		const state = this.base64urlEncode(randomBytes(OAUTH_RANDOM_BYTES));
 
 		this.pkceStore.set(sessionId, {
 			codeVerifier: verifier,

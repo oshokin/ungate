@@ -6,6 +6,13 @@ import { PRIVATE_DIR_MODE, PRIVATE_FILE_MODE, sleep } from '@ungate/shared';
 
 import { config } from '../runtime-state/config';
 
+/** Pause between attempts to take a contended lock. */
+const LOCK_POLL_MS = 20;
+/** Retries when removing a lock directory that is still disappearing. */
+const LOCK_REMOVE_RETRIES = 3;
+/** Delay between those removal retries. */
+const LOCK_REMOVE_RETRY_DELAY_MS = 10;
+
 interface Owner {
 	pid: number;
 	token: string;
@@ -41,7 +48,7 @@ export class CrossProcessLock {
 				this.recoverDeadOwner(target, guard);
 			}
 			if (Date.now() - started >= timeoutMs) throw new Error(`Timed out waiting for Ungate lock: ${lockName}`);
-			await sleep(20);
+			await sleep(LOCK_POLL_MS);
 		}
 	}
 
@@ -69,7 +76,7 @@ export class CrossProcessLock {
 	}
 
 	private static removeDirectory(target: string): void {
-		fs.rmSync(target, { recursive: true, force: true, maxRetries: 3, retryDelay: 10 });
+		fs.rmSync(target, { recursive: true, force: true, maxRetries: LOCK_REMOVE_RETRIES, retryDelay: LOCK_REMOVE_RETRY_DELAY_MS });
 	}
 
 	private static alive(pid: number): boolean {

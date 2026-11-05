@@ -145,7 +145,9 @@ export function reconcileDiscoveredModels(current: ModelMappingConfig[], respons
 					upstreamModel: item.upstreamModel.trim(),
 					sortOrder: next.length,
 					reasoningBudget: tier,
-					serviceTier
+					serviceTier,
+					contextWindow: item.contextWindow ?? null,
+					maxOutputTokens: item.maxOutputTokens ?? null
 				});
 				usedIds.add(normalized(id));
 				added++;

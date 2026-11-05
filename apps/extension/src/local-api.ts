@@ -2,6 +2,7 @@ import {
 	describeService,
 	getAdminToken,
 	isTunnelProtocol,
+	LOOPBACK_HOST,
 	type ApiHealth,
 	type AppSettings,
 	type TunnelProtocol
@@ -12,7 +13,7 @@ import { config } from './runtime-state/config';
 /** Identity checks do not trust the PID stored on disk or any arbitrary listener. */
 export async function readApiHealth(port: number, signal?: AbortSignal): Promise<ApiHealth> {
 	const request = (path: string, authenticated = false) =>
-		fetch(`http://127.0.0.1:${port}${path}`, {
+		fetch(`http://${LOOPBACK_HOST}:${port}${path}`, {
 			headers: authenticated ? { Authorization: `Bearer ${getAdminToken()}` } : undefined,
 			signal: signal
 				? AbortSignal.any([signal, AbortSignal.timeout(config.apiServer.portHealthRequestTimeoutMs)])
@@ -37,11 +38,15 @@ export async function readApiHealth(port: number, signal?: AbortSignal): Promise
 	if (health.service !== 'ungate' || !Number.isInteger(health.pid) || Number(health.pid) <= 0)
 		throw new Error('Unknown service on the Ungate port');
 
+	const artifactDigest =
+		typeof health.artifactDigest === 'string' && /^[a-f0-9]{64}$/u.test(health.artifactDigest) ? health.artifactDigest : null;
+
 	return {
 		service: 'ungate',
 		pid: Number(health.pid),
 		version: typeof health.version === 'string' ? health.version : null,
-		protocolVersion: typeof health.protocolVersion === 'number' ? health.protocolVersion : null
+		protocolVersion: typeof health.protocolVersion === 'number' ? health.protocolVersion : null,
+		artifactDigest
 	};
 }
 
@@ -54,7 +59,7 @@ export async function readTunnelProtocol(port: number): Promise<TunnelProtocol> 
 }
 
 async function readAdminJson<T>(port: number, path: string): Promise<T> {
-	const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+	const response = await fetch(`http://${LOOPBACK_HOST}:${port}${path}`, {
 		headers: { Authorization: `Bearer ${getAdminToken()}` },
 		redirect: 'error',
 		signal: AbortSignal.timeout(config.apiServer.adminRequestTimeoutMs)
@@ -70,8 +75,11 @@ export function readAppSettings(port: number): Promise<AppSettings> {
 	return readAdminJson<AppSettings>(port, '/settings');
 }
 
-export async function assertCompatibleApi(port: number, signal?: AbortSignal): Promise<void> {
-	const health = await readApiHealth(port, signal);
-	const state = describeService(health);
+export async function assertCompatibleApi(
+	port: number,
+	options: { expectedArtifactDigest?: string; signal?: AbortSignal } = {}
+): Promise<void> {
+	const health = await readApiHealth(port, options.signal);
+	const state = describeService(health, options.expectedArtifactDigest);
 	if (state.status !== 'ready') throw new Error(state.message ?? 'Incompatible Ungate API');
 }

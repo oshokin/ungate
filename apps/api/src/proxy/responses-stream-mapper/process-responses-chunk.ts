@@ -54,4 +54,31 @@ export class ResponsesSseProcessor {
 
 		return results;
 	}
+
+	/** Flush a provider stream that ended without the optional final blank SSE line. */
+	static flush(state: StreamState, trailing = ''): StreamProcessResult[] {
+		const results = trailing ? this.process(state, trailing) : [];
+		if (!state.buffer.trim()) {
+			state.buffer = '';
+
+			return results;
+		}
+
+		return [...results, ...this.process(state, '\n\n')];
+	}
+
+	static failTruncated(state: StreamState): StreamProcessResult[] {
+		if (state.completed) return [];
+		const error = {
+			message: 'ChatGPT Codex stream ended before a terminal event.',
+			type: 'api_error',
+			code: 'truncated_stream'
+		};
+		state.pendingFunctionCalls.clear();
+		state.error = error;
+		state.completed = true;
+		state.successfulCompletion = false;
+
+		return [{ type: 'error', data: { error } }, { type: 'done' }];
+	}
 }

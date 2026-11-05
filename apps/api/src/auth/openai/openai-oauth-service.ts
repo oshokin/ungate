@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 
 import { secondsToMilliseconds } from 'date-fns';
 
-import { DEFAULT_ACCESS_TOKEN_TTL_SECONDS, OAUTH_LOGIN_TTL_MS } from 'src/auth/oauth-limits';
+import { DEFAULT_ACCESS_TOKEN_TTL_SECONDS, OAUTH_LOGIN_TTL_MS, OAUTH_RANDOM_BYTES } from 'src/auth/oauth-limits';
 import { config } from 'src/config';
 import { ProviderSettings } from 'src/database/provider-settings';
 import { logger } from 'src/utils/logger';
@@ -23,7 +23,7 @@ export class OpenAIOAuthService {
 
 	public static async startLogin(): Promise<{ authUrl: string; sessionId: string }> {
 		const { verifier, challenge } = await OpenAIOAuthUtils.generatePkce();
-		const sessionId = OpenAIOAuthUtils.base64urlEncode(randomBytes(32));
+		const sessionId = OpenAIOAuthUtils.base64urlEncode(randomBytes(OAUTH_RANDOM_BYTES));
 		const oauthConfig = config.openai.oauth;
 		const redirectUri = oauthConfig.redirectUri;
 

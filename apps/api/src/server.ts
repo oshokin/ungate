@@ -1,6 +1,7 @@
 import cors from '@fastify/cors';
 import Fastify from 'fastify';
 
+import { LOOPBACK_HOST } from '@ungate/shared';
 import { logger, setQuietMode } from 'src/utils/logger';
 
 /** Largest request body accepted by the proxy before Fastify rejects it. */
@@ -68,7 +69,7 @@ export async function startServer(): Promise<void> {
 	await app.register(settingsPlugin);
 	await app.register(usagePlugin);
 
-	await app.listen({ port: config.port, host: '127.0.0.1' });
+	await app.listen({ port: config.port, host: LOOPBACK_HOST });
 
 	// Always print port to stdout — extension parses this to detect the running port.
 	// Uses globalThis.console to bypass quiet mode.

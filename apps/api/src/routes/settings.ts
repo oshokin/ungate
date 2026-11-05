@@ -2,6 +2,8 @@ import { z } from 'zod';
 
 import {
 	ClaudeCliVersion,
+	TCP_PORT_MAX,
+	TCP_PORT_MIN,
 	TUNNEL_PROTOCOLS,
 	isClaudeCliVersionMode,
 	isModelMappingProvider,
@@ -14,6 +16,8 @@ import { logger } from 'src/utils/logger';
 import { Settings } from '../database/app-settings';
 
 import type { FastifyPluginCallback } from 'fastify';
+
+const TokenLimitSchema = z.union([z.null(), z.number().int().positive()]);
 
 const ModelMappingUpdateSchema = z
 	.object({
@@ -30,13 +34,15 @@ const ModelMappingUpdateSchema = z
 		]),
 		serviceTier: z
 			.union([z.null(), z.string().refine((value) => isModelServiceTier(value), { message: 'Invalid serviceTier' })])
-			.default(null)
+			.default(null),
+		contextWindow: TokenLimitSchema.default(null),
+		maxOutputTokens: TokenLimitSchema.default(null)
 	})
 	.strip();
 
 const SettingsUpdateSchema = z
 	.object({
-		port: z.number().int().min(1).max(65535).optional(),
+		port: z.number().int().min(TCP_PORT_MIN).max(TCP_PORT_MAX).optional(),
 		apiKey: z.string().trim().min(1, 'Ungate API key cannot be empty').optional(),
 		quiet: z.boolean().optional(),
 		extraInstruction: z.union([z.string(), z.null()]).optional(),

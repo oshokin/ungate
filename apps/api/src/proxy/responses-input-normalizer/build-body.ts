@@ -67,6 +67,9 @@ export class ResponsesBodyBuilder {
 		if (body.service_tier) {
 			payload.service_tier = body.service_tier;
 		}
+		if (body.prompt_cache_key?.trim()) {
+			payload.prompt_cache_key = body.prompt_cache_key.trim();
+		}
 
 		if (options.extraInstruction?.trim()) {
 			payload.instructions = options.extraInstruction.trim();

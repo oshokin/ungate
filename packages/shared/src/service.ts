@@ -8,6 +8,7 @@ export interface ApiHealth {
 	pid: number;
 	version: string | null;
 	protocolVersion: number | null;
+	artifactDigest?: string | null;
 }
 
 export interface ServiceState {
@@ -16,6 +17,8 @@ export interface ServiceState {
 	expectedVersion: string;
 	canUpdate: boolean;
 	message: string | null;
+	logsConnected?: boolean;
+	restartRequired?: boolean;
 }
 
 export function compareReleaseVersions(left: string, right: string): number | null {
@@ -27,11 +30,15 @@ export function compareReleaseVersions(left: string, right: string): number | nu
 	return 0;
 }
 
-export function describeService(health: ApiHealth): ServiceState {
-	const ready = health.version === UNGATE_VERSION && health.protocolVersion === API_PROTOCOL_VERSION;
+export function describeService(health: ApiHealth, expectedArtifactDigest?: string): ServiceState {
+	const releaseAndProtocolMatch = health.version === UNGATE_VERSION && health.protocolVersion === API_PROTOCOL_VERSION;
+	const artifactMatches = expectedArtifactDigest === undefined || health.artifactDigest === expectedArtifactDigest;
+	const ready = releaseAndProtocolMatch && artifactMatches;
 	const comparison = health.version ? compareReleaseVersions(health.version, UNGATE_VERSION) : -1;
 	const protocolIsOlder = health.protocolVersion === null || health.protocolVersion < API_PROTOCOL_VERSION;
-	const canUpdate = !ready && comparison !== null && (comparison < 0 || (comparison === 0 && protocolIsOlder));
+	const sameReleaseDifferentArtifact = releaseAndProtocolMatch && !artifactMatches;
+	const canUpdate =
+		!ready && comparison !== null && (comparison < 0 || (comparison === 0 && (protocolIsOlder || sameReleaseDifferentArtifact)));
 	const sameReleaseNeedsApiUpdate = health.version === UNGATE_VERSION && protocolIsOlder;
 
 	return {
@@ -39,12 +46,16 @@ export function describeService(health: ApiHealth): ServiceState {
 		version: health.version,
 		expectedVersion: UNGATE_VERSION,
 		canUpdate,
+		logsConnected: true,
+		restartRequired: sameReleaseDifferentArtifact,
 		message: ready
 			? null
 			: canUpdate
-				? sameReleaseNeedsApiUpdate
-					? 'The shared API is from an older Ungate build. Update the API when active chats finish.'
-					: `The shared API is ${health.version ?? 'an older release'}; this window needs ${UNGATE_VERSION}. Update the API when active chats finish.`
+				? sameReleaseDifferentArtifact
+					? 'A different Ungate API build is running. Restart the shared API to apply the installed build.'
+					: sameReleaseNeedsApiUpdate
+						? 'The shared API is from an older Ungate build. Update the API when active chats finish.'
+						: `The shared API is ${health.version ?? 'an older release'}; this window needs ${UNGATE_VERSION}. Update the API when active chats finish.`
 				: 'The shared API is newer than this window. Update Ungate in this window, then reload this window; shared services will keep running and the API will not be downgraded.'
 	};
 }

@@ -122,6 +122,7 @@ export class ExtensionStatusBar {
 		const restartLabel = this.tunnelRestartLabel(tunnel);
 		const actions: string[] = [
 			`[$(layout-panel) Open Dashboard](command:${extensionCommands.openDashboard})`,
+			`[$(debug-restart) Restart API](command:${extensionCommands.restartApi})`,
 			`[$(debug-restart) ${restartLabel}](command:${extensionCommands.restartTunnel})`
 		];
 

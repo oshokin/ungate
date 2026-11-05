@@ -58,7 +58,7 @@ describe('routes-anthropic', () => {
 		await app.close();
 	});
 
-	it('returns 400 on thrown error', async () => {
+	it('returns a sanitized 500 on an unexpected internal error', async () => {
 		proxyRequestMock.mockRejectedValueOnce(new Error('upstream boom'));
 		const app = await withPlugin(anthropicPlugin, { apiKey: 'secret' });
 		const response = await app.inject({
@@ -68,8 +68,8 @@ describe('routes-anthropic', () => {
 			payload: { model: 'm', max_tokens: 10, messages: [{ role: 'user', content: 'hi' }] }
 		});
 
-		expect(response.statusCode).toBe(502);
-		expect(response.json().error.message).toBe('Upstream request failed');
+		expect(response.statusCode).toBe(500);
+		expect(response.json().error.message).toBe('Internal gateway error.');
 		await app.close();
 	});
 });

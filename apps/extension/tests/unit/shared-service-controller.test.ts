@@ -42,7 +42,8 @@ function create(active = true) {
 		start: vi.fn().mockResolvedValue(undefined),
 		stop: vi.fn().mockResolvedValue(undefined),
 		restart: vi.fn().mockResolvedValue(undefined),
-		getPort: () => state.api.port
+		getPort: () => state.api.port,
+		getExpectedArtifactDigest: () => undefined
 	};
 	const tunnel = {
 		start: vi.fn().mockResolvedValue(undefined),

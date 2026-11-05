@@ -1,9 +1,16 @@
+import { MILLISECONDS_PER_SECOND } from '@ungate/shared';
 import { DEFAULT_MAX_SSE_EVENT_BYTES, DEFAULT_MAX_TOOL_ARGUMENT_BYTES, providerByteLimit } from 'src/streaming/stream-limits';
 
 import type { ChatCompletionUsage } from 'src/types/openai';
 
+export interface StreamError {
+	message: string;
+	type: string;
+	code?: string;
+}
+
 export interface StreamProcessResult {
-	type: 'chunk' | 'done';
+	type: 'chunk' | 'error' | 'done';
 	data?: Record<string, unknown>;
 }
 
@@ -20,6 +27,7 @@ export interface StreamState {
 	buffer: string;
 	completed?: boolean;
 	successfulCompletion?: boolean;
+	error?: StreamError;
 	id: string;
 	model: string;
 	created: number;
@@ -42,7 +50,7 @@ export class StreamStateFactory {
 			buffer: '',
 			id: `chatcmpl-${Date.now().toString(36)}`,
 			model,
-			created: Math.floor(Date.now() / 1000),
+			created: Math.floor(Date.now() / MILLISECONDS_PER_SECOND),
 			roleSent: false,
 			sawTextDelta: false,
 			toolCallsSeen: false,

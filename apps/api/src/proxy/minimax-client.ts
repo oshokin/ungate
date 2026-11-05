@@ -76,7 +76,8 @@ export async function proxyMiniMaxRequest(
 				},
 				body: JSON.stringify(minimaxBody)
 			},
-			signal
+			signal,
+			'minimax'
 		);
 
 		logger.log(`✓ MiniMax request → ${response.status}`);

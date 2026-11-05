@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { ANTHROPIC_API_VERSION } from '@ungate/shared';
+
 import { HeadersExtractor } from 'src/handlers/headers-extractor';
 
 describe('headers-extractor', () => {
@@ -9,7 +11,7 @@ describe('headers-extractor', () => {
 		});
 		expect(out).toEqual({
 			'anthropic-beta': 'a, b',
-			'anthropic-version': '2023-06-01'
+			'anthropic-version': ANTHROPIC_API_VERSION
 		});
 	});
 

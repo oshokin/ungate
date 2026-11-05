@@ -1,4 +1,11 @@
-import { dashboardRequestSchema, DASHBOARD_TRANSPORT, getAdminToken, sleep, type DashboardResponse } from '@ungate/shared';
+import {
+	dashboardRequestSchema,
+	DASHBOARD_TRANSPORT,
+	getAdminToken,
+	LOOPBACK_HOST,
+	sleep,
+	type DashboardResponse
+} from '@ungate/shared';
 
 import { assertCompatibleApi } from './local-api';
 
@@ -9,7 +16,8 @@ export class DashboardApiBridge {
 
 	constructor(
 		private readonly getPort: () => number | null,
-		private readonly send: (message: DashboardResponse) => void
+		private readonly send: (message: DashboardResponse) => void,
+		private readonly expectedArtifactDigest?: string
 	) {}
 
 	async handle(message: unknown): Promise<void> {
@@ -33,8 +41,8 @@ export class DashboardApiBridge {
 				await sleep(DASHBOARD_TRANSPORT.portPollIntervalMs, signal);
 				port = this.getPort();
 			}
-			if (path !== '/health') await assertCompatibleApi(port, signal);
-			const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+			if (path !== '/health') await assertCompatibleApi(port, { expectedArtifactDigest: this.expectedArtifactDigest, signal });
+			const response = await fetch(`http://${LOOPBACK_HOST}:${port}${path}`, {
 				method,
 				body: encoded,
 				signal,

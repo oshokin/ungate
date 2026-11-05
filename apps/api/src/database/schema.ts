@@ -1,10 +1,12 @@
 import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
+import { DEFAULT_API_PORT } from '@ungate/shared';
+
 export const appSettings = sqliteTable('app_settings', {
 	id: integer()
 		.primaryKey({ autoIncrement: false })
 		.$defaultFn(() => 1),
-	port: integer().notNull().default(47821),
+	port: integer().notNull().default(DEFAULT_API_PORT),
 	apiKey: text(),
 	quiet: integer({ mode: 'boolean' }).notNull().default(false),
 	extraInstruction: text(),
@@ -31,7 +33,9 @@ export const modelMappings = sqliteTable('model_mappings', {
 	upstreamModel: text().notNull(),
 	sortOrder: integer().notNull().default(0),
 	reasoningBudget: text(),
-	serviceTier: text()
+	serviceTier: text(),
+	contextWindow: integer(),
+	maxOutputTokens: integer()
 });
 
 export const schema = { appSettings, providerSettings, modelMappings };

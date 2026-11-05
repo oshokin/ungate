@@ -1,6 +1,12 @@
+import { MILLISECONDS_PER_SECOND, OPENAI_API_VERSION } from '@ungate/shared';
 import { logger } from 'src/utils/logger';
 
-import { DEFAULT_MAX_SSE_EVENT_BYTES, DEFAULT_MAX_TOOL_ARGUMENT_BYTES, providerByteLimit } from './stream-limits';
+import {
+	DEFAULT_MAX_SSE_EVENT_BYTES,
+	DEFAULT_MAX_TOOL_ARGUMENT_BYTES,
+	providerByteLimit,
+	SSE_QUEUE_HIGH_WATER_MARK
+} from './stream-limits';
 
 import type { RequestContext, StreamResult } from '../types/proxy';
 
@@ -46,7 +52,7 @@ function buildChunk(
 	return `data: ${JSON.stringify({
 		id: `chatcmpl-${streamId}`,
 		object: 'chat.completion.chunk',
-		created: Math.floor(Date.now() / 1000),
+		created: Math.floor(Date.now() / MILLISECONDS_PER_SECOND),
 		model: modelName,
 		choices: [{ index: 0, delta, finish_reason: finishReason }]
 	})}\n\n`;
@@ -60,7 +66,7 @@ function buildUsageChunk(
 	return `data: ${JSON.stringify({
 		id: `chatcmpl-${streamId}`,
 		object: 'chat.completion.chunk',
-		created: Math.floor(Date.now() / 1000),
+		created: Math.floor(Date.now() / MILLISECONDS_PER_SECOND),
 		model: modelName,
 		choices: [],
 		usage
@@ -148,7 +154,7 @@ export class MiniMaxStreamHandler {
 			'X-Accel-Buffering': 'no',
 			'x-request-id': `req_${streamId}`,
 			'openai-processing-ms': '0',
-			'openai-version': '2020-10-01'
+			'openai-version': OPENAI_API_VERSION
 		};
 
 		const reader = response.body?.getReader();
@@ -372,7 +378,7 @@ export class MiniMaxStreamHandler {
 					reader.cancel(reason).catch(() => {});
 				}
 			},
-			new CountQueuingStrategy({ highWaterMark: 64 })
+			new CountQueuingStrategy({ highWaterMark: SSE_QUEUE_HIGH_WATER_MARK })
 		);
 	}
 }

@@ -10,7 +10,7 @@ import {
 import { config } from '../config';
 import { PROVIDER_READ_TIMEOUT_MS } from '../security/outbound-request';
 
-import { MAX_MODELS, model, readJson, uniqueModels, type ProviderCatalog } from './common';
+import { MAX_MODELS, modelWithLimits, readJson, uniqueModels, type ProviderCatalog } from './common';
 
 interface CodexCatalog {
 	models?: unknown;
@@ -42,7 +42,7 @@ function serviceTiers(item: Record<string, unknown>): ModelServiceTier[] {
 }
 
 function discoveredModel(item: Record<string, unknown>): DiscoveredModel | null {
-	const base = model(item.slug, item.display_name);
+	const base = modelWithLimits(item.slug, item.display_name, item);
 	if (!base) return null;
 	const levels = reasoningLevels(item.supported_reasoning_levels);
 	const defaultLevel = isReasoningBudgetTier(item.default_reasoning_level) ? item.default_reasoning_level : null;

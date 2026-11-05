@@ -1,34 +1,26 @@
 import { openaiToAnthropic } from 'src/adapter/openai-to-anthropic';
+import { resolveMaxOutputTokens } from 'src/proxy/output-tokens';
+import { DEFAULT_MAX_TOKENS } from 'src/proxy/token-budgets';
 
 import type { ModelMappingConfig } from '@ungate/shared';
 import type { OpenAIChatRequest } from 'src/types/openai';
 
 export class CompletionModelRouting {
-	static isMiniMaxModel(model: string): boolean {
-		const normalized = model.trim().toLowerCase();
-
-		if (normalized.startsWith('minimax')) {
-			return true;
-		}
-
-		if (normalized.startsWith('mini-max')) {
-			return true;
-		}
-
-		return false;
-	}
-
-	static shouldRouteMiniMax(resolved: ModelMappingConfig | null, requestedModel: string): boolean {
-		if (resolved?.provider === 'minimax') {
-			return true;
-		}
-
-		return CompletionModelRouting.isMiniMaxModel(requestedModel);
+	static shouldRouteMiniMax(resolved: ModelMappingConfig | null, _requestedModel: string): boolean {
+		return resolved?.provider === 'minimax';
 	}
 
 	static buildMiniMaxBody(openaiBody: OpenAIChatRequest, resolved: ModelMappingConfig | null): OpenAIChatRequest {
 		if (resolved?.provider === 'minimax') {
-			return { ...openaiBody, model: resolved.upstreamModel };
+			return {
+				...openaiBody,
+				model: resolved.upstreamModel,
+				max_completion_tokens: resolveMaxOutputTokens(
+					openaiBody.max_completion_tokens ?? openaiBody.max_tokens,
+					resolved.maxOutputTokens,
+					DEFAULT_MAX_TOKENS
+				)
+			};
 		}
 
 		return openaiBody;
@@ -77,7 +69,8 @@ export class CompletionModelRouting {
 		if (resolved?.provider === 'claude') {
 			return openaiToAnthropic(openaiBody, {
 				model: resolved.upstreamModel,
-				reasoningBudget: resolved.reasoningBudget
+				reasoningBudget: resolved.reasoningBudget,
+				maxOutputTokens: resolved.maxOutputTokens
 			});
 		}
 

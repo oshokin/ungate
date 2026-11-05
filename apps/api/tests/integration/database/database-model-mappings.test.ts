@@ -33,7 +33,9 @@ describe('database-model-mappings', () => {
 			upstreamModel: 'gpt-5.4',
 			sortOrder: 0,
 			reasoningBudget: 'max',
-			serviceTier: 'priority'
+			serviceTier: 'priority',
+			contextWindow: null,
+			maxOutputTokens: null
 		});
 	});
 

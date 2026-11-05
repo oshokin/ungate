@@ -1,9 +1,11 @@
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-import { UNGATE_DIR } from '@ungate/shared';
+import { DASHBOARD_TRANSPORT, UNGATE_DIR } from '@ungate/shared';
 
 const baseDir = path.join(os.homedir(), UNGATE_DIR);
+/** How long a shared API start may hold its lock and stay owned by the starting window. */
+const API_START_WINDOW_MS = 120_000;
 
 /** Paths and deadlines for the shared API, tunnel and multi-window state. */
 export const config = {
@@ -23,9 +25,9 @@ export const config = {
 	},
 	locks: {
 		/** Cross-window command lock. Matches the longest dashboard action. */
-		commandsTimeoutMs: 180_000,
+		commandsTimeoutMs: DASHBOARD_TRANSPORT.actionTimeoutMs,
 		/** Lock held while the shared API is starting. */
-		startupTimeoutMs: 120_000
+		startupTimeoutMs: API_START_WINDOW_MS
 	},
 	apiServer: {
 		/** How long to wait for the child process to print its port. */
@@ -74,6 +76,6 @@ export const config = {
 		// How long a yellow status-bar warning stays visible.
 		statusBarWarningMs: 8_000,
 		// A starting API owned by a live window is left alone for this long.
-		apiStartFreshMs: 120_000
+		apiStartFreshMs: API_START_WINDOW_MS
 	}
 };

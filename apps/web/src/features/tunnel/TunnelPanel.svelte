@@ -171,6 +171,42 @@ $effect(() => watchTunnelError(store.tunnel.error, 'error'));
 			<span class="ug-muted">Shared by local and SSH windows on this computer.</span>
 		</div>
 	{/if}
+	<div
+		class="ug-stack ug-service-controls"
+		role="group"
+		aria-label="Service controls">
+		<div
+			class="ug-row ug-service-control"
+			data-service="api">
+			<span
+				><strong>API</strong> · {service.state.status === 'ready'
+					? service.state.logsConnected === false
+						? 'Logging disconnected'
+						: 'Ready'
+					: service.state.status}</span>
+			<button
+				class="ug-button ug-compact"
+				disabled={!!actions.busy}
+				onclick={() => performAction('restart-services')}>
+				{actions.busy === 'restart-services' ? 'Restarting…' : 'Restart API'}
+			</button>
+		</div>
+		<div
+			class="ug-row ug-service-control"
+			data-service="tunnel">
+			<span><strong>Tunnel</strong> · {tunnelLabel}</span>
+			<div class="ug-toolbar">
+				<button
+					class="ug-button ug-compact"
+					disabled={!!actions.busy}
+					onclick={() => performAction('restart-tunnel')}>Restart tunnel</button>
+				<button
+					class="ug-button ug-compact ug-caution"
+					disabled={!!actions.busy}
+					onclick={() => performAction('stop-tunnel')}>Stop</button>
+			</div>
+		</div>
+	</div>
 	<details class="ug-details">
 		<summary>Connection details</summary>
 		<div class="ug-stack ug-muted">
@@ -180,16 +216,6 @@ $effect(() => watchTunnelError(store.tunnel.error, 'error'));
 			<p
 				>Ungate cannot automatically change Cursor’s Base URL or verify its billing route. Quick Tunnels may work in practice, but
 				Cloudflare classifies them as development-only, provides no uptime guarantee, and does not officially support SSE.</p>
-			<div class="ug-toolbar">
-				<button
-					class="ug-button"
-					disabled={!!actions.busy}
-					onclick={() => performAction('restart-tunnel')}>Restart tunnel</button>
-				<button
-					class="ug-button"
-					disabled={!!actions.busy}
-					onclick={() => performAction('stop-tunnel')}>Stop tunnel only</button>
-			</div>
 		</div>
 	</details>
 </section>

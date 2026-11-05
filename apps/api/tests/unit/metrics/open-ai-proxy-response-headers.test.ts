@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { OPENAI_API_VERSION } from '@ungate/shared';
+
 import { ProxyResponseHeaders } from 'src/metrics';
 
 describe('ProxyResponseHeaders.apply', () => {
@@ -13,6 +15,6 @@ describe('ProxyResponseHeaders.apply', () => {
 		expect(header.mock.calls[0][0]).toBe('x-request-id');
 		expect(String(header.mock.calls[0][1])).toMatch(/^req_[0-9a-f-]{36}$/);
 		expect(header.mock.calls[1]).toEqual(['openai-processing-ms', '42']);
-		expect(header.mock.calls[2]).toEqual(['openai-version', '2020-10-01']);
+		expect(header.mock.calls[2]).toEqual(['openai-version', OPENAI_API_VERSION]);
 	});
 });

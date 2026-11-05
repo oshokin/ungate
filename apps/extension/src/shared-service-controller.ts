@@ -27,7 +27,7 @@ export class SharedServiceController {
 					// A failed probe is not evidence that a process is ours: ApiServer.stop re-authenticates it.
 					const health = await readApiHealth(existingPort).catch(() => null);
 					if (health) {
-						const state = describeService(health);
+						const state = describeService(health, this.api.getExpectedArtifactDigest());
 						if (state.status === 'incompatible' && !state.canUpdate) throw new Error(state.message!);
 					}
 				}
@@ -75,7 +75,7 @@ export class SharedServiceController {
 				const port = this.api.getPort() ?? RuntimeStateStore.read().api.port;
 				if (!port) throw new Error('Ungate API is not ready.');
 				const snapshot = await readApiHealth(port);
-				const health = describeService(snapshot);
+				const health = describeService(snapshot, this.api.getExpectedArtifactDigest());
 				if (health.status !== 'ready') throw new Error(health.message!);
 				const protocol = await readTunnelProtocol(port);
 				if (action === 'restart-tunnel') await this.tunnel.restart(port, protocol);

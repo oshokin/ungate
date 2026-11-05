@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import {
 	dashboardActions,
 	describeService,
+	LOOPBACK_HOST,
 	UNGATE_VERSION,
 	type DashboardAction,
 	type ServiceState,
@@ -13,6 +14,7 @@ import {
 } from '@ungate/shared/frontend';
 import * as vscode from 'vscode';
 
+import { apiArtifactDigest } from './api-artifact';
 import { ApiServer } from './api-server';
 import { openCursorModels } from './cursor-settings';
 import { Dashboard, type Msg } from './dashboard';
@@ -44,7 +46,8 @@ export class ExtensionController {
 		version: null,
 		expectedVersion: UNGATE_VERSION,
 		canUpdate: false,
-		message: null
+		message: null,
+		logsConnected: true
 	};
 
 	private currentPort: number | null = null;
@@ -82,9 +85,13 @@ export class ExtensionController {
 		// bootstrap is asynchronous and must not gate status-bar visibility.
 		this.updateStatusBar();
 
-		this.dashboard = new Dashboard(this.context, (message) => {
-			this.handleDashboardMessage(message);
-		});
+		this.dashboard = new Dashboard(
+			this.context,
+			(message) => {
+				this.handleDashboardMessage(message);
+			},
+			apiArtifactDigest(this.context)
+		);
 
 		this.tunnelManager = new TunnelManager(
 			this.windowId,
@@ -220,7 +227,7 @@ export class ExtensionController {
 	}
 
 	private getLocalApiUrl(): string | null {
-		return this.currentPort ? `http://127.0.0.1:${this.currentPort}` : null;
+		return this.currentPort ? `http://${LOOPBACK_HOST}:${this.currentPort}` : null;
 	}
 
 	private updateStatusBar(): void {
@@ -394,22 +401,25 @@ export class ExtensionController {
 				version: null,
 				expectedVersion: UNGATE_VERSION,
 				canUpdate: false,
-				message: state.api.lastError
+				message: state.api.lastError,
+				logsConnected: true
 			};
 		} else {
 			try {
 				const health = await readApiHealth(state.api.port);
-				service = describeService(health);
+				service = describeService(health, this.apiServer.getExpectedArtifactDigest());
 			} catch {
 				service = {
 					status: 'error',
 					version: null,
 					expectedVersion: UNGATE_VERSION,
 					canUpdate: false,
-					message: state.api.lastError ?? 'The shared API is not responding. Restart it or open Logs.'
+					message: state.api.lastError ?? 'The shared API is not responding. Restart it or open Logs.',
+					logsConnected: true
 				};
 			}
 		}
+		service.logsConnected = state.api.logHealth?.status !== 'unavailable';
 		this.serviceState = service;
 		this.dashboard.sendServiceState(service);
 	}

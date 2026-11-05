@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { OPENAI_API_VERSION } from '@ungate/shared';
+
 import openaiPlugin from 'src/routes/openai';
 import { MAX_CHAT_MESSAGES } from 'src/schemas/proxy-requests';
 
@@ -131,7 +133,7 @@ describe('routes-openai', () => {
 		expect(response.json()).toEqual({ id: 'minimax-ok' });
 		expect(response.headers['x-request-id']).toBeTruthy();
 		expect(response.headers['openai-processing-ms']).toBeTruthy();
-		expect(response.headers['openai-version']).toBe('2020-10-01');
+		expect(response.headers['openai-version']).toBe(OPENAI_API_VERSION);
 
 		await app.close();
 	});
@@ -158,7 +160,7 @@ describe('routes-openai', () => {
 
 		expect(response.statusCode).toBe(429);
 		expect(response.json().error.message).toBe('upstream failed');
-		expect(response.headers['openai-version']).toBe('2020-10-01');
+		expect(response.headers['openai-version']).toBe(OPENAI_API_VERSION);
 		await app.close();
 	});
 
@@ -195,7 +197,7 @@ describe('routes-openai', () => {
 		expect(response.statusCode).toBe(200);
 		expect(response.json()).toEqual({ id: 'chatcmpl-ok', choices: [{ message: { content: 'done' } }] });
 		expect(response.headers['x-request-id']).toBeTruthy();
-		expect(response.headers['openai-version']).toBe('2020-10-01');
+		expect(response.headers['openai-version']).toBe(OPENAI_API_VERSION);
 
 		expect(proxyOpenAIRequestMock).toHaveBeenCalledWith(
 			expect.objectContaining({

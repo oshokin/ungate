@@ -171,7 +171,9 @@ function addModel() {
 			upstreamModel: '',
 			sortOrder: formStore.models.length,
 			reasoningBudget: null,
-			serviceTier: null
+			serviceTier: null,
+			contextWindow: null,
+			maxOutputTokens: null
 		}
 	]);
 
@@ -188,6 +190,14 @@ function inputValue(event: Event): string {
 	}
 
 	return target.value;
+}
+
+function tokenLimitValue(event: Event): number | null {
+	const raw = inputValue(event).trim();
+	if (!raw) return null;
+	const value = Number(raw);
+
+	return Number.isSafeInteger(value) && value > 0 ? value : null;
 }
 
 function selectValue(event: Event): string {
@@ -599,10 +609,7 @@ $effect(() => {
 
 										<details class="rounded-md border ug-border">
 											<summary class="cursor-pointer px-3 py-2 text-xs font-medium">Advanced options</summary>
-											<div
-												class="grid grid-cols-1 gap-4 border-t ug-border p-3 {selectedProvider === 'openai'
-													? 'md:grid-cols-2'
-													: ''}">
+											<div class="grid grid-cols-1 gap-4 border-t ug-border p-3 md:grid-cols-2">
 												<label class="ug-label">
 													<span class=" text-xs">Reasoning Budget</span>
 													<select
@@ -633,6 +640,31 @@ $effect(() => {
 														</select>
 													</label>
 												{/if}
+												<label class="ug-label">
+													<span class="text-xs">Context Window</span>
+													<input
+														class="ug-input text-sm font-mono"
+														type="number"
+														min="1"
+														step="1"
+														value={model.contextWindow ?? ''}
+														oninput={(event) => updateModelAtIndex(index, 'contextWindow', tokenLimitValue(event))}
+														placeholder="Unknown" />
+													<span class="text-xs ug-description">Metadata reported through /v1/models. Empty means unknown.</span>
+												</label>
+												<label class="ug-label">
+													<span class="text-xs">Max Output Tokens</span>
+													<input
+														class="ug-input text-sm font-mono"
+														type="number"
+														min="1"
+														step="1"
+														value={model.maxOutputTokens ?? ''}
+														oninput={(event) => updateModelAtIndex(index, 'maxOutputTokens', tokenLimitValue(event))}
+														placeholder="Provider default" />
+													<span class="text-xs ug-description"
+														>Caps larger requests and supplies the limit when the client omits it.</span>
+												</label>
 											</div>
 										</details>
 									</div>

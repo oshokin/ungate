@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-import { LOG_LIMITS, QUICK_TUNNEL_CONFIG, QUICK_TUNNEL_CONFIG_NAME } from '@ungate/shared';
+import { DEFAULT_API_PORT, LOOPBACK_HOST, LOG_LIMITS, QUICK_TUNNEL_CONFIG, QUICK_TUNNEL_CONFIG_NAME } from '@ungate/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { config } from '../../src/runtime-state/config';
@@ -91,11 +91,11 @@ afterEach(() => {
 
 describe('detached tunnel lifecycle', () => {
 	it('installs a verified binary, uses a loopback origin and detached file-backed logs', async () => {
-		await manager.start(47821);
+		await manager.start(DEFAULT_API_PORT);
 		expect(mocks.install).toHaveBeenCalledWith(getCloudflaredBinPath());
 		expect(mocks.spawn).toHaveBeenCalledWith(
 			getCloudflaredBinPath(),
-			expect.arrayContaining(['http://127.0.0.1:47821', '--protocol', 'http2']),
+			expect.arrayContaining([`http://${LOOPBACK_HOST}:${DEFAULT_API_PORT}`, '--protocol', 'http2']),
 			expect.objectContaining({ detached: true, stdio: 'ignore' })
 		);
 		const args = mocks.spawn.mock.calls[0][1] as string[];
@@ -114,7 +114,7 @@ describe('detached tunnel lifecycle', () => {
 	});
 
 	it('starts cloudflared with the saved protocol', async () => {
-		await manager.start(47821, 'quic');
+		await manager.start(DEFAULT_API_PORT, 'quic');
 		expect(mocks.spawn).toHaveBeenCalledWith(
 			getCloudflaredBinPath(),
 			expect.arrayContaining(['--protocol', 'quic']),
@@ -124,28 +124,28 @@ describe('detached tunnel lifecycle', () => {
 	});
 
 	it('reuses a live tunnel in another window, including two concurrent starts', async () => {
-		await Promise.all([manager.start(47821), manager.start(47821)]);
+		await Promise.all([manager.start(DEFAULT_API_PORT), manager.start(DEFAULT_API_PORT)]);
 		const another = new TunnelManager('window-b', () => true, vi.fn(), vi.fn());
-		await another.start(47821);
+		await another.start(DEFAULT_API_PORT);
 		expect(mocks.spawn).toHaveBeenCalledTimes(1);
 		expect(another.getState().url).toBe('https://one.trycloudflare.com');
 	});
 
 	it('does not spawn when binary verification fails', async () => {
 		mocks.install.mockRejectedValue(new Error('Checksum mismatch'));
-		await expect(manager.start(47821)).rejects.toThrow('Checksum mismatch');
+		await expect(manager.start(DEFAULT_API_PORT)).rejects.toThrow('Checksum mismatch');
 		expect(mocks.spawn).not.toHaveBeenCalled();
 		expect(manager.getState().status).toBe('error');
 	});
 
 	it('stops the old process before spawning a replacement', async () => {
-		await manager.start(47821);
+		await manager.start(DEFAULT_API_PORT);
 		const kill = vi.spyOn(process, 'kill').mockImplementation(() => {
 			mocks.alive = false;
 
 			return true;
 		});
-		await manager.restart(47821);
+		await manager.restart(DEFAULT_API_PORT);
 		expect(kill).toHaveBeenCalledWith(12345, 'SIGTERM');
 		expect(mocks.spawn).toHaveBeenCalledTimes(2);
 		expect(manager.getState().url).toBe('https://two.trycloudflare.com');
@@ -158,13 +158,13 @@ describe('detached tunnel lifecycle', () => {
 	});
 
 	it('kills a verified tunnel that ignores graceful shutdown and clears a dead tunnel', async () => {
-		await manager.start(47821);
+		await manager.start(DEFAULT_API_PORT);
 		const kill = vi.spyOn(process, 'kill').mockImplementation((_pid, signal) => {
 			if (signal === 'SIGKILL') mocks.alive = false;
 
 			return true;
 		});
-		await manager.restart(47821);
+		await manager.restart(DEFAULT_API_PORT);
 		expect(kill.mock.calls.map((call) => call[1])).toEqual(['SIGTERM', 'SIGKILL']);
 		expect(manager.getState().url).toBe('https://two.trycloudflare.com');
 

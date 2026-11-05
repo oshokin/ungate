@@ -3,7 +3,10 @@ import { PROVIDER_READ_TIMEOUT_MS } from 'src/security/outbound-request';
 import { config } from '../config';
 import { RequestBuilder } from '../proxy/request-builder';
 
-import { MAX_MODELS, MAX_PAGES, model, readJson, uniqueModels, type ProviderCatalog } from './common';
+import { MAX_MODELS, MAX_PAGES, modelWithLimits, readJson, uniqueModels, type ProviderCatalog } from './common';
+
+/** Models requested from one Claude catalog page. */
+const CLAUDE_CATALOG_PAGE_SIZE = 100;
 
 import type { DiscoveredModel } from '@ungate/shared';
 
@@ -19,7 +22,7 @@ export async function discoverClaudeModels(accessToken: string): Promise<Provide
 
 	for (let page = 0; page < MAX_PAGES && discovered.length < MAX_MODELS; page++) {
 		const url = new URL('/v1/models', config.anthropic.apiUrl);
-		url.searchParams.set('limit', '100');
+		url.searchParams.set('limit', String(CLAUDE_CATALOG_PAGE_SIZE));
 		if (afterId) url.searchParams.set('after_id', afterId);
 		const response = await fetch(url, {
 			method: 'GET',
@@ -34,7 +37,7 @@ export async function discoverClaudeModels(accessToken: string): Promise<Provide
 		for (const item of payload.data) {
 			if (!item || typeof item !== 'object') continue;
 			const row = item as Record<string, unknown>;
-			const normalized = model(row.id, row.display_name);
+			const normalized = modelWithLimits(row.id, row.display_name, row);
 			if (normalized) discovered.push(normalized);
 		}
 

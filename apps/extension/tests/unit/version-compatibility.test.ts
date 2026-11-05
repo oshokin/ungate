@@ -1,6 +1,6 @@
 import { createServer, type Server } from 'node:http';
 
-import { API_PROTOCOL_VERSION, describeService, UNGATE_VERSION } from '@ungate/shared';
+import { API_PROTOCOL_VERSION, describeService, LOOPBACK_HOST, UNGATE_VERSION } from '@ungate/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { DashboardApiBridge } from '../../src/dashboard-api-bridge';
@@ -31,7 +31,7 @@ async function start(health: unknown, modern = false) {
 			response.end(JSON.stringify({ ok: true }));
 		}
 	});
-	await new Promise<void>((resolve) => server!.listen(0, '127.0.0.1', resolve));
+	await new Promise<void>((resolve) => server!.listen(0, LOOPBACK_HOST, resolve));
 	const address = server.address();
 	if (!address || typeof address === 'string') throw new Error('Missing port');
 
@@ -58,7 +58,8 @@ describe('shared API compatibility over real HTTP', () => {
 				service: 'ungate',
 				pid: 123,
 				version: UNGATE_VERSION,
-				protocolVersion: API_PROTOCOL_VERSION
+				protocolVersion: API_PROTOCOL_VERSION,
+				artifactDigest: 'current'
 			},
 			true
 		);
@@ -73,9 +74,38 @@ describe('shared API compatibility over real HTTP', () => {
 				service: 'ungate',
 				pid: 123,
 				version: UNGATE_VERSION,
-				protocolVersion: API_PROTOCOL_VERSION - 1
+				protocolVersion: API_PROTOCOL_VERSION - 1,
+				artifactDigest: null
 			})
 		).toMatchObject({ status: 'incompatible', canUpdate: true });
+	});
+	it('requires restart when the same release and protocol run different API bytes', () => {
+		expect(
+			describeService(
+				{
+					service: 'ungate',
+					pid: 123,
+					version: UNGATE_VERSION,
+					protocolVersion: API_PROTOCOL_VERSION,
+					artifactDigest: 'old'
+				},
+				'installed'
+			)
+		).toMatchObject({
+			status: 'incompatible',
+			canUpdate: true,
+			message: expect.stringContaining('different Ungate API build')
+		});
+	});
+	it('treats an invalid reported digest as missing', async () => {
+		const { port } = await start({
+			service: 'ungate',
+			pid: 123,
+			version: UNGATE_VERSION,
+			protocolVersion: API_PROTOCOL_VERSION,
+			artifactDigest: 'not-a-sha256'
+		});
+		await expect(readApiHealth(port)).resolves.toMatchObject({ artifactDigest: null });
 	});
 	it('does not offer downgrading a newer API from an old window', async () => {
 		const { port } = await start({ service: 'ungate', pid: 123, version: '1.8.0', protocolVersion: 1 });

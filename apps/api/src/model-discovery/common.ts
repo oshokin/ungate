@@ -58,6 +58,28 @@ export function model(id: unknown, label: unknown): DiscoveredModel | null {
 	return { id: upstreamModel, label: displayLabel, upstreamModel };
 }
 
+export function modelWithLimits(id: unknown, label: unknown, raw: Record<string, unknown>): DiscoveredModel | null {
+	const discovered = model(id, label);
+	if (!discovered) return null;
+	const contextWindow = firstTokenLimit(raw, ['max_input_tokens', 'context_window', 'context_length']);
+	const maxOutputTokens = firstTokenLimit(raw, ['max_tokens', 'max_output_tokens', 'max_completion_tokens']);
+
+	return {
+		...discovered,
+		...(contextWindow ? { contextWindow } : {}),
+		...(maxOutputTokens ? { maxOutputTokens } : {})
+	};
+}
+
+function firstTokenLimit(raw: Record<string, unknown>, keys: string[]): number | undefined {
+	for (const key of keys) {
+		const value = raw[key];
+		if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) return value;
+	}
+
+	return undefined;
+}
+
 export function uniqueModels(models: DiscoveredModel[]): DiscoveredModel[] {
 	const unique = new Map<string, DiscoveredModel>();
 	for (const item of models) {

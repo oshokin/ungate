@@ -140,6 +140,15 @@ export async function verifyDashboardThemes(
 		await page.getByText('Connect this provider in Settings.', { exact: true }).first().waitFor();
 		await verify('usage');
 		await page.getByRole('button', { name: 'Connection', exact: true }).click();
+		for (const name of ['Restart API', 'Restart tunnel', 'Stop']) {
+			const control = page.getByRole('button', { name, exact: true });
+			await control.waitFor();
+			assert.equal(await control.evaluate((element) => getComputedStyle(element).borderStyle), 'solid');
+			assert.notEqual(await control.evaluate((element) => getComputedStyle(element).borderColor), 'rgba(0, 0, 0, 0)');
+			await control.hover();
+			await verify(`hover-${name.toLowerCase().replaceAll(' ', '-')}`);
+		}
+		await page.mouse.move(0, 0);
 		const settings = page.locator('details.ug-details').filter({ hasText: 'Advanced settings' });
 		const settingsOpen = await settings.getAttribute('open');
 		if (settingsOpen === null) await settings.locator('summary').click();

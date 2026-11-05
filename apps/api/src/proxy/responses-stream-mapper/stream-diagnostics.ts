@@ -2,6 +2,8 @@ import { logger } from 'src/utils/logger';
 
 /** Characters of the SSE event summary kept on one log line. */
 const MAX_SSE_SUMMARY_CHARS = 900;
+/** SSE event kinds included in one finished-stream log line. */
+const MAX_LOGGED_SSE_KINDS = 24;
 
 import type { StreamState } from './stream-state';
 import type { ChatCompletionUsage } from 'src/types/openai';
@@ -74,7 +76,7 @@ export class StreamDiagnostics {
 	static logFinished(state: StreamState, how: 'stream' | 'buffer'): void {
 		const entries = [...state.sseKindCounts.entries()].sort((a, b) => b[1] - a[1]);
 		const top = entries
-			.slice(0, 24)
+			.slice(0, MAX_LOGGED_SSE_KINDS)
 			.map(([t, n]) => `${t}:${n}`)
 			.join(' ');
 		let summary = top;

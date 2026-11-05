@@ -36,6 +36,10 @@ export interface ModelMappingConfig {
 	sortOrder: number;
 	reasoningBudget: ReasoningBudgetTier | null;
 	serviceTier: ModelServiceTier | null;
+	/** Input context metadata reported to clients; null means unknown. */
+	contextWindow?: number | null;
+	/** Upstream output cap; null keeps the provider fallback. */
+	maxOutputTokens?: number | null;
 }
 
 export interface DiscoveredModel {
@@ -49,6 +53,8 @@ export interface DiscoveredModel {
 	defaultReasoningLevel?: ReasoningBudgetTier | null;
 	serviceTiers?: ModelServiceTier[];
 	defaultServiceTier?: ModelServiceTier | null;
+	contextWindow?: number;
+	maxOutputTokens?: number;
 }
 
 export type ModelDiscoveryStatus = 'ok' | 'not_connected' | 'unsupported' | 'error';

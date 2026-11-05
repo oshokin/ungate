@@ -9,6 +9,12 @@ export const runtimeClientEntrySchema = z.object({
 	lastSeenAt: z.number()
 });
 
+export const runtimeApiLogHealthSchema = z.object({
+	status: z.enum(['available', 'unavailable']),
+	logPath: z.string().nullable(),
+	message: z.string().nullable()
+});
+
 export const runtimeApiStateSchema = z.object({
 	pid: z.number().nullable(),
 	port: z.number().nullable(),
@@ -17,7 +23,8 @@ export const runtimeApiStateSchema = z.object({
 	lastSeenAt: z.number(),
 	lastError: z.string().nullable(),
 	ownerWindowId: z.string().nullable(),
-	startSuppressed: z.boolean().optional()
+	startSuppressed: z.boolean().optional(),
+	logHealth: runtimeApiLogHealthSchema.optional()
 });
 
 export const runtimeTunnelStateSchema = z.object({

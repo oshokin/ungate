@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { DEFAULT_API_PORT } from '@ungate/shared';
+
 import { Settings } from 'src/database/app-settings';
 import { ModelMappings } from 'src/database/model-mappings';
 import { getDb, schema } from 'src/database';
@@ -14,13 +16,15 @@ describe('database-app-settings', () => {
 				upstreamModel: 'claude-test-default-model',
 				sortOrder: 0,
 				reasoningBudget: null,
-				serviceTier: null
+				serviceTier: null,
+				contextWindow: null,
+				maxOutputTokens: null
 			}
 		];
 		ModelMappings.replace(expectedModels);
 		const settings = Settings.get();
 
-		expect(settings.port).toBe(47821);
+		expect(settings.port).toBe(DEFAULT_API_PORT);
 		expect(settings.tunnelProtocol).toBe('http2');
 		expect(settings.apiKey).toBeTypeOf('string');
 		expect(settings.models).toEqual(expectedModels);
@@ -35,7 +39,9 @@ describe('database-app-settings', () => {
 			upstreamModel: 'u',
 			sortOrder: 0,
 			reasoningBudget: null,
-			serviceTier: null
+			serviceTier: null,
+			contextWindow: null,
+			maxOutputTokens: null
 		};
 
 		Settings.update({

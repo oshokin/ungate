@@ -6,6 +6,9 @@ import { StreamChunkMapper } from './stream-openai-chunks';
 
 import type { StreamProcessResult, StreamState } from './stream-state';
 
+/** Provider error text retained in logs and the OpenAI-compatible response. */
+const MAX_STREAM_ERROR_MESSAGE_CHARS = 1_000;
+
 export class ResponsesEventRouter {
 	static route(state: StreamState, payload: Record<string, unknown>, results: StreamProcessResult[]): void {
 		if (state.completed) return;
@@ -291,6 +294,20 @@ export class ResponsesEventRouter {
 		}
 
 		const resp = payload.response as Record<string, unknown> | undefined;
+		if (kind === 'response.failed' || kind === 'error') {
+			const error = this.extractStreamError(payload, resp);
+			logger.error(
+				`ChatGPT Codex stream error: event=${kind} type=${error.type}${error.code ? ` code=${error.code}` : ''} message=${JSON.stringify(error.message)}`
+			);
+			state.pendingFunctionCalls.clear();
+			state.error = error;
+			state.completed = true;
+			state.successfulCompletion = false;
+			results.push({ type: 'error', data: { error } });
+			results.push({ type: 'done' });
+
+			return;
+		}
 
 		if (!state.sawTextDelta && !state.toolCallsSeen) {
 			const fallbackText = AssistantTextExtractor.fromResponseOutput(resp);
@@ -317,6 +334,43 @@ export class ResponsesEventRouter {
 
 		results.push({ type: 'chunk', data: StreamChunkMapper.chunk(state, {}, finish, mappedUsage) });
 		results.push({ type: 'done' });
+	}
+
+	private static extractStreamError(
+		payload: Record<string, unknown>,
+		response: Record<string, unknown> | undefined
+	): { message: string; type: string; code?: string } {
+		const responseError = response?.error;
+		const statusDetails =
+			response?.status_details && typeof response.status_details === 'object'
+				? (response.status_details as Record<string, unknown>)
+				: undefined;
+		const statusDetailsError =
+			statusDetails?.error && typeof statusDetails.error === 'object'
+				? (statusDetails.error as Record<string, unknown>)
+				: statusDetails;
+		const raw =
+			payload.error && typeof payload.error === 'object'
+				? (payload.error as Record<string, unknown>)
+				: responseError && typeof responseError === 'object'
+					? (responseError as Record<string, unknown>)
+					: (statusDetailsError ?? payload);
+		const code = typeof raw.code === 'string' && raw.code ? raw.code : undefined;
+		const type =
+			(typeof raw.type === 'string' && raw.type !== 'error' && raw.type) ||
+			(typeof raw.error_type === 'string' && raw.error_type) ||
+			'api_error';
+		const message =
+			(typeof raw.message === 'string' && raw.message) ||
+			(typeof raw.reason === 'string' && raw.reason) ||
+			(typeof response?.status_details === 'string' && response.status_details) ||
+			'ChatGPT Codex stream failed.';
+
+		return {
+			message: message.replace(/[\r\n\t]+/gu, ' ').slice(0, MAX_STREAM_ERROR_MESSAGE_CHARS),
+			type,
+			...(code ? { code } : {})
+		};
 	}
 
 	private static readArgumentsDelta(rawArgDelta: unknown): string {

@@ -2,7 +2,7 @@ import { MINIMAX_BASE_URLS } from '@ungate/shared';
 import { validateMiniMaxBaseUrl } from 'src/security/minimax-url';
 import { PROVIDER_READ_TIMEOUT_MS } from 'src/security/outbound-request';
 
-import { MAX_MODELS, model, readJson, uniqueModels, type ProviderCatalog } from './common';
+import { MAX_MODELS, modelWithLimits, readJson, uniqueModels, type ProviderCatalog } from './common';
 
 interface MiniMaxCatalog {
 	data?: unknown;
@@ -30,7 +30,7 @@ export async function discoverMiniMaxModels(accessToken: string, baseUrl: string
 				if (!item || typeof item !== 'object') return null;
 				const row = item as Record<string, unknown>;
 
-				return model(row.id, row.display_name ?? row.id);
+				return modelWithLimits(row.id, row.display_name ?? row.id, row);
 			})
 			.filter((item) => item !== null)
 	);

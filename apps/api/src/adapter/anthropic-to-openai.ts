@@ -1,3 +1,4 @@
+import { MILLISECONDS_PER_SECOND } from '@ungate/shared';
 import { logger } from 'src/utils/logger';
 
 /** Characters of tool arguments written to the stream diagnostic log. */
@@ -58,7 +59,7 @@ export class AnthropicToOpenai {
 		const result: OpenAIChatResponse = {
 			id: `chatcmpl-${anthropicResponse.id ?? Date.now()}`,
 			object: 'chat.completion',
-			created: Math.floor(Date.now() / 1000),
+			created: Math.floor(Date.now() / MILLISECONDS_PER_SECOND),
 			model,
 			choices: [{ index: 0, message, finish_reason: finishReason }],
 			usage: {
@@ -75,7 +76,7 @@ export class AnthropicToOpenai {
 		const chunk: OpenAIStreamChunk = {
 			id: `chatcmpl-${id}`,
 			object: 'chat.completion.chunk',
-			created: Math.floor(Date.now() / 1000),
+			created: Math.floor(Date.now() / MILLISECONDS_PER_SECOND),
 			model,
 			choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }]
 		};
@@ -100,7 +101,7 @@ export class AnthropicToOpenai {
 		} = {
 			id: `chatcmpl-${id}`,
 			object: 'chat.completion.chunk',
-			created: Math.floor(Date.now() / 1000),
+			created: Math.floor(Date.now() / MILLISECONDS_PER_SECOND),
 			model,
 			choices:
 				usage === undefined
@@ -140,7 +141,7 @@ export class AnthropicToOpenai {
 		const chunk: OpenAIStreamChunk = {
 			id: `chatcmpl-${id}`,
 			object: 'chat.completion.chunk',
-			created: Math.floor(Date.now() / 1000),
+			created: Math.floor(Date.now() / MILLISECONDS_PER_SECOND),
 			model,
 			choices: [{ index: 0, delta: { tool_calls: [toolCall] }, finish_reason: finishReason ?? null }]
 		};

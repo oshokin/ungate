@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 
-import { LOG_LIMITS, normalizeLogEntryLimit, UNGATE_VERSION } from '@ungate/shared';
+import { LOG_LIMITS, MILLISECONDS_PER_SECOND, normalizeLogEntryLimit, UNGATE_VERSION } from '@ungate/shared';
 import { describe, expect, it, vi } from 'vitest';
 
 import { dashboardLogEntryLimit, tunnelConnectTimeoutMs } from '../../src/dashboard-settings';
@@ -41,11 +41,11 @@ describe('dashboard preferences and release identity', () => {
 	});
 	it('uses the machine tunnel timeout and ignores a workspace override', () => {
 		inspect.mockReturnValue({ workspaceValue: 120 });
-		expect(tunnelConnectTimeoutMs()).toBe(TUNNEL_CONNECT.defaultSeconds * 1000);
+		expect(tunnelConnectTimeoutMs()).toBe(TUNNEL_CONNECT.defaultSeconds * MILLISECONDS_PER_SECOND);
 		inspect.mockReturnValue({ globalValue: 90, workspaceValue: 15 });
-		expect(tunnelConnectTimeoutMs()).toBe(90_000);
+		expect(tunnelConnectTimeoutMs()).toBe(90 * MILLISECONDS_PER_SECOND);
 	});
 	it.each([undefined, null, '45', 14, 121, 45.5, Infinity, NaN])('rejects invalid tunnel timeout %s', (value) => {
-		expect(normalizeTunnelConnectTimeoutMs(value)).toBe(TUNNEL_CONNECT.defaultSeconds * 1000);
+		expect(normalizeTunnelConnectTimeoutMs(value)).toBe(TUNNEL_CONNECT.defaultSeconds * MILLISECONDS_PER_SECOND);
 	});
 });

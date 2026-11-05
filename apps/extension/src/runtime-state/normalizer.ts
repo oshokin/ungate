@@ -16,7 +16,8 @@ export class RuntimeStateNormalizer {
 			next.api = {
 				...next.api,
 				...parsed.data.api,
-				startSuppressed: parsed.data.api.startSuppressed === true
+				startSuppressed: parsed.data.api.startSuppressed === true,
+				logHealth: parsed.data.api.logHealth ?? next.api.logHealth
 			};
 		}
 

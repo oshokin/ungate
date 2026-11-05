@@ -19,6 +19,7 @@ function collectChunks(events: Record<string, unknown>[]) {
 		chunks,
 		finishReason: finish?.[0]?.finish_reason ?? null,
 		toolDeltas,
+		errors: out.filter((x) => x.type === 'error').map((x) => x.data?.error),
 		doneCount: out.filter((x) => x.type === 'done').length
 	};
 }
@@ -177,5 +178,96 @@ describe('responses-stream-mapper replay', () => {
 			total_tokens: 6
 		});
 		expect(got.finishReason).toBe('stop');
+	});
+
+	it('preserves an SSE error payload instead of converting it to finish_reason length', () => {
+		const got = collectChunks([
+			{ type: 'response.created', response: { id: 'resp_error' } },
+			{
+				type: 'error',
+				error: {
+					type: 'invalid_request_error',
+					code: 'context_length_exceeded',
+					message: 'Your input exceeds the model context window.'
+				}
+			}
+		]);
+
+		expect(got.errors).toEqual([
+			{
+				type: 'invalid_request_error',
+				code: 'context_length_exceeded',
+				message: 'Your input exceeds the model context window.'
+			}
+		]);
+		expect(got.finishReason).toBeNull();
+		expect(got.doneCount).toBe(1);
+	});
+
+	it('extracts response.failed errors from the nested response', () => {
+		const got = collectChunks([
+			{ type: 'response.created', response: { id: 'resp_failed' } },
+			{
+				type: 'response.failed',
+				response: {
+					error: { code: 'server_error', message: 'The model failed while processing the request.' }
+				}
+			}
+		]);
+
+		expect(got.errors).toEqual([
+			{
+				type: 'api_error',
+				code: 'server_error',
+				message: 'The model failed while processing the request.'
+			}
+		]);
+		expect(got.finishReason).toBeNull();
+		expect(got.doneCount).toBe(1);
+	});
+
+	it('keeps response.incomplete as a length-limited completion', () => {
+		const got = collectChunks([
+			{ type: 'response.created', response: { id: 'resp_incomplete' } },
+			{ type: 'response.output_text.delta', delta: 'partial' },
+			{ type: 'response.incomplete', response: { incomplete_details: { reason: 'max_output_tokens' } } }
+		]);
+
+		expect(got.errors).toEqual([]);
+		expect(got.finishReason).toBe('length');
+		expect(got.doneCount).toBe(1);
+	});
+
+	it('uses a bounded fallback when an error event has no details', () => {
+		const got = collectChunks([{ type: 'error' }]);
+
+		expect(got.errors).toEqual([{ type: 'api_error', message: 'ChatGPT Codex stream failed.' }]);
+		expect(got.finishReason).toBeNull();
+		expect(got.doneCount).toBe(1);
+	});
+
+	it('extracts object-shaped response status details', () => {
+		const got = collectChunks([
+			{
+				type: 'response.failed',
+				response: {
+					status_details: {
+						error: {
+							type: 'invalid_request_error',
+							code: 'context_length_exceeded',
+							message: 'Your input exceeds the model context window.'
+						}
+					}
+				}
+			}
+		]);
+
+		expect(got.errors).toEqual([
+			{
+				type: 'invalid_request_error',
+				code: 'context_length_exceeded',
+				message: 'Your input exceeds the model context window.'
+			}
+		]);
 	});
 });

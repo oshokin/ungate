@@ -1,11 +1,7 @@
 import { secondsToMilliseconds } from 'date-fns';
 
-import type { UsageWindow } from '@ungate/shared';
+import { SECONDS_PER_DAY, SECONDS_PER_HOUR, type UsageWindow } from '@ungate/shared';
 
-/** Seconds in one hour, used to label provider usage windows. */
-const SECONDS_PER_HOUR = 60 * 60;
-/** Seconds in one civil day. */
-const SECONDS_PER_DAY = 24 * SECONDS_PER_HOUR;
 /** Claude five-hour usage window when the payload omits a duration. */
 const FIVE_HOUR_WINDOW_SECONDS = 5 * SECONDS_PER_HOUR;
 /** Claude weekly usage window when the payload omits a duration. */

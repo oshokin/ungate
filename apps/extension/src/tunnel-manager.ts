@@ -7,6 +7,8 @@ import * as path from 'node:path';
 
 import {
 	isTunnelProtocol,
+	LOOPBACK_HOST,
+	MILLISECONDS_PER_SECOND,
 	PRIVATE_FILE_MODE,
 	QUICK_TUNNEL_CONFIG,
 	QUICK_TUNNEL_CONFIG_NAME,
@@ -18,6 +20,7 @@ import { tunnelConnectTimeoutMs } from './dashboard-settings';
 import { RuntimeStateStore } from './runtime-state';
 import { config } from './runtime-state/config';
 import { CLOUDFLARED_VERSION, CloudflaredInstaller } from './utils/cloudflared-installer';
+import { parseCloudflaredLogLine } from './utils/cloudflared-log';
 import { CrossProcessLock } from './utils/cross-process-lock';
 import { capAppendOnlyLog, LogFileReader } from './utils/log-file-reader';
 import { getCloudflaredBinPath, ManagedProcess } from './utils/managed-process';
@@ -36,6 +39,12 @@ const PUBLIC_PROBE_INTERVAL_MS = 5000;
 const PUBLIC_PROBE_TIMEOUT_MS = 3000;
 /** Consecutive probe failures before the tunnel is reported down. */
 const PUBLIC_PROBE_FAILURE_THRESHOLD = 3;
+/** HTTPS port used when a public probe connects to a resolved address. */
+const HTTPS_PORT = 443;
+/** Cloudflare quick-tunnel edge port named when a start times out. */
+const CLOUDFLARE_EDGE_PORT = 7844;
+/** Public resolvers tried after a local DNS failure. */
+const PUBLIC_DNS_RESOLVERS = ['1.1.1.1', '8.8.8.8'] as const;
 /** Local DNS failures. The public resolver gets the next attempt, and repeated misses count toward the tunnel being down. */
 const TRANSIENT_DNS_ERRORS = new Set(['EAI_AGAIN', 'ENOTFOUND']);
 
@@ -71,7 +80,7 @@ async function fetchQuickTunnelHealth(url: string): Promise<unknown> {
 	if (!target.hostname.endsWith('.trycloudflare.com'))
 		throw new Error('Public health DNS fallback is not allowed for this host.');
 	const resolver = new Resolver();
-	resolver.setServers(['1.1.1.1', '8.8.8.8']);
+	resolver.setServers([...PUBLIC_DNS_RESOLVERS]);
 	const [address] = await resolver.resolve4(target.hostname);
 	if (!address) throw new Error('Public health DNS fallback returned no address.');
 
@@ -79,7 +88,7 @@ async function fetchQuickTunnelHealth(url: string): Promise<unknown> {
 		const request = https.request(
 			{
 				hostname: address,
-				port: 443,
+				port: HTTPS_PORT,
 				path: target.pathname,
 				method: 'GET',
 				servername: target.hostname,
@@ -255,7 +264,7 @@ export class TunnelManager {
 				[
 					'tunnel',
 					'--url',
-					`http://127.0.0.1:${port}`,
+					`http://${LOOPBACK_HOST}:${port}`,
 					'--config',
 					configPath,
 					'--no-autoupdate',
@@ -318,7 +327,9 @@ export class TunnelManager {
 					throw new Error('cloudflared exited before connecting. See tunnel logs.');
 				await sleep(config.tunnelManager.startupPollIntervalMs);
 			}
-			throw new Error(`Tunnel did not connect within ${timeoutMs / 1000} seconds. Check VPN/firewall access to TCP port 7844.`);
+			throw new Error(
+				`Tunnel did not connect within ${timeoutMs / MILLISECONDS_PER_SECOND} seconds. Check VPN/firewall access to TCP port ${CLOUDFLARE_EDGE_PORT}.`
+			);
 		} catch (error) {
 			this.pollLogs();
 			const message = error instanceof Error ? error.message : String(error);
@@ -427,7 +438,7 @@ export class TunnelManager {
 
 	private pollLogs(): void {
 		const logPath = RuntimeStateStore.read().tunnel.logPath;
-		if (logPath) for (const line of this.logReader.read(logPath)) this.log(line);
+		if (logPath) for (const line of this.logReader.read(logPath)) this.onLog(parseCloudflaredLogLine(line));
 		if (logPath) capAppendOnlyLog(logPath);
 	}
 

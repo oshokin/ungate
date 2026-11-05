@@ -1,10 +1,10 @@
+import { LOOPBACK_HOST, type RuntimeState } from '@ungate/shared/frontend';
+
 import { getCloudflaredBinPath, ManagedProcess } from '../utils/managed-process';
 
 import { config } from './config';
 import { RuntimeStateFileStore } from './file-store';
 import { RuntimeStateNormalizer } from './normalizer';
-
-import type { RuntimeState } from '@ungate/shared/frontend';
 
 export class RuntimeStateStore {
 	public static read(): RuntimeState {
@@ -216,7 +216,7 @@ export class RuntimeStateStore {
 
 	private static async isApiPortHealthy(port: number): Promise<boolean> {
 		try {
-			const response = await fetch(`http://127.0.0.1:${port}/health`, {
+			const response = await fetch(`http://${LOOPBACK_HOST}:${port}/health`, {
 				signal: AbortSignal.timeout(config.apiServer.portHealthRequestTimeoutMs)
 			});
 

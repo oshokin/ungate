@@ -16,6 +16,8 @@ export const MAX_MODEL_ID_CHARS = 256;
 const MAX_TOOLS = 256;
 /** Stop sequences accepted on one chat request. */
 const MAX_STOP_SEQUENCES = 16;
+/** Client-supplied prompt-cache routing hint. This is not a model id. */
+const MAX_PROMPT_CACHE_KEY_CHARS = 256;
 
 /**
  * Cursor resends the whole agent transcript on every turn. A long tool loop
@@ -45,6 +47,7 @@ export const openAiChatRequestSchema = {
 			},
 			tools: { type: 'array', maxItems: MAX_TOOLS, items: object },
 			stop: { anyOf: [string, { type: 'array', maxItems: MAX_STOP_SEQUENCES, items: string }] },
+			prompt_cache_key: { type: 'string', minLength: 1, maxLength: MAX_PROMPT_CACHE_KEY_CHARS },
 			stream: { type: 'boolean' }
 		}
 	}
