@@ -40,7 +40,7 @@ describe('Codex interruption (#68)', () => {
 		expect(cancel).toHaveBeenCalledWith('user stopped');
 	});
 
-	it('forwards an SSE error object to streaming clients', async () => {
+	it('renders a context-window failure as an actionable assistant message without retrying', async () => {
 		const upstreamError = {
 			type: 'error',
 			error: {
@@ -54,10 +54,9 @@ describe('Codex interruption (#68)', () => {
 			StreamStateFactory.create('test')
 		).text();
 
-		expect(output).toContain(
-			'data: {"error":{"message":"Your input exceeds the model context window.","type":"invalid_request_error","code":"context_length_exceeded"}}'
-		);
-		expect(output).not.toContain('"finish_reason":"length"');
+		expect(output).toContain('This conversation exceeds the model context window');
+		expect(output).toContain('"finish_reason":"stop"');
+		expect(output).not.toContain('"error"');
 		expect(output.match(/data: \[DONE\]/g)).toHaveLength(1);
 	});
 
@@ -94,8 +93,8 @@ describe('Codex interruption (#68)', () => {
 			StreamStateFactory.create('test')
 		).text();
 
-		expect(output).toContain('"code":"context_length_exceeded"');
-		expect(output).not.toContain('"finish_reason":"length"');
+		expect(output).toContain('This conversation exceeds the model context window');
+		expect(output).toContain('"finish_reason":"stop"');
 		expect(output.match(/data: \[DONE\]/g)).toHaveLength(1);
 	});
 

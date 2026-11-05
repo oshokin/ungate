@@ -22,7 +22,7 @@ let apiKey = $state('');
 let urlType = $state<UrlType>('global');
 let customUrl = $state('');
 let error = $state<string | null>(null);
-const watchError = createToastWatcher();
+const watchError = createToastWatcher('auth:minimax');
 
 $effect(() => watchError(error, 'error'));
 let saving = $state(false);

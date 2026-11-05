@@ -1,5 +1,6 @@
 <script lang="ts">
 import { MILLISECONDS_PER_SECOND, sleep } from '@ungate/shared/frontend';
+import { onDestroy } from 'svelte';
 import IconCheck from 'virtual:icons/lucide/check';
 import IconLoader from 'virtual:icons/lucide/loader-circle';
 import IconLogOut from 'virtual:icons/lucide/log-out';
@@ -24,7 +25,7 @@ let email = $state<string | undefined>(undefined);
 let loading = $state(true);
 let checking = $state(false);
 let error = $state<string | null>(null);
-const watchError = createToastWatcher();
+const watchError = createToastWatcher('auth:openai');
 
 $effect(() => watchError(error, 'error'));
 let pollingTimer = $state<ReturnType<typeof setInterval> | null>(null);
@@ -43,6 +44,8 @@ function stopPolling() {
 		timeoutAbort = null;
 	}
 }
+
+onDestroy(stopPolling);
 
 $effect(() => {
 	void loadStatus();

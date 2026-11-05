@@ -14,7 +14,7 @@ const form = getSettingsFormStore();
 const ui = getSettingsUiStore();
 const service = getServiceStore();
 const availability = $derived(service.state.status);
-const watchSettingsError = createToastWatcher();
+const watchSettingsError = createToastWatcher('settings');
 
 function save(): void {
 	const validationError = form.validate();

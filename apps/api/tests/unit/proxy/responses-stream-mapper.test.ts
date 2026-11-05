@@ -180,7 +180,7 @@ describe('responses-stream-mapper replay', () => {
 		expect(got.finishReason).toBe('stop');
 	});
 
-	it('preserves an SSE error payload instead of converting it to finish_reason length', () => {
+	it('converts a context-window error into an actionable assistant completion', () => {
 		const got = collectChunks([
 			{ type: 'response.created', response: { id: 'resp_error' } },
 			{
@@ -193,14 +193,9 @@ describe('responses-stream-mapper replay', () => {
 			}
 		]);
 
-		expect(got.errors).toEqual([
-			{
-				type: 'invalid_request_error',
-				code: 'context_length_exceeded',
-				message: 'Your input exceeds the model context window.'
-			}
-		]);
-		expect(got.finishReason).toBeNull();
+		expect(got.errors).toEqual([]);
+		expect(got.finishReason).toBe('stop');
+		expect(JSON.stringify(got.chunks)).toContain('This conversation exceeds the model context window');
 		expect(got.doneCount).toBe(1);
 	});
 
@@ -246,7 +241,7 @@ describe('responses-stream-mapper replay', () => {
 		expect(got.doneCount).toBe(1);
 	});
 
-	it('extracts object-shaped response status details', () => {
+	it('converts object-shaped context-window status details into an actionable completion', () => {
 		const got = collectChunks([
 			{
 				type: 'response.failed',
@@ -262,12 +257,8 @@ describe('responses-stream-mapper replay', () => {
 			}
 		]);
 
-		expect(got.errors).toEqual([
-			{
-				type: 'invalid_request_error',
-				code: 'context_length_exceeded',
-				message: 'Your input exceeds the model context window.'
-			}
-		]);
+		expect(got.errors).toEqual([]);
+		expect(got.finishReason).toBe('stop');
+		expect(JSON.stringify(got.chunks)).toContain('This conversation exceeds the model context window');
 	});
 });

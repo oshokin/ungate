@@ -212,6 +212,24 @@ try {
 	assert.equal(await errorToast.count(), 1, 'errors never auto-dismiss');
 	await errorToast.getByRole('button', { name: 'Dismiss notification' }).click();
 	await copied.waitFor();
+	const repeatedTunnelError = 'Tunnel restart is required.';
+	await emit({
+		type: 'tunnel-status',
+		state: { status: 'error', url: null, error: repeatedTunnelError }
+	});
+	await page.getByRole('alert').getByText(repeatedTunnelError, { exact: true }).waitFor();
+	await page.getByRole('alert').getByRole('button', { name: 'Dismiss notification' }).click();
+	await page.getByRole('button', { name: 'Usage', exact: true }).click();
+	await page.getByRole('button', { name: 'Connection', exact: true }).click();
+	assert.equal(
+		await page.getByRole('alert').getByText(repeatedTunnelError, { exact: true }).count(),
+		0,
+		'navigation does not announce the same persistent tunnel error again'
+	);
+	await emit({
+		type: 'tunnel-status',
+		state: { status: 'running', url: 'https://example.trycloudflare.com', error: null }
+	});
 	await page.getByRole('button', { name: 'Models', exact: true }).click();
 	await page.getByLabel('More actions', { exact: true }).click();
 	await page.getByRole('button', { name: 'Stop API and tunnel · all windows', exact: true }).waitFor();

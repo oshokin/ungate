@@ -37,7 +37,9 @@ let { selectedProvider, onSave, saving, saved, restarting }: Props = $props();
 
 const formStore = getSettingsFormStore();
 const discoveryStore = getModelDiscoveryStore();
-const watchDiscoveryError = createToastWatcher();
+const discoveryWatchers = Object.fromEntries(
+	(['claude', 'openai', 'minimax'] as const).map((provider) => [provider, createToastWatcher(`model-discovery:${provider}`)])
+) as Record<ModelMappingProvider, ReturnType<typeof createToastWatcher>>;
 
 let copiedId = $state<string | null>(null);
 let confirmDeleteModelLabel = $state<string | null>(null);
@@ -285,7 +287,7 @@ function confirmDelete() {
 $effect(() => {
 	if (saved) discoveryStore.acknowledgeSaved(selectedProvider);
 });
-$effect(() => watchDiscoveryError(discoveryState.error, 'error'));
+$effect(() => discoveryWatchers[selectedProvider](discoveryState.error, 'error'));
 
 $effect(() => {
 	const visible = visibleModels();

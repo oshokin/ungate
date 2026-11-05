@@ -300,6 +300,17 @@ export class ResponsesEventRouter {
 				`ChatGPT Codex stream error: event=${kind} type=${error.type}${error.code ? ` code=${error.code}` : ''} message=${JSON.stringify(error.message)}`
 			);
 			state.pendingFunctionCalls.clear();
+			if (error.code === 'context_length_exceeded') {
+				const message =
+					'Ungate: This conversation exceeds the model context window. Start a new chat or remove older context, then retry.';
+				this.pushAssistantChunk(state, results, { content: message });
+				state.completed = true;
+				state.successfulCompletion = true;
+				results.push({ type: 'chunk', data: StreamChunkMapper.chunk(state, {}, 'stop') });
+				results.push({ type: 'done' });
+
+				return;
+			}
 			state.error = error;
 			state.completed = true;
 			state.successfulCompletion = false;

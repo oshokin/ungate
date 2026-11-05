@@ -9,7 +9,7 @@ import { getUsageStore } from './usage-store.svelte';
 import type { ModelMappingProvider, ProviderUsage } from '@ungate/shared/frontend';
 
 const usage = getUsageStore();
-const watchUsageError = createToastWatcher();
+const watchUsageError = createToastWatcher('usage');
 const providers: ModelMappingProvider[] = ['claude', 'openai', 'minimax'];
 const labels = { claude: 'Claude', openai: 'ChatGPT / Codex', minimax: 'MiniMax' };
 const statuses = {

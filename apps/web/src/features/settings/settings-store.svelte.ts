@@ -88,8 +88,8 @@ async function saveAndRestart(update: Partial<AppSettings>): Promise<void> {
 	try {
 		await runDashboardAction('restart-services');
 		completeRestart();
-	} catch (cause) {
-		error = extractError(cause);
+	} catch {
+		// The shared action layer owns the toast for this failure.
 		statusMessage = 'Restart not completed';
 	} finally {
 		restarting = false;

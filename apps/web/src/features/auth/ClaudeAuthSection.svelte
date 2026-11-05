@@ -25,7 +25,7 @@ let authUrl = $state('');
 let sessionId = $state('');
 let codeInput = $state('');
 let error = $state<string | null>(null);
-const watchError = createToastWatcher();
+const watchError = createToastWatcher('auth:claude');
 
 $effect(() => watchError(error, 'error'));
 $effect(() => {

@@ -15,7 +15,7 @@ import { getTunnelStore } from './tunnel-store.svelte';
 const store = getTunnelStore();
 const service = getServiceStore();
 const actions = getActionStore();
-const watchTunnelError = createToastWatcher();
+const watchTunnelError = createToastWatcher('tunnel');
 const labels = { stopped: 'Stopped', installing: 'Installing…', starting: 'Starting…', running: 'Running', error: 'Error' };
 const tunnelLabel = $derived(labels[store.tunnel.status]);
 const copyFeedback = createCopyFeedback<'url' | 'key'>();

@@ -1,6 +1,9 @@
 import { UI_TIMING } from '@ungate/shared/frontend';
 import { SvelteSet } from 'svelte/reactivity';
 
+import { sameToast } from './toast-dedupe';
+import { shouldAnnounceToast } from './toast-watcher';
+
 export type ToastTone = 'error' | 'status';
 
 export interface ToastAction {
@@ -70,6 +73,7 @@ export function showToast(message: string, tone: ToastTone, action?: ToastAction
 		...(action ? { action } : {}),
 		remaining: tone === 'status' && !action ? UI_TIMING.statusNoticeMs : null
 	};
+	if ((current && sameToast(current, toast)) || queue.some((queued) => sameToast(queued, toast))) return;
 	if (!current) {
 		activate(toast);
 
@@ -109,19 +113,10 @@ export function runToastAction(): void {
 	}
 }
 
-/** Announce a changing message once, including the same text after it is cleared. */
-export function createToastWatcher(): (message: string | null, tone: ToastTone) => void {
-	let previous = '';
-
+/** Announce one state transition per source, surviving page unmount/remount. */
+export function createToastWatcher(source: string): (message: string | null, tone: ToastTone) => void {
 	return (message, tone) => {
-		if (!message) {
-			previous = '';
-
-			return;
-		}
-		if (message === previous) return;
-		previous = message;
-		showToast(message, tone);
+		if (shouldAnnounceToast(source, message)) showToast(message!, tone);
 	};
 }
 
