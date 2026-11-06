@@ -21,6 +21,48 @@ afterEach(() => {
 });
 
 describe('CrossProcessLock on the real filesystem', () => {
+	it.each(['EPERM', 'EACCES', 'EBUSY'])('fails closed and recovers from %s ticket reads', (code) => {
+		const child = spawnSync(
+			process.execPath,
+			[
+				'-e',
+				`
+			const fs = require('node:fs');
+			const assert = require('node:assert/strict');
+			const { ProcessLockAttempt } = require(${JSON.stringify(path.resolve('../../packages/shared/lib/index.cjs'))});
+			const target = ${JSON.stringify(path.join(temporary, 'fault.lock'))};
+			const owner = new ProcessLockAttempt(target);
+			assert.equal(owner.tryAcquire(), true);
+			const root = target + '.tickets';
+			const ownerName = fs.readdirSync(root)[0];
+			const ownerTicket = require('node:path').join(root, ownerName, 'ticket');
+			const read = fs.readFileSync;
+			let fail = true;
+			fs.readFileSync = function(file, ...args) {
+				if (fail && file === ownerTicket) throw Object.assign(new Error('injected'), { code: ${JSON.stringify(code)} });
+				return read.call(this, file, ...args);
+			};
+			const waiter = new ProcessLockAttempt(target);
+			for (let i = 0; i < 20; i++) assert.equal(waiter.tryAcquire(), false);
+			const waiterName = fs.readdirSync(root).find(name => name !== ownerName);
+			assert.equal(fs.existsSync(require('node:path').join(root, waiterName, 'ticket')), false);
+			fail = false;
+			assert.equal(waiter.tryAcquire(), false);
+			fail = true;
+			for (let i = 0; i < 20; i++) assert.equal(waiter.tryAcquire(), false);
+			fail = false;
+			owner.release();
+			assert.equal(waiter.tryAcquire(), true);
+			waiter.release();
+			assert.deepEqual(fs.readdirSync(root), []);
+			`
+			],
+			{ encoding: 'utf8' }
+		);
+		expect(child.stderr).toBe('');
+		expect(child.status).toBe(0);
+	});
+
 	it('serializes competing asynchronous operations without losing updates', async () => {
 		let inCriticalSection = 0;
 		let counter = 0;
