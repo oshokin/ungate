@@ -9,6 +9,9 @@ import { UNGATE_VERSION } from '../../packages/shared/src/service';
 
 import { repoDir } from './process';
 
+/** Reject unexpectedly large individual archive entries before buffering them. */
+const MAX_VSIX_ENTRY_BYTES = 20 * 1024 * 1024;
+
 /** Validate actual ZIP bytes, not the directory that we hoped to package. */
 export async function verifyPackage(file: string): Promise<void> {
 	const entries = new Map<string, Buffer>();
@@ -35,7 +38,7 @@ export async function verifyPackage(file: string): Promise<void> {
 					entries.has(entry.fileName) ||
 					entry.fileName.includes('..') ||
 					entry.fileName.startsWith('/') ||
-					entry.uncompressedSize > 20 * 1024 * 1024
+					entry.uncompressedSize > MAX_VSIX_ENTRY_BYTES
 				) {
 					fail(new Error(`Unsafe VSIX entry: ${entry.fileName}`));
 

@@ -1,5 +1,5 @@
 <script lang="ts">
-import { MILLISECONDS_PER_SECOND, sleep } from '@ungate/shared/frontend';
+import { MILLISECONDS_PER_SECOND, SECONDS_PER_MINUTE, sleep } from '@ungate/shared/frontend';
 import { onDestroy } from 'svelte';
 import IconCheck from 'virtual:icons/lucide/check';
 import IconLoader from 'virtual:icons/lucide/loader-circle';
@@ -12,6 +12,8 @@ import { postExtensionMessage } from '$shared/vscode';
 
 /** How often the dashboard checks whether the Codex login finished. */
 const AUTH_STATUS_POLL_MS = MILLISECONDS_PER_SECOND;
+/** Stop waiting for the browser OAuth callback after five minutes. */
+const AUTH_CALLBACK_TIMEOUT_MS = 5 * SECONDS_PER_MINUTE * MILLISECONDS_PER_SECOND;
 
 interface Props {
 	onAuthStatusChange?: () => void;
@@ -103,7 +105,7 @@ async function handleLogin() {
 
 		timeoutAbort = new AbortController();
 		const timeoutSignal = timeoutAbort.signal;
-		void sleep(300_000, timeoutSignal)
+		void sleep(AUTH_CALLBACK_TIMEOUT_MS, timeoutSignal)
 			.then(() => {
 				stopPolling();
 

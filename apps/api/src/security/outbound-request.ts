@@ -1,10 +1,8 @@
 import { isIP } from 'node:net';
 
-import { MILLISECONDS_PER_SECOND, type ModelMappingProvider } from '@ungate/shared';
+import { MILLISECONDS_PER_SECOND, providerHeaderTimeoutFromEnv, type ModelMappingProvider } from '@ungate/shared';
 import { ProviderHealth } from 'src/metrics/provider-health';
 
-/** How long to wait for upstream response headers before aborting the proxy call. */
-const DEFAULT_HEADER_TIMEOUT_MS = 30_000;
 /** One bounded retry absorbs transient failures before any response bytes exist. */
 const UPSTREAM_RETRY_ATTEMPTS = 1;
 const UPSTREAM_RETRY_BASE_DELAY_MS = 300;
@@ -63,7 +61,7 @@ export async function fetchWithHeaderTimeout(
 	provider?: ModelMappingProvider,
 	transport: typeof fetch = fetch
 ): Promise<Response> {
-	const timeoutMs = Number(process.env.UPSTREAM_HEADER_TIMEOUT_MS) || DEFAULT_HEADER_TIMEOUT_MS;
+	const timeoutMs = providerHeaderTimeoutFromEnv(process.env.UPSTREAM_HEADER_TIMEOUT_MS);
 	const replayable = init.body === undefined || init.body === null || typeof init.body === 'string';
 	const safeMethod = ['GET', 'HEAD', 'OPTIONS'].includes((init.method ?? 'GET').toUpperCase());
 	const maxAttempts = replayable && safeMethod ? UPSTREAM_RETRY_ATTEMPTS + 1 : 1;

@@ -3,6 +3,7 @@ import { config } from 'src/config';
 import { logger } from 'src/utils/logger';
 
 import { OpenAILoginError } from './login-error';
+import { readTokenResponse } from './token-response';
 
 export class OpenAIOAuthClient {
 	public static async exchangeCode(code: string, codeVerifier: string): Promise<Record<string, unknown>> {
@@ -30,27 +31,7 @@ export class OpenAIOAuthClient {
 				);
 			}
 
-			let tokens: unknown;
-			try {
-				tokens = await response.json();
-			} catch (error) {
-				if (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')) throw error;
-				throw new OpenAILoginError('invalid_token_response');
-			}
-			if (!tokens || typeof tokens !== 'object' || Array.isArray(tokens)) throw new OpenAILoginError('invalid_token_response');
-			const payload = tokens as Record<string, unknown>;
-			if (
-				typeof payload.access_token !== 'string' ||
-				!payload.access_token.trim() ||
-				(payload.refresh_token !== undefined && typeof payload.refresh_token !== 'string') ||
-				(payload.id_token !== undefined && typeof payload.id_token !== 'string') ||
-				(payload.expires_in !== undefined &&
-					(typeof payload.expires_in !== 'number' || !Number.isFinite(payload.expires_in) || payload.expires_in <= 0))
-			) {
-				throw new OpenAILoginError('invalid_token_response');
-			}
-
-			return payload;
+			return await readTokenResponse(response);
 		} catch (error) {
 			const causeCode = error instanceof Error ? (error.cause as { code?: unknown } | undefined)?.code : undefined;
 			const failure =
@@ -86,18 +67,15 @@ export class OpenAIOAuthClient {
 			});
 
 			if (!response.ok) {
-				const errorText = await response.text();
-				logger.error('Token refresh failed:', response.status, errorText);
+				void response.body?.cancel().catch(() => {});
+				logger.error('Token refresh failed:', response.status);
 
 				return null;
 			}
 
-			const parsedTokens = await response.json();
-			const tokens = parsedTokens as Record<string, unknown>;
-
-			return tokens;
+			return await readTokenResponse(response);
 		} catch (error) {
-			logger.error('Failed to refresh token:', error);
+			logger.error('Failed to refresh token:', error instanceof OpenAILoginError ? error.code : 'request_failed');
 
 			return null;
 		}

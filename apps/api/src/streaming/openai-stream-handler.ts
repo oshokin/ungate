@@ -11,6 +11,7 @@ import {
 	providerByteLimit,
 	SSE_QUEUE_HIGH_WATER_MARK
 } from './stream-limits';
+import { MAX_NODE_TIMER_MS, STREAM_FIRST_BYTE_TIMEOUT_MS, STREAM_HEARTBEAT_MS } from './stream-timing';
 
 import type { AnthropicStopReason, AnthropicStreamEvent } from '../types/anthropic-stream';
 
@@ -21,8 +22,8 @@ export interface StreamTimingOptions {
 
 // Adapted from orchidfiles/ungate 514dfb5222d3ca454bb4b7d3efaa8ad0d450764b.
 export const DEFAULT_STREAM_TIMING: Readonly<StreamTimingOptions> = Object.freeze({
-	keepaliveIntervalMs: 15_000,
-	upstreamIdleTimeoutMs: 180_000
+	keepaliveIntervalMs: STREAM_HEARTBEAT_MS,
+	upstreamIdleTimeoutMs: STREAM_FIRST_BYTE_TIMEOUT_MS
 });
 
 function resolveStreamTiming(timing: Partial<StreamTimingOptions>): StreamTimingOptions {
@@ -30,8 +31,8 @@ function resolveStreamTiming(timing: Partial<StreamTimingOptions>): StreamTiming
 	for (const key of ['keepaliveIntervalMs', 'upstreamIdleTimeoutMs'] as const) {
 		// Node clamps overflowing timers to 1 ms; reject instead of silently
 		// turning a long timeout into an immediate abort or a busy heartbeat.
-		if (!Number.isSafeInteger(resolved[key]) || resolved[key] < 1 || resolved[key] > 2_147_483_647) {
-			throw new RangeError(`${key} must be an integer between 1 and 2147483647 milliseconds`);
+		if (!Number.isSafeInteger(resolved[key]) || resolved[key] < 1 || resolved[key] > MAX_NODE_TIMER_MS) {
+			throw new RangeError(`${key} must be an integer between 1 and ${MAX_NODE_TIMER_MS} milliseconds`);
 		}
 	}
 
@@ -305,13 +306,19 @@ export class OpenAIStreamHandler {
 								}
 
 								buffer += decoder.decode(value, { stream: true });
-								if (Buffer.byteLength(buffer, 'utf8') > MAX_SSE_EVENT_BYTES && !buffer.includes('\n')) {
+								if (Buffer.byteLength(buffer, 'utf8') > MAX_SSE_EVENT_BYTES) {
 									throw new Error(`Claude SSE event exceeded ${MAX_SSE_EVENT_BYTES} bytes`);
 								}
 								const lines = buffer.split('\n');
 								buffer = lines.pop() ?? '';
 
 								for (const line of lines) {
+									while (!cancelled && !finalized && (controller.desiredSize ?? 0) <= 0) {
+										await new Promise<void>((resolve) => {
+											resumePull = resolve;
+										});
+										resumePull = undefined;
+									}
 									if (cancelled) break;
 									if (finalized || !line.startsWith('data: ')) continue;
 

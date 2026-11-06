@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { NodeResolver } from '../../src/utils/node-resolver';
+import { NODE_RUNTIME_REQUIREMENTS, NodeResolver } from '../../src/utils/node-resolver';
 
 const mocks = vi.hoisted(() => ({ spawn: vi.fn(), exists: vi.fn(), read: vi.fn() }));
 vi.mock('node:child_process', () => ({ spawnSync: mocks.spawn }));
@@ -64,6 +64,23 @@ afterEach(() => {
 });
 
 describe('standalone Node discovery', () => {
+	it('accepts the minimum runtime capabilities', () => {
+		mocks.spawn.mockReturnValue(
+			report('/usr/bin/node', {
+				version: `${NODE_RUNTIME_REQUIREMENTS.minMajor}.14.0`,
+				napi: NODE_RUNTIME_REQUIREMENTS.minNapi
+			})
+		);
+		expect(NodeResolver.inspect('/usr/bin/node').execPath).toBe('/usr/bin/node');
+	});
+	it.each([
+		[NODE_RUNTIME_REQUIREMENTS.minMajor - 1, NODE_RUNTIME_REQUIREMENTS.minNapi],
+		[NODE_RUNTIME_REQUIREMENTS.minMajor, NODE_RUNTIME_REQUIREMENTS.minNapi - 1]
+	])('rejects capabilities below boundary Node %s / N-API %s', (major, napi) => {
+		mocks.spawn.mockReturnValue(report('/usr/bin/node', { version: `${major}.14.0`, napi }));
+		expect(() => NodeResolver.inspect('/usr/bin/node')).toThrow();
+	});
+
 	it('returns a canonical executable instead of keeping a version-manager shim', () => {
 		mocks.spawn.mockReturnValue(report('/opt/node/bin/node'));
 		expect(NodeResolver.resolve('"/home/test/.volta/bin/node"')).toBe('/opt/node/bin/node');

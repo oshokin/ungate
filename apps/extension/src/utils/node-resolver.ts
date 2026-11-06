@@ -5,6 +5,12 @@ import * as path from 'node:path';
 
 import { PROCESS_PROBE_MAX_BUFFER_BYTES, PROCESS_PROBE_TIMEOUT_MS } from './process-limits';
 
+/** Runtime capabilities required by the bundled SQLite N-API prebuilds. */
+export const NODE_RUNTIME_REQUIREMENTS = {
+	minMajor: 22,
+	minNapi: 10
+} as const;
+
 export interface RuntimeInfo {
 	version: string;
 	napi: number;
@@ -66,13 +72,17 @@ export class NodeResolver {
 		}
 		if (!raw || typeof raw !== 'object') throw new Error('Invalid Node.js runtime report.');
 		const info = raw as Record<string, unknown>;
-		if (typeof info.version !== 'string' || !/^\d+\.\d+\.\d+$/.test(info.version) || Number(info.version.split('.')[0]) < 22)
+		if (
+			typeof info.version !== 'string' ||
+			!/^\d+\.\d+\.\d+$/.test(info.version) ||
+			Number(info.version.split('.')[0]) < NODE_RUNTIME_REQUIREMENTS.minMajor
+		)
 			throw new Error(
 				`Node.js ${typeof info.version === 'string' ? info.version : 'unknown'} is unsupported; version 22 or newer is required. Node.js 24 LTS is recommended.`
 			);
 		if (
 			!Number.isInteger(info.napi) ||
-			Number(info.napi) < 10 ||
+			Number(info.napi) < NODE_RUNTIME_REQUIREMENTS.minNapi ||
 			typeof info.abi !== 'string' ||
 			info.electron ||
 			!['win32', 'linux', 'darwin'].includes(String(info.platform)) ||

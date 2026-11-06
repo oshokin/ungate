@@ -16,6 +16,9 @@ import { OpenAIPkceSessionStore } from './pkce-session-store';
 import type { OAuthCredentials } from '../base-provider';
 import type { ServerResponse } from 'node:http';
 
+/** Refresh before expiry so a request is not started with an almost-expired token. */
+const TOKEN_REFRESH_MARGIN_MS = 60_000;
+
 export class OpenAIOAuthService {
 	private static readonly refreshFlights = new Map<string, Promise<OAuthCredentials | null>>();
 	static {
@@ -109,9 +112,7 @@ export class OpenAIOAuthService {
 			return null;
 		}
 
-		const bufferMs = 60_000;
-
-		if (Date.now() < (credentials.expiresAt ?? 0) - bufferMs) {
+		if (Date.now() < (credentials.expiresAt ?? 0) - TOKEN_REFRESH_MARGIN_MS) {
 			return credentials;
 		}
 

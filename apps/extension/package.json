@@ -130,6 +130,15 @@
 		"configuration": {
 			"title": "Ungate",
 			"properties": {
+				"ungate.network.providerHeaderTimeoutSeconds": {
+					"type": "integer",
+					"default": 30,
+					"minimum": 5,
+					"maximum": 120,
+					"scope": "machine",
+					"tags": ["advanced"],
+					"description": "Advanced: seconds to wait for provider response headers, not stream idle time. Applies on the next shared API start or explicit Restart Shared API; changing this does not restart services. The starting window supplies the snapshot. An inherited UPSTREAM_HEADER_TIMEOUT_MS takes precedence; invalid values fall back to 30 seconds."
+				},
 				"ungate.nodePath": {
 					"type": "string",
 					"default": "",

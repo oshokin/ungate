@@ -48,10 +48,12 @@ const CLOUDFLARE_EDGE_PORT = 7844;
 const PUBLIC_DNS_RESOLVERS = ['1.1.1.1', '8.8.8.8'] as const;
 /** Local DNS failures. The public resolver gets the next attempt, and repeated misses count toward the tunnel being down. */
 const TRANSIENT_DNS_ERRORS = new Set(['EAI_AGAIN', 'ENOTFOUND']);
+/** Bound traversal of nested network errors, including cyclic causes. */
+const MAX_ERROR_CAUSE_DEPTH = 3;
 
 function errorCode(error: unknown): string | null {
 	let current = error;
-	for (let depth = 0; current && depth < 3; depth += 1) {
+	for (let depth = 0; current && depth < MAX_ERROR_CAUSE_DEPTH; depth += 1) {
 		if (typeof current !== 'object') return null;
 		const candidate = current as { cause?: unknown; code?: unknown };
 		if (typeof candidate.code === 'string') return candidate.code;
@@ -100,7 +102,7 @@ async function fetchQuickTunnelHealth(url: string): Promise<unknown> {
 				const chunks: Buffer[] = [];
 				let received = 0;
 				const tooLarge = (): void => {
-					const error = new Error('Public health response exceeds 65536-byte size limit.');
+					const error = new Error(`Public health response exceeds ${PUBLIC_HEALTH_MAX_BYTES}-byte size limit.`);
 					reject(error);
 					response.destroy();
 					request.destroy(error);

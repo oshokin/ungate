@@ -1,5 +1,8 @@
 import type { PkceSession } from './types';
 
+/** Sweep expired login sessions independently of their individual lifetimes. */
+const PKCE_CLEANUP_INTERVAL_MS = 60_000;
+
 export class OpenAIPkceSessionStore {
 	private static readonly pkceStore = new Map<string, PkceSession>();
 	private static cleanupStarted = false;
@@ -18,7 +21,7 @@ export class OpenAIPkceSessionStore {
 					this.pkceStore.delete(sessionId);
 				}
 			}
-		}, 60_000);
+		}, PKCE_CLEANUP_INTERVAL_MS);
 	}
 
 	public static set(sessionId: string, session: PkceSession): void {

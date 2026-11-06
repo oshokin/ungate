@@ -6,7 +6,9 @@ import { bin, install, Tunnel } from 'cloudflared';
 
 import { PRIVATE_FILE_MODE, QUICK_TUNNEL_CONFIG, QUICK_TUNNEL_CONFIG_NAME, UNGATE_DIR } from '@ungate/shared';
 
-const port = process.argv[2] ?? process.env.PORT ?? '4783';
+/** Matches the explicit development API start script, not the installed API default. */
+const DEVELOPMENT_API_PORT = 4783;
+const port = process.argv[2] ?? process.env.PORT ?? String(DEVELOPMENT_API_PORT);
 
 if (!existsSync(bin)) {
 	console.log('[tunnel] installing cloudflared...');

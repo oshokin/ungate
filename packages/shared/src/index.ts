@@ -11,3 +11,4 @@ export * from './service';
 export * from './limits';
 export * from './fs-access';
 export * from './process-lock';
+export * from './provider-timeout';

@@ -1,4 +1,8 @@
-const string = { type: 'string', minLength: 1, maxLength: 1_000_000 } as const;
+/** Maximum length of a single stop sequence. */
+export const MAX_STOP_SEQUENCE_CHARS = 1_000_000;
+/** Direct Anthropic request output-token ceiling (independent of string limits). */
+export const MAX_REQUEST_OUTPUT_TOKENS = 1_000_000;
+const string = { type: 'string', minLength: 1, maxLength: MAX_STOP_SEQUENCE_CHARS } as const;
 
 /** Own properties on one tool definition. Nested parameter schemas are separate objects. */
 const MAX_TOOL_PROPERTIES = 128;
@@ -61,7 +65,7 @@ export const anthropicRequestSchema = {
 		maxProperties: MAX_REQUEST_PROPERTIES,
 		properties: {
 			model: { type: 'string', minLength: 1, maxLength: MAX_MODEL_ID_CHARS },
-			max_tokens: { type: 'integer', minimum: 1, maximum: 1_000_000 },
+			max_tokens: { type: 'integer', minimum: 1, maximum: MAX_REQUEST_OUTPUT_TOKENS },
 			messages: {
 				type: 'array',
 				minItems: 1,

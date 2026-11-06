@@ -21,6 +21,7 @@ import * as vscode from 'vscode';
 import { apiArtifactDigest } from './api-artifact';
 import { readApiHealth, assertCompatibleApi } from './local-api';
 import { configuredNodePath } from './node-runtime-settings';
+import { providerHeaderTimeoutEnvironment } from './provider-network-settings';
 import { RuntimeStateStore } from './runtime-state';
 import { config } from './runtime-state/config';
 import { BetterSqlite3Installer } from './utils/better-sqlite3-installer';
@@ -294,6 +295,7 @@ export class ApiServer {
 
 		const env: NodeJS.ProcessEnv = {
 			...process.env,
+			...providerHeaderTimeoutEnvironment(),
 			UNGATE_ADMIN_TOKEN: getAdminToken(),
 			UNGATE_BETTER_SQLITE3_NATIVE_BINDING: BetterSqlite3Installer.resolveBindingPath(cwd, runtime),
 			...(isDev ? { DB_PATH: path.join(os.homedir(), UNGATE_DIR, 'data-dev.db') } : { DRIZZLE_PATH: path.join(cwd, 'drizzle') })
