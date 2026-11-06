@@ -10,6 +10,11 @@ import type { FastifyPluginCallback, FastifyReply } from 'fastify';
 const OAUTH_HTML_CSP =
 	"default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'";
 
+function bodySchema(properties: Record<string, object>, required: string[]) {
+	return { body: { type: 'object', properties, required, additionalProperties: false } };
+}
+const requiredString = { type: 'string', minLength: 1, pattern: '\\S' };
+
 function escapeHtml(value: string): string {
 	return value.replace(/[&<>"']/g, (character) => {
 		const escaped: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
@@ -33,17 +38,21 @@ const plugin: FastifyPluginCallback = (app) => {
 		return reply.send(result);
 	});
 
-	app.post('/auth/claude/complete', async (request, reply) => {
-		const { code, sessionId } = request.body as { code: string; sessionId: string };
+	app.post(
+		'/auth/claude/complete',
+		{ schema: bodySchema({ code: requiredString, sessionId: requiredString }, ['code', 'sessionId']) },
+		async (request, reply) => {
+			const { code, sessionId } = request.body as { code: string; sessionId: string };
 
-		if (!code || !sessionId) {
-			return reply.code(400).send({ ok: false, error: 'Missing code or sessionId' });
+			if (!code || !sessionId) {
+				return reply.code(400).send({ ok: false, error: 'Missing code or sessionId' });
+			}
+
+			const result = await OAuth.completeLogin(code, sessionId);
+
+			return reply.send(result);
 		}
-
-		const result = await OAuth.completeLogin(code, sessionId);
-
-		return reply.send(result);
-	});
+	);
 
 	app.get('/auth/claude/status', (_request, reply) => {
 		return reply.send(OAuth.getAuthStatus());
@@ -64,25 +73,29 @@ const plugin: FastifyPluginCallback = (app) => {
 		});
 	});
 
-	app.post('/auth/minimax/login', async (request, reply) => {
-		const { apiKey, baseUrl } = request.body as { apiKey: string; baseUrl?: string };
+	app.post(
+		'/auth/minimax/login',
+		{ schema: bodySchema({ apiKey: requiredString, baseUrl: requiredString }, ['apiKey']) },
+		async (request, reply) => {
+			const { apiKey, baseUrl } = request.body as { apiKey: string; baseUrl?: string };
 
-		if (!apiKey?.trim()) {
-			return reply.code(400).send({ ok: false, error: 'API key is required' });
+			if (!apiKey?.trim()) {
+				return reply.code(400).send({ ok: false, error: 'API key is required' });
+			}
+
+			let validatedBaseUrl: string;
+			try {
+				validatedBaseUrl = await validateMiniMaxBaseUrl(baseUrl?.trim() ?? config.minimax.baseUrlGlobal);
+			} catch {
+				return reply.code(400).send({ ok: false, error: 'MiniMax base URL is not allowed' });
+			}
+			ProviderSettings.upsertApiKey('minimax', apiKey.trim(), validatedBaseUrl);
+
+			return reply.send({ ok: true });
 		}
+	);
 
-		let validatedBaseUrl: string;
-		try {
-			validatedBaseUrl = await validateMiniMaxBaseUrl(baseUrl?.trim() ?? config.minimax.baseUrlGlobal);
-		} catch {
-			return reply.code(400).send({ ok: false, error: 'MiniMax base URL is not allowed' });
-		}
-		ProviderSettings.upsertApiKey('minimax', apiKey.trim(), validatedBaseUrl);
-
-		return reply.send({ ok: true });
-	});
-
-	app.post('/auth/minimax/base-url', async (request, reply) => {
+	app.post('/auth/minimax/base-url', { schema: bodySchema({ baseUrl: requiredString }, ['baseUrl']) }, async (request, reply) => {
 		const { baseUrl } = request.body as { baseUrl?: string };
 		const trimmedBaseUrl = baseUrl?.trim();
 

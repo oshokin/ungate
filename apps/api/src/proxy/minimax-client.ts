@@ -3,7 +3,7 @@ import { logger } from 'src/utils/logger';
 import { getProvider } from '../auth';
 import { config } from '../config';
 import { ProviderSettings } from '../database/provider-settings';
-import { validateMiniMaxBaseUrl } from '../security/minimax-url';
+import { fetchMiniMax, validateMiniMaxBaseUrl } from '../security/minimax-url';
 import { fetchWithHeaderTimeout } from '../security/outbound-request';
 
 import { DEFAULT_MAX_TOKENS } from './token-budgets';
@@ -77,7 +77,8 @@ export async function proxyMiniMaxRequest(
 				body: JSON.stringify(minimaxBody)
 			},
 			signal,
-			'minimax'
+			'minimax',
+			fetchMiniMax
 		);
 
 		logger.log(`✓ MiniMax request → ${response.status}`);

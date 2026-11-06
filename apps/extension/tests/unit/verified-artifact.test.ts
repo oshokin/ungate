@@ -148,5 +148,17 @@ describe('InstallStamp', () => {
 
 		expect(InstallStamp.matches(binaryPath, artifact)).toBe(true);
 		expect(InstallStamp.matches(binaryPath, { ...artifact, sha256: OTHER_SHA256 })).toBe(false);
+		fs.writeFileSync(binaryPath, 'tampered');
+		expect(InstallStamp.matches(binaryPath, artifact)).toBe(false);
+	});
+
+	it('hashes extracted executable bytes separately from the archive digest', () => {
+		const binaryPath = path.join(stagingRoot, 'extracted');
+		const artifact = { url: 'https://example.invalid/tool.tgz', sha256: OTHER_SHA256 };
+		fs.writeFileSync(binaryPath, PAYLOAD);
+		InstallStamp.write(binaryPath, artifact);
+		expect(InstallStamp.matches(binaryPath, artifact)).toBe(true);
+		fs.writeFileSync(binaryPath, 'changed');
+		expect(InstallStamp.matches(binaryPath, artifact)).toBe(false);
 	});
 });

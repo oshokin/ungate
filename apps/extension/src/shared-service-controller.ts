@@ -45,8 +45,24 @@ export class SharedServiceController {
 
 					return state;
 				});
-				await this.tunnel.stop();
-				await this.api.stop();
+				const failures: string[] = [];
+				for (const [name, stop] of [
+					['Tunnel', () => this.tunnel.stop()],
+					['API', () => this.api.stop()]
+				] as const) {
+					try {
+						await stop();
+					} catch (error) {
+						failures.push(`${name}: ${error instanceof Error ? error.message : String(error)}`);
+					}
+				}
+				if (failures.length) {
+					const state = RuntimeStateStore.read();
+					throw new Error(
+						`Stop partially failed (${failures.join('; ')}). API: ${state.api.status}; tunnel: ${state.tunnel.status}. ` +
+							'Automatic API start remains disabled. Retry Stop Shared API and Tunnel, or use Restart Services to recover and enable automatic start.'
+					);
+				}
 
 				return;
 			}

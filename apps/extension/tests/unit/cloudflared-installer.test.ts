@@ -55,7 +55,7 @@ describe('CloudflaredInstaller', () => {
 			originalPlatform === 'win32' ? fs.statSync(binaryPath).mode & FILE_PERMISSION_BITS : EXECUTABLE_FILE_MODE;
 
 		expect(fs.statSync(binaryPath).mode & FILE_PERMISSION_BITS).toBe(expectedMode);
-		expect(fs.readFileSync(`${binaryPath}.sha256`, 'utf8')).toBe(LINUX_X64_SHA256);
+		expect((JSON.parse(fs.readFileSync(`${binaryPath}.sha256`, 'utf8')) as { artifact: string }).artifact).toBe(LINUX_X64_SHA256);
 		expect(CloudflaredInstaller.isPinnedInstall(binaryPath)).toBe(true);
 
 		const artifact = downloadSpy.mock.calls[0]?.[0];
@@ -76,6 +76,18 @@ describe('CloudflaredInstaller', () => {
 
 		expect(fs.existsSync(binaryPath)).toBe(false);
 		expect(fs.existsSync(`${binaryPath}.sha256`)).toBe(false);
+	});
+
+	it('preserves an existing executable when verification fails', async () => {
+		forceHost('linux', 'x64');
+		const binaryPath = path.join(binDir, 'cloudflared');
+		fs.writeFileSync(binaryPath, 'previous executable', { mode: 0o700 });
+		fs.writeFileSync(`${binaryPath}.sha256`, 'previous stamp');
+		fetchMock.mockResolvedValue(new Response('tampered replacement'));
+		await expect(CloudflaredInstaller.install(binaryPath)).rejects.toThrow(/Checksum mismatch/);
+		expect(fs.readFileSync(binaryPath, 'utf8')).toBe('previous executable');
+		expect(fs.readFileSync(`${binaryPath}.sha256`, 'utf8')).toBe('previous stamp');
+		expect(fs.readdirSync(binDir).sort()).toEqual(['cloudflared', 'cloudflared.sha256']);
 	});
 
 	it('fails closed on an unsupported platform without downloading anything', async () => {

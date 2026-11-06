@@ -65,6 +65,7 @@ export class CompletionStreamingGateway {
 			reply.header(key, value);
 		}
 
-		return reply.send(reliableOpenAiStream(stream));
+		// Claude's converter owns byte-level timeouts, keepalive and backpressure.
+		return reply.send(stream);
 	}
 }

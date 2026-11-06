@@ -1,4 +1,4 @@
-import { MINIMAX_BASE_URLS, type AppSettings } from '@ungate/shared';
+import { MINIMAX_BASE_URLS, TCP_PORT_MAX, type AppSettings } from '@ungate/shared';
 
 import type { ProxyConfig } from './types';
 
@@ -49,12 +49,14 @@ export type Config = ProxyConfig;
 export function getConfig(settings: AppSettings): ProxyConfig {
 	let envPort: number | undefined;
 
-	if (process.env.PORT) {
-		const parsed = parseInt(process.env.PORT, 10);
-
-		if (!Number.isNaN(parsed)) {
-			envPort = parsed;
+	if (process.env.PORT !== undefined) {
+		const raw = process.env.PORT;
+		const parsed = Number(raw);
+		// Environment-only zero requests an ephemeral port for isolated process tests.
+		if (!/^\d+$/.test(raw) || !Number.isInteger(parsed) || parsed < 0 || parsed > TCP_PORT_MAX) {
+			throw new Error(`PORT must be an integer between 0 and ${TCP_PORT_MAX}`);
 		}
+		envPort = parsed;
 	}
 
 	return {

@@ -119,10 +119,21 @@ export class InstallStamp {
 	}
 
 	static matches(binaryPath: string, artifact: PinnedArtifact): boolean {
-		return this.read(binaryPath) === artifact.sha256;
+		try {
+			const stamp = this.read(binaryPath);
+			if (!stamp || !fs.lstatSync(binaryPath).isFile()) return false;
+			const recorded = JSON.parse(stamp) as { artifact: string; binary: string };
+			if (recorded.artifact !== artifact.sha256 || !/^[0-9a-f]{64}$/.test(recorded.binary)) return false;
+			const actual = createHash('sha256').update(fs.readFileSync(binaryPath)).digest();
+
+			return timingSafeEqual(actual, Buffer.from(recorded.binary, 'hex'));
+		} catch {
+			return false;
+		}
 	}
 
 	static write(binaryPath: string, artifact: PinnedArtifact): void {
-		fs.writeFileSync(`${binaryPath}${STAMP_SUFFIX}`, artifact.sha256, 'utf8');
+		const binary = createHash('sha256').update(fs.readFileSync(binaryPath)).digest('hex');
+		fs.writeFileSync(`${binaryPath}${STAMP_SUFFIX}`, JSON.stringify({ artifact: artifact.sha256, binary }), { mode: 0o600 });
 	}
 }

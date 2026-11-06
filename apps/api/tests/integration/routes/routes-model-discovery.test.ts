@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+// Catalog fixtures mock the transport boundary; socket/DNS policy has dedicated unit coverage.
+vi.mock('src/security/minimax-url', () => ({
+	validateMiniMaxBaseUrl: async (value: string) => value,
+	fetchMiniMax: (input: string, init: RequestInit) => fetch(input, init)
+}));
+
 import { ModelMappings } from 'src/database/model-mappings';
 import { ProviderSettings } from 'src/database/provider-settings';
 import { protectAdministration } from 'src/plugins/administration';

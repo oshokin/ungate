@@ -23,7 +23,7 @@ interface SettingsFormStore {
 	setQuiet(value: boolean): void;
 	setExtraInstruction(value: string): void;
 	setModels(models: ModelMappingConfig[]): void;
-	markModelsSaved(): void;
+	markModelsSaved(snapshot?: ModelMappingConfig[]): void;
 	setClaudeCliVersionMode(mode: ClaudeCliVersionMode): void;
 	setClaudeCliVersionCustom(value: string): void;
 	setTunnelProtocol(value: string): void;
@@ -38,6 +38,7 @@ let quiet = $state(false);
 let extraInstruction = $state('');
 let models = $state<ModelMappingConfig[]>([]);
 let savedModelsFingerprint = '';
+let initialized = false;
 let claudeCliVersionMode = $state<ClaudeCliVersionMode>('stable');
 let claudeCliVersionCustom = $state('');
 let tunnelProtocol = $state<TunnelProtocol>('http2');
@@ -78,6 +79,7 @@ function modelsFingerprint(items: ModelMappingConfig[]): string {
 
 function syncFromAppSettings(settings: AppSettings): void {
 	const nextModels = cloneModels(settings.models);
+	const preserveModels = initialized && modelsFingerprint(models) !== savedModelsFingerprint;
 	port = String(settings.port);
 	apiKey = settings.apiKey ?? '';
 	quiet = settings.quiet;
@@ -85,8 +87,9 @@ function syncFromAppSettings(settings: AppSettings): void {
 	claudeCliVersionMode = settings.claudeCliVersionMode ?? 'stable';
 	claudeCliVersionCustom = settings.claudeCliVersionCustom ?? '';
 	tunnelProtocol = isTunnelProtocol(settings.tunnelProtocol) ? settings.tunnelProtocol : 'http2';
-	models = nextModels;
+	if (!preserveModels) models = nextModels;
 	savedModelsFingerprint = modelsFingerprint(nextModels);
+	initialized = true;
 }
 
 function setPort(value: string): void {
@@ -109,8 +112,8 @@ function setModels(nextModels: ModelMappingConfig[]): void {
 	models = withSortOrder(nextModels);
 }
 
-function markModelsSaved(): void {
-	savedModelsFingerprint = modelsFingerprint(models);
+function markModelsSaved(snapshot: ModelMappingConfig[] = models): void {
+	savedModelsFingerprint = modelsFingerprint(snapshot);
 }
 
 function setClaudeCliVersionMode(mode: ClaudeCliVersionMode): void {
@@ -126,7 +129,7 @@ function setTunnelProtocol(value: string): void {
 }
 
 function validate(): string | null {
-	const parsedPort = parseInt(port, 10);
+	const parsedPort = /^\d+$/.test(port) ? Number(port) : NaN;
 
 	if (!Number.isInteger(parsedPort) || parsedPort < TCP_PORT_MIN || parsedPort > TCP_PORT_MAX) {
 		return `Port must be an integer between ${TCP_PORT_MIN} and ${TCP_PORT_MAX}.`;
@@ -134,10 +137,17 @@ function validate(): string | null {
 
 	if (!apiKey.trim()) return 'An Ungate API key is required. Copy the saved key into Cursor Settings → Models.';
 
+	const ids: string[] = [];
 	for (const model of models) {
 		if (!model.id.trim()) {
 			return 'Every model must have a Model ID.';
 		}
+		if (model.id !== model.id.trim()) {
+			return `Model ID "${model.id}" must not have leading or trailing whitespace.`;
+		}
+		const normalizedId = model.id.toLowerCase();
+		if (ids.includes(normalizedId)) return `Model ID "${model.id}" must be unique (case-insensitive).`;
+		ids.push(normalizedId);
 
 		if (!model.label.trim()) {
 			return `Model "${model.id}" must have a label.`;
@@ -160,7 +170,7 @@ function validate(): string | null {
 }
 
 function toSavePayload(): Partial<AppSettings> {
-	const parsedPort = parseInt(port, 10);
+	const parsedPort = /^\d+$/.test(port) ? Number(port) : NaN;
 	const payload: Partial<AppSettings> = {
 		port: parsedPort,
 		quiet,

@@ -1,4 +1,7 @@
 <script lang="ts">
+import { TCP_PORT_MAX, TCP_PORT_MIN } from '@ungate/shared/frontend';
+import { untrack } from 'svelte';
+
 import { getServiceStore } from '$shared/service-store.svelte';
 import { createToastWatcher, showToast } from '$shared/toast-store.svelte';
 
@@ -34,7 +37,8 @@ $effect(() => {
 	}
 });
 $effect(() => {
-	if (store.settings) form.syncFromAppSettings(store.settings);
+	const settings = store.settings;
+	if (settings) untrack(() => form.syncFromAppSettings(settings));
 });
 $effect(() => watchSettingsError(store.settings ? store.error : null, 'error'));
 </script>
@@ -63,6 +67,10 @@ $effect(() => watchSettingsError(store.settings ? store.error : null, 'error'));
 							>Port<input
 								class="ug-input"
 								type="number"
+								min={TCP_PORT_MIN}
+								max={TCP_PORT_MAX}
+								step="1"
+								required
 								value={form.port}
 								oninput={(event) => form.setPort(event.currentTarget.value)} /></label>
 						<label class="ug-label"

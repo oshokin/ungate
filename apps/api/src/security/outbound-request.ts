@@ -60,11 +60,13 @@ export async function fetchWithHeaderTimeout(
 	input: string | URL,
 	init: RequestInit,
 	requestSignal?: AbortSignal,
-	provider?: ModelMappingProvider
+	provider?: ModelMappingProvider,
+	transport: typeof fetch = fetch
 ): Promise<Response> {
 	const timeoutMs = Number(process.env.UPSTREAM_HEADER_TIMEOUT_MS) || DEFAULT_HEADER_TIMEOUT_MS;
 	const replayable = init.body === undefined || init.body === null || typeof init.body === 'string';
-	const maxAttempts = replayable ? UPSTREAM_RETRY_ATTEMPTS + 1 : 1;
+	const safeMethod = ['GET', 'HEAD', 'OPTIONS'].includes((init.method ?? 'GET').toUpperCase());
+	const maxAttempts = replayable && safeMethod ? UPSTREAM_RETRY_ATTEMPTS + 1 : 1;
 	let retryBudgetUsed = 0;
 
 	for (let attempt = 1; ; attempt += 1) {
@@ -75,7 +77,7 @@ export async function fetchWithHeaderTimeout(
 		const signal = signals.length === 1 ? signals[0] : AbortSignal.any(signals);
 
 		try {
-			const response = await fetch(input, { ...init, redirect: 'manual', signal });
+			const response = await transport(input, { ...init, redirect: 'manual', signal });
 			if (!RETRYABLE_UPSTREAM_STATUSES.has(response.status) || attempt >= maxAttempts || requestSignal?.aborted) {
 				if (provider) {
 					if (response.ok) ProviderHealth.success(provider, response.status);
@@ -184,22 +186,35 @@ export function isPublicIpAddress(address: string): boolean {
 			(a === 169 && b === 254) ||
 			(a === 172 && b >= 16 && b <= 31) ||
 			(a === 192 && b === 168) ||
+			(a === 192 && b === 0 && (parts[2] === 0 || parts[2] === 2)) ||
+			(a === 192 && b === 88 && parts[2] === 99) ||
+			(a === 198 && (b === 18 || b === 19 || (b === 51 && parts[2] === 100))) ||
+			(a === 203 && b === 0 && parts[2] === 113) ||
 			(a === 100 && b >= 64 && b <= 127) ||
 			a >= 224
 		);
 	}
 	if (isIP(address) === 6) {
-		return !(
-			normalized === '::' ||
-			normalized === '::1' ||
-			normalized.startsWith('fc') ||
-			normalized.startsWith('fd') ||
-			normalized.startsWith('fe8') ||
-			normalized.startsWith('fe9') ||
-			normalized.startsWith('fea') ||
-			normalized.startsWith('feb') ||
-			normalized.startsWith('ff') ||
-			normalized.startsWith('2001:db8:')
+		// Canonicalize expanded and mixed IPv6 forms before classifying them.
+		const canonical = new URL(`http://[${normalized}]/`).hostname.slice(1, -1);
+		if (canonical.startsWith('::ffff:')) {
+			const words = canonical
+				.slice('::ffff:'.length)
+				.split(':')
+				.map((word) => parseInt(word, 16));
+
+			return isPublicIpAddress(`${words[0] >> 8}.${words[0] & 255}.${words[1] >> 8}.${words[1] & 255}`);
+		}
+
+		// Fail closed outside global unicast; exclude special-purpose allocations.
+		const [first, second = '0'] = canonical.split(':');
+		const secondWord = parseInt(second || '0', 16);
+
+		return (
+			/^[23]/.test(canonical) &&
+			!(first === '2001' && (secondWord <= 0x1ff || secondWord === 0xdb8)) &&
+			!canonical.startsWith('2002:') &&
+			!(first === '3fff' && secondWord <= 0xfff)
 		);
 	}
 

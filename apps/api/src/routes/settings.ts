@@ -21,12 +21,12 @@ const TokenLimitSchema = z.union([z.null(), z.number().int().positive()]);
 
 const ModelMappingUpdateSchema = z
 	.object({
-		id: z.string(),
-		label: z.string(),
+		id: z.string().trim().min(1),
+		label: z.string().trim().min(1),
 		provider: z.string().refine((value) => isModelMappingProvider(value), {
 			message: 'Model provider must be claude, openai or minimax'
 		}),
-		upstreamModel: z.string(),
+		upstreamModel: z.string().trim().min(1),
 		sortOrder: z.number().int(),
 		reasoningBudget: z.union([
 			z.null(),
@@ -52,7 +52,12 @@ const SettingsUpdateSchema = z
 			.optional(),
 		claudeCliVersionCustom: z.union([z.string(), z.null()]).optional(),
 		tunnelProtocol: z.enum(TUNNEL_PROTOCOLS).optional(),
-		models: z.array(ModelMappingUpdateSchema).optional()
+		models: z
+			.array(ModelMappingUpdateSchema)
+			.refine((models) => new Set(models.map((model) => model.id.toLowerCase())).size === models.length, {
+				message: 'Model IDs must be unique (case-insensitive)'
+			})
+			.optional()
 	})
 	.strip();
 

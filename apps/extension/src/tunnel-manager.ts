@@ -37,6 +37,7 @@ const TUNNEL_STOP_DEADLINE_MS = 10000;
 const PUBLIC_PROBE_INTERVAL_MS = 5000;
 /** One public probe must finish within this time. */
 const PUBLIC_PROBE_TIMEOUT_MS = 3000;
+const PUBLIC_HEALTH_MAX_BYTES = 64 * 1024;
 /** Consecutive probe failures before the tunnel is reported down. */
 const PUBLIC_PROBE_FAILURE_THRESHOLD = 3;
 /** HTTPS port used when a public probe connects to a resolved address. */
@@ -97,7 +98,24 @@ async function fetchQuickTunnelHealth(url: string): Promise<unknown> {
 			},
 			(response) => {
 				const chunks: Buffer[] = [];
-				response.on('data', (chunk: Buffer) => chunks.push(chunk));
+				let received = 0;
+				const tooLarge = (): void => {
+					const error = new Error('Public health response exceeds 65536-byte size limit.');
+					reject(error);
+					response.destroy();
+					request.destroy(error);
+				};
+				response.on('error', reject);
+				if (Number(response.headers['content-length']) > PUBLIC_HEALTH_MAX_BYTES) {
+					tooLarge();
+
+					return;
+				}
+				response.on('data', (chunk: Buffer) => {
+					received += chunk.length;
+					if (received > PUBLIC_HEALTH_MAX_BYTES) tooLarge();
+					else chunks.push(chunk);
+				});
 				response.on('end', () => {
 					if (response.statusCode !== 200) {
 						reject(new Error(`Public health returned HTTP ${response.statusCode ?? 'unknown'}.`));
@@ -388,16 +406,16 @@ export class TunnelManager {
 				status: state.status,
 				url: state.url,
 				lastError: state.error,
-				publicStatus: state.publicStatus,
-				publicCheckedAt: state.publicCheckedAt,
-				publicError: state.publicError,
+				...(state.publicStatus !== undefined ? { publicStatus: state.publicStatus } : {}),
+				...(state.publicCheckedAt !== undefined ? { publicCheckedAt: state.publicCheckedAt } : {}),
+				...(state.publicError !== undefined ? { publicError: state.publicError } : {}),
 				lastSeenAt: Date.now(),
 				ownerWindowId: this.windowId
 			});
 
 			return current;
 		});
-		this.onStateChange(state);
+		this.onStateChange(this.getState());
 	}
 
 	private async stopVerifiedProcess(pid: number, logPath: string | undefined): Promise<void> {

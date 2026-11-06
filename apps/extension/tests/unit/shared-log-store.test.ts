@@ -51,6 +51,19 @@ describe('SharedLogStore', () => {
 		expect(entries.at(-1)?.message).toBe('api-504');
 	});
 
+	it('clears observed journal IDs across windows without trusting entry clocks', async () => {
+		const now = Date.now();
+		SharedLogStore.append('api', { timestamp: now + 60_000, level: 'info', message: 'old future clock' });
+		vi.resetModules();
+		const { SharedLogStore: otherWindow } = await import('../../src/runtime-state/shared-log-store');
+		otherWindow.clear('api');
+		SharedLogStore.append('api', { timestamp: now, level: 'info', message: 'same millisecond' });
+		otherWindow.append('api', { timestamp: now - 60_000, level: 'info', message: 'clock moved backwards' });
+		for (const window of [SharedLogStore, otherWindow]) {
+			expect(window.readAll('api').map((entry) => entry.message)).toEqual(['clock moved backwards', 'same millisecond']);
+		}
+	});
+
 	it('applies the requested display limit independently for each source', () => {
 		for (let index = 0; index < 125; index++) {
 			SharedLogStore.append('api', { timestamp: index, level: 'info', message: `entry-${index}` });

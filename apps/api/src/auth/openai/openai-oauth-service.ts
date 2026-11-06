@@ -8,6 +8,7 @@ import { ProviderSettings } from 'src/database/provider-settings';
 import { logger } from 'src/utils/logger';
 
 import { OpenAICallbackServer } from './callback-server';
+import { LOGIN_ERROR_MESSAGES, OpenAILoginError, type LoginErrorCode } from './login-error';
 import { OpenAIOAuthClient } from './oauth-client';
 import { OpenAIOAuthUtils } from './openai-oauth-utils';
 import { OpenAIPkceSessionStore } from './pkce-session-store';
@@ -33,7 +34,9 @@ export class OpenAIOAuthService {
 			expiresAt: Date.now() + OAUTH_LOGIN_TTL_MS
 		});
 
-		await OpenAICallbackServer.start((requestUrl, path, response) => this.handleCallbackRequest(requestUrl, path, response));
+		await OpenAICallbackServer.start((requestUrl, path, response, stop) =>
+			this.handleCallbackRequest(requestUrl, path, response, stop)
+		);
 		const params = new URLSearchParams({
 			response_type: 'code',
 			client_id: oauthConfig.clientId,
@@ -48,7 +51,10 @@ export class OpenAIOAuthService {
 		return { authUrl: `${oauthConfig.authorizeUrl}?${params}`, sessionId };
 	}
 
-	public static async completeLogin(code: string, sessionId: string): Promise<{ ok: boolean; email?: string; error?: string }> {
+	public static async completeLogin(
+		code: string,
+		sessionId: string
+	): Promise<{ ok: boolean; email?: string; error?: string; errorCode?: LoginErrorCode }> {
 		const session = OpenAIPkceSessionStore.get(sessionId);
 
 		if (!session) {
@@ -62,10 +68,13 @@ export class OpenAIOAuthService {
 		}
 
 		OpenAIPkceSessionStore.delete(sessionId);
-		const tokens = await OpenAIOAuthClient.exchangeCode(code, session.codeVerifier);
+		let tokens: Record<string, unknown>;
+		try {
+			tokens = await OpenAIOAuthClient.exchangeCode(code, session.codeVerifier);
+		} catch (error) {
+			const errorCode = error instanceof OpenAILoginError ? error.code : 'unexpected_error';
 
-		if (!tokens) {
-			return { ok: false, error: 'Token exchange failed' };
+			return { ok: false, errorCode, error: LOGIN_ERROR_MESSAGES[errorCode] };
 		}
 
 		const idToken = typeof tokens.id_token === 'string' ? tokens.id_token : null;
@@ -169,7 +178,8 @@ export class OpenAIOAuthService {
 	private static async handleCallbackRequest(
 		requestUrl: string | undefined,
 		path: string,
-		response: ServerResponse
+		response: ServerResponse,
+		stop: () => Promise<void>
 	): Promise<void> {
 		if (!requestUrl) {
 			response.statusCode = 400;
@@ -200,18 +210,33 @@ export class OpenAIOAuthService {
 			return;
 		}
 
-		const result = await this.completeLogin(code, sessionId);
-		response.setHeader('Content-Type', 'text/html; charset=utf-8');
+		try {
+			const result = await this.completeLogin(code, sessionId);
+			if (response.destroyed || response.writableEnded) {
+				await stop();
 
-		if (result.ok) {
-			response.end(
-				'<html><body><h1>Connected!</h1><p>You can close this window.</p><script>window.close()</script></body></html>'
-			);
-		} else {
-			response.statusCode = 400;
-			response.end(`<html><body><h1>Error</h1><p>${result.error ?? 'Unknown error'}</p></body></html>`);
+				return;
+			}
+			response.setHeader('Content-Type', 'text/html; charset=utf-8');
+			response.setHeader('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'");
+			response.setHeader('Cache-Control', 'no-store');
+
+			if (result.ok) {
+				response.end('<html><body><h1>Connected!</h1><p>You can close this window.</p></body></html>');
+			} else {
+				response.statusCode = 400;
+				// Only render application-owned copy, never provider or exception text.
+				const message =
+					result.errorCode && Object.hasOwn(LOGIN_ERROR_MESSAGES, result.errorCode)
+						? LOGIN_ERROR_MESSAGES[result.errorCode]
+						: LOGIN_ERROR_MESSAGES.unexpected_error;
+				response.end(
+					`<html lang="en"><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>Sign-in failed</title></head><body><main><h1>Sign-in failed</h1><p>${message}</p><p>You can close this window.</p></main></body></html>`
+				);
+			}
+		} finally {
+			OpenAIPkceSessionStore.delete(sessionId);
 		}
-
-		await OpenAICallbackServer.stop();
+		await stop();
 	}
 }

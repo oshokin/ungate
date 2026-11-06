@@ -1,6 +1,5 @@
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 
 import { EXECUTABLE_FILE_MODE } from '@ungate/shared';
@@ -102,7 +101,9 @@ export class CloudflaredInstaller {
 			);
 		}
 
-		const stagingRoot = path.join(os.tmpdir(), `ungate-cloudflared-${process.pid}-${Date.now()}`);
+		fs.mkdirSync(path.dirname(binaryPath), { recursive: true });
+		const stagingRoot = fs.mkdtempSync(path.join(path.dirname(binaryPath), '.ungate-cloudflared-'));
+		fs.chmodSync(stagingRoot, 0o700);
 		const downloadPath = path.join(stagingRoot, artifact.url.slice(artifact.url.lastIndexOf('/') + 1));
 
 		try {
@@ -113,14 +114,15 @@ export class CloudflaredInstaller {
 
 			const stagedBinary = artifact.archived ? this.extractTarball(downloadPath, stagingRoot) : downloadPath;
 
-			fs.mkdirSync(path.dirname(binaryPath), { recursive: true });
-			fs.copyFileSync(stagedBinary, binaryPath);
+			if (!fs.lstatSync(stagedBinary).isFile()) throw new Error('cloudflared executable must be a regular file.');
 
 			if (process.platform !== 'win32') {
-				fs.chmodSync(binaryPath, EXECUTABLE_FILE_MODE);
+				fs.chmodSync(stagedBinary, EXECUTABLE_FILE_MODE);
 			}
 
-			InstallStamp.write(binaryPath, artifact);
+			InstallStamp.write(stagedBinary, artifact);
+			fs.renameSync(stagedBinary, binaryPath);
+			fs.renameSync(`${stagedBinary}.sha256`, `${binaryPath}.sha256`);
 
 			return binaryPath;
 		} finally {

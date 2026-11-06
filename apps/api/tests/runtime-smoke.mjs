@@ -52,9 +52,48 @@ try {
   assert.equal(response.status, 200); checks++;
   const settings = await response.json();
   assert.ok(settings.apiKey.length >= 32); checks++;
+  // Invalid configuration must fail before either the key or model registry changes.
+  const models = settings.models;
+  assert.ok(Array.isArray(models) && models.length > 0); checks++;
+  for (const invalidModels of [
+    [models[0], { ...models[0] }],
+    [{ ...models[0], id: 'CASE-CONFLICT' }, { ...models[0], id: 'case-conflict' }],
+    [{ ...models[0], id: '   ' }],
+    [{ ...models[0], label: '   ' }],
+    [{ ...models[0], upstreamModel: '   ' }],
+    [{ ...models[0], provider: 'invalid-provider' }]
+  ]) {
+    const rejectedKey = randomBytes(32).toString('hex');
+    assert.equal((await call('/settings', admin, 'POST', { apiKey: rejectedKey, models: invalidModels })).status, 400); checks++;
+    const unchanged = await (await call('/settings', admin)).json();
+    assert.equal(unchanged.apiKey, settings.apiKey); checks++;
+    assert.deepEqual(unchanged.models, models); checks++;
+    assert.equal((await call('/v1/models', rejectedKey)).status, 403); checks++;
+  }
+  // Exercise the actual Fastify boundary, not only the schema helper.
+  for (const path of ['/auth/claude/complete', '/auth/minimax/login', '/auth/minimax/base-url']) {
+    for (const body of [undefined, 'null', '{}', '{"code":null,"sessionId":null}']) {
+      const invalid = await fetch(`http://127.0.0.1:${port}${path}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${admin}`, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
+        body,
+        signal: AbortSignal.timeout(5000)
+      });
+      assert.equal(invalid.status, 400); checks++;
+    }
+  }
   assert.equal((await call('/settings', settings.apiKey)).status, 403); checks++;
   assert.equal((await call('/v1/models')).status, 403); checks++;
   assert.equal((await call('/v1/models', settings.apiKey)).status, 200); checks++;
+  for (const path of ['/v1/messages', '/v1/messages/count_tokens']) {
+    const unknown = await call(path, settings.apiKey, 'POST', {
+      model: 'ungate-smoke-unknown-model',
+      max_tokens: 1,
+      messages: [{ role: 'user', content: 'Do not forward this request.' }]
+    });
+    assert.equal(unknown.status, 400); checks++;
+    assert.equal((await unknown.json()).error.type, 'invalid_request_error'); checks++;
+  }
   for (const apiKey of [null, '', '   ']) { assert.equal((await call('/settings', admin, 'POST', { apiKey })).status, 400); checks++; }
   const rotated = randomBytes(32).toString('hex');
   assert.equal((await call('/settings', admin, 'POST', { apiKey: rotated })).status, 200); checks++;

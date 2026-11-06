@@ -38,8 +38,9 @@ async function save(): Promise<void> {
 
 		return;
 	}
-	await settings.save(form.toSavePayload());
-	if (!settings.error) form.markModelsSaved();
+	const payload = form.toSavePayload();
+	await settings.save(payload);
+	if (!settings.error) form.markModelsSaved(payload.models);
 }
 function refresh(): void {
 	void ui.refreshAuthStates();

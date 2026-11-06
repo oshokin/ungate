@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { ModelMappings } from 'src/database/model-mappings';
 
 describe('database-model-mappings', () => {
-	it('sanitizes invalid and trims valid rows', () => {
+	it('trims valid rows', () => {
 		const sanitized = ModelMappings.sanitize([
 			{
 				id: ' a ',
@@ -13,15 +13,6 @@ describe('database-model-mappings', () => {
 				sortOrder: 0,
 				reasoningBudget: 'max',
 				serviceTier: 'priority'
-			},
-			{
-				id: ' ',
-				label: 'skip',
-				provider: 'claude',
-				upstreamModel: 'x',
-				sortOrder: 1,
-				reasoningBudget: null,
-				serviceTier: null
 			}
 		]);
 
@@ -37,6 +28,10 @@ describe('database-model-mappings', () => {
 			contextWindow: null,
 			maxOutputTokens: null
 		});
+	});
+
+	it('rejects empty rows instead of silently dropping them', () => {
+		expect(() => ModelMappings.sanitize([{ id: ' ', label: 'Invalid', provider: 'claude', upstreamModel: 'x', sortOrder: 0, reasoningBudget: null }])).toThrow('must not be empty');
 	});
 
 	it('resolves by id/upstream/case-insensitive', () => {

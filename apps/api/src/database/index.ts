@@ -1,15 +1,4 @@
-import {
-	chmodSync,
-	closeSync,
-	constants,
-	existsSync,
-	lstatSync,
-	mkdirSync,
-	openSync,
-	readFileSync,
-	unlinkSync,
-	writeFileSync
-} from 'node:fs';
+import { chmodSync, closeSync, constants, existsSync, lstatSync, mkdirSync, openSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -17,7 +6,7 @@ import BetterSqlite3, { type Database as DatabaseType } from 'better-sqlite3';
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 
-import { PRIVATE_DIR_MODE, PRIVATE_FILE_MODE, UNGATE_DIR } from '@ungate/shared';
+import { PRIVATE_DIR_MODE, PRIVATE_FILE_MODE, ProcessLockAttempt, UNGATE_DIR } from '@ungate/shared';
 
 import { schema } from './schema';
 
@@ -37,55 +26,19 @@ const MIGRATION_LOCK_TIMEOUT_MS = 30000;
 /** Pause between checks while another process holds the migration lock. */
 const MIGRATION_LOCK_POLL_MS = 50;
 
-function isProcessAlive(pid: number): boolean {
-	try {
-		process.kill(pid, 0);
-
-		return true;
-	} catch (error) {
-		return (error as NodeJS.ErrnoException).code !== 'ESRCH';
-	}
-}
-
 function acquireMigrationLock(dbPath: string): () => void {
-	const lockPath = `${dbPath}.migrate.lock`;
+	const attempt = new ProcessLockAttempt(`${dbPath}.migrate.lock`);
 	const deadline = Date.now() + MIGRATION_LOCK_TIMEOUT_MS;
-	while (true) {
-		try {
-			const fd = openSync(lockPath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, PRIVATE_FILE_MODE);
-			writeFileSync(fd, String(process.pid));
-			closeSync(fd);
-
-			return () => {
-				try {
-					if (readFileSync(lockPath, 'utf8').trim() === String(process.pid)) unlinkSync(lockPath);
-				} catch (error) {
-					if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-				}
-			};
-		} catch (error) {
-			const code = (error as NodeJS.ErrnoException).code;
-			if (code !== 'EEXIST') throw error;
-			let owner: number;
-			try {
-				const stat = lstatSync(lockPath);
-				if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`Unsafe migration lock path: "${lockPath}"`);
-				owner = Number.parseInt(readFileSync(lockPath, 'utf8').trim(), 10);
-			} catch (readError) {
-				if ((readError as NodeJS.ErrnoException).code === 'ENOENT') continue;
-				throw readError;
-			}
-			if (Number.isInteger(owner) && owner > 0 && !isProcessAlive(owner)) {
-				try {
-					unlinkSync(lockPath);
-				} catch (unlinkError) {
-					if ((unlinkError as NodeJS.ErrnoException).code !== 'ENOENT') throw unlinkError;
-				}
-				continue;
-			}
-			if (Date.now() >= deadline) throw new Error(`Timed out waiting for database migrations held by PID ${owner}`);
+	try {
+		while (!attempt.tryAcquire()) {
+			if (Date.now() >= deadline) throw new Error('Timed out waiting for database migrations');
 			Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, MIGRATION_LOCK_POLL_MS);
 		}
+
+		return () => attempt.release();
+	} catch (error) {
+		attempt.release();
+		throw error;
 	}
 }
 

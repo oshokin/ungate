@@ -374,13 +374,19 @@ export class ApiServer {
 
 		if (code === 0) {
 			this.lastStatus = 'stopped';
-			void sleep(config.apiServer.restartDelayMs).then(async () => {
-				if (!this.shouldRespawn()) {
-					return;
-				}
+			void sleep(config.apiServer.restartDelayMs)
+				.then(async () => {
+					if (!this.shouldRespawn()) {
+						return;
+					}
 
-				await this.start();
-			});
+					await this.start();
+				})
+				.catch(async (error: unknown) => {
+					const message = `API automatic restart failed: ${error instanceof Error ? error.message : String(error)}`;
+					this.callbacks.onLog('error', message);
+					await this.recordApiFailure(message).catch(() => {});
+				});
 
 			return;
 		}

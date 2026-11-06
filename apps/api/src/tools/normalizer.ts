@@ -128,7 +128,7 @@ export class ToolNormalizer {
 		const finalInput = JSON.stringify(normalized.input);
 
 		if (originalInput !== finalInput) {
-			logger.log(`[Normalizer] CHANGED: ${toolUse.name} - ${originalInput} -> ${finalInput}`);
+			logger.log('[Normalizer] Tool input normalized');
 		}
 
 		return normalized;

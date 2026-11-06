@@ -8,12 +8,7 @@ import { fetchWithHeaderTimeout } from '../security/outbound-request';
 import { RequestBuilder } from './request-builder';
 import { ToolMapper } from './tool-mapper';
 
-/** Characters of a Claude 400 body kept in the rare-error log. */
-const LOGGED_API_ERROR_CHARS = 300;
-/** Tool names recorded beside a Claude 400, enough to see the mapping. */
-const LOGGED_TOOL_NAMES = 100;
-
-import type { RequestSource, AnthropicRequest, AnthropicError, Tool } from '../types';
+import type { RequestSource, AnthropicRequest, AnthropicError } from '../types';
 import type { ProxyResult } from '../types/proxy';
 
 type RequestResult =
@@ -62,8 +57,7 @@ async function makeClaudeCodeRequest(
 		}
 
 		if (response.status === 401) {
-			const errorBody = await response.clone().text();
-			logger.error(`Claude Code 401 error: ${errorBody}`);
+			logger.error('Claude Code 401 error');
 
 			const row = ProviderSettings.get('claude');
 
@@ -93,8 +87,7 @@ async function makeClaudeCodeRequest(
 		}
 
 		if (response.status === 403) {
-			const errorBody = await response.clone().text();
-			logger.error(`Claude Code 403 error: ${errorBody}`);
+			logger.error('Claude Code 403 error');
 
 			return { success: false, error: 'Permission denied', status: 403 };
 		}
@@ -106,20 +99,12 @@ async function makeClaudeCodeRequest(
 				.catch(() => ({}));
 			const errorBody = errorJson as { error?: { message?: string; type?: string } };
 			const errorMessage = errorBody?.error?.message ?? '';
-			const errorType = errorBody?.error?.type ?? '';
-
-			logger.error(`API 400 Error: type=${errorType || 'unknown'} messageLength=${errorMessage.length}`);
+			logger.error('Claude Code API 400 error');
 
 			if (errorMessage.includes('illegal value') || errorMessage.includes('invalid') || errorMessage.includes('argument')) {
-				logger.rareError(errorMessage.slice(0, LOGGED_API_ERROR_CHARS), {
-					errorType,
-					requestBody: {
-						model: preparedBody.model,
-						messagesCount: preparedBody.messages?.length ?? 0,
-						toolsCount: preparedBody.tools?.length ?? 0,
-						stream: preparedBody.stream
-					},
-					toolNames: preparedBody.tools?.map((tool: Tool) => tool.name).slice(0, LOGGED_TOOL_NAMES) ?? []
+				logger.rareError('Claude Code rejected request arguments', {
+					messagesCount: preparedBody.messages?.length ?? 0,
+					toolsCount: preparedBody.tools?.length ?? 0
 				});
 			}
 
@@ -132,7 +117,7 @@ async function makeClaudeCodeRequest(
 
 		return { success: true, response, source: 'claude', reverseToolMapping };
 	} catch (error) {
-		logger.error(`Claude Code OAuth request failed: ${String(error)}`);
+		logger.error('Claude Code OAuth request failed');
 
 		return { success: false, error: String(error), status: 500 };
 	}

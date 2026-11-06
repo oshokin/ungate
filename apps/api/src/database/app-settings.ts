@@ -68,24 +68,26 @@ export class Settings {
 	static update(settings: Partial<AppSettings>): void {
 		const db = getDb();
 
-		db.insert(appSettings)
-			.values({ id: 1 })
-			.onConflictDoUpdate({
-				target: appSettings.id,
-				set: {
-					...(settings.port !== undefined && { port: settings.port }),
-					...(settings.apiKey !== undefined && { apiKey: settings.apiKey }),
-					...(settings.quiet !== undefined && { quiet: settings.quiet }),
-					...(settings.extraInstruction !== undefined && { extraInstruction: settings.extraInstruction }),
-					...(settings.claudeCliVersionMode !== undefined && { claudeCliVersionMode: settings.claudeCliVersionMode }),
-					...(settings.claudeCliVersionCustom !== undefined && { claudeCliVersionCustom: settings.claudeCliVersionCustom }),
-					...(settings.tunnelProtocol !== undefined && { tunnelProtocol: settings.tunnelProtocol })
-				}
-			})
-			.run();
+		db.transaction((tx) => {
+			tx.insert(appSettings)
+				.values({ id: 1 })
+				.onConflictDoUpdate({
+					target: appSettings.id,
+					set: {
+						...(settings.port !== undefined && { port: settings.port }),
+						...(settings.apiKey !== undefined && { apiKey: settings.apiKey }),
+						...(settings.quiet !== undefined && { quiet: settings.quiet }),
+						...(settings.extraInstruction !== undefined && { extraInstruction: settings.extraInstruction }),
+						...(settings.claudeCliVersionMode !== undefined && { claudeCliVersionMode: settings.claudeCliVersionMode }),
+						...(settings.claudeCliVersionCustom !== undefined && { claudeCliVersionCustom: settings.claudeCliVersionCustom }),
+						...(settings.tunnelProtocol !== undefined && { tunnelProtocol: settings.tunnelProtocol })
+					}
+				})
+				.run();
 
-		if (settings.models !== undefined) {
-			ModelMappings.replace(settings.models);
-		}
+			if (settings.models !== undefined) {
+				ModelMappings.replace(settings.models, tx);
+			}
+		});
 	}
 }

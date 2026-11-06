@@ -615,6 +615,19 @@ describe('ApiServer.onExit', () => {
 		expect(sleepMock).toHaveBeenCalledTimes(1);
 	});
 
+	it('logs and records a rejected automatic restart without an unhandled rejection', async () => {
+		const { server, onLog, onStatusChange } = createServer();
+		const internals = getInternals(server);
+		vi.spyOn(internals, 'shouldRespawn').mockReturnValue(true);
+		vi.spyOn(server, 'start').mockRejectedValue(new Error('restart denied'));
+		Object.assign(internals, { shutDownDeliberately: false });
+		internals.onExit(0, null);
+		await vi.waitFor(() => {
+			expect(onLog).toHaveBeenCalledWith('error', expect.stringContaining('restart denied'));
+			expect(onStatusChange).toHaveBeenCalledWith('error');
+		});
+	});
+
 	it('marks status as error after a non-zero exit', async () => {
 		const runtimeState = createRuntimeState();
 		const { server, onStatusChange } = createServer();

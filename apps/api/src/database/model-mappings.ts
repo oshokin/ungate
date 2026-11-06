@@ -25,6 +25,7 @@ export class ModelMappings {
 
 	static sanitize(models: ModelMappingConfig[]): ModelMappingConfig[] {
 		const sanitized: ModelMappingConfig[] = [];
+		const ids = new Set<string>();
 
 		for (const [index, model] of models.entries()) {
 			const trimmedId = trim(model.id);
@@ -33,7 +34,7 @@ export class ModelMappings {
 			let reasoningBudget: ReasoningBudgetTier | null = null;
 			let serviceTier: ModelServiceTier | null = null;
 			if (!isModelMappingProvider(model.provider)) {
-				continue;
+				throw new Error('Invalid model provider');
 			}
 			const provider: ModelMappingProvider = model.provider;
 
@@ -46,8 +47,11 @@ export class ModelMappings {
 			}
 
 			if (!trimmedId || !trimmedLabel || !trimmedUpstreamModel) {
-				continue;
+				throw new Error('Model id, label and upstreamModel must not be empty');
 			}
+			const lowerId = trimmedId.toLowerCase();
+			if (ids.has(lowerId)) throw new Error(`Duplicate model id: ${trimmedId}`);
+			ids.add(lowerId);
 
 			sanitized.push({
 				id: trimmedId,
@@ -148,8 +152,7 @@ export class ModelMappings {
 		return null;
 	}
 
-	static replace(models: ModelMappingConfig[]): void {
-		const db = getDb();
+	static replace(models: ModelMappingConfig[], db: Pick<ReturnType<typeof getDb>, 'transaction'> = getDb()): void {
 		const sanitized = this.sanitize(models);
 		db.transaction((tx) => {
 			tx.delete(modelMappings).run();

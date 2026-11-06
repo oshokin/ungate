@@ -39,7 +39,8 @@ const states = $state<Record<ModelMappingProvider, ProviderDiscoveryState>>({
 });
 let autoSaveQueue: Promise<void> = Promise.resolve();
 
-async function sync(provider: ModelMappingProvider): Promise<void> {
+async function sync(provider: ModelMappingProvider): Promise<boolean> {
+	const initialModels = JSON.stringify(getSettingsFormStore().models);
 	const state = states[provider];
 	state.loading = true;
 	state.error = null;
@@ -62,10 +63,11 @@ async function sync(provider: ModelMappingProvider): Promise<void> {
 				state.error = response.message ?? 'The provider model catalog is unavailable.';
 			}
 
-			return;
+			return false;
 		}
 
 		const formStore = getSettingsFormStore();
+		const unchangedDuringDiscovery = JSON.stringify(formStore.models) === initialModels;
 		const reconciliation = reconcileDiscoveredModels(formStore.models, response);
 		formStore.setModels(reconciliation.models);
 		state.catalog = response.models;
@@ -76,12 +78,16 @@ async function sync(provider: ModelMappingProvider): Promise<void> {
 		};
 		state.notListedUpstreamModels = reconciliation.notListedUpstreamModels;
 		state.catalogMessage = response.message;
+
+		return unchangedDuringDiscovery;
 	} catch (error) {
 		state.summary = null;
 		state.notListedUpstreamModels = [];
 		state.catalogMessage = null;
 		state.catalog = [];
 		state.error = error instanceof Error ? error.message : 'Unable to sync models.';
+
+		return false;
 	} finally {
 		state.loading = false;
 	}
@@ -97,13 +103,14 @@ export function getModelDiscoveryStore() {
 			const state = states[provider];
 			const formStore = getSettingsFormStore();
 			const hadUnsavedModelEdits = formStore.modelsDirty;
-			await sync(provider);
-			if (hadUnsavedModelEdits || state.error || !state.summary?.added) return;
+			const unchangedDuringDiscovery = await sync(provider);
+			if (hadUnsavedModelEdits || !unchangedDuringDiscovery || state.error || !state.summary?.added) return;
+			const snapshot = formStore.models.map((model) => ({ ...model }));
 			autoSaveQueue = autoSaveQueue
 				.catch(() => {})
 				.then(async () => {
-					await Api.updateSettings({ models: formStore.models });
-					formStore.markModelsSaved();
+					await Api.updateSettings({ models: snapshot });
+					formStore.markModelsSaved(snapshot);
 				});
 			try {
 				await autoSaveQueue;

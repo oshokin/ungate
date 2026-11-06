@@ -83,6 +83,7 @@ beforeEach(() => {
 	manager = new TunnelManager('window-a', () => true, vi.fn(), vi.fn());
 });
 afterEach(() => {
+	vi.unstubAllGlobals();
 	manager.syncMonitor(false);
 	config.baseDir = original;
 	vi.restoreAllMocks();
@@ -90,6 +91,49 @@ afterEach(() => {
 });
 
 describe('detached tunnel lifecycle', () => {
+	it('preserves public health fields when a state update omits them', async () => {
+		Object.assign(mocks.state!.tunnel, { publicStatus: 'reachable', publicCheckedAt: 123, publicError: 'saved' });
+		await (manager as unknown as { setState(state: unknown): Promise<void> }).setState({
+			status: 'running',
+			url: 'https://one.trycloudflare.com',
+			error: null
+		});
+		expect(manager.getState()).toMatchObject({ publicStatus: 'reachable', publicCheckedAt: 123, publicError: 'saved' });
+	});
+
+	it.each(['declared', 'streamed'])('bounds %s DNS fallback health responses', async (kind) => {
+		mocks.alive = true;
+		Object.assign(mocks.state!.tunnel, {
+			status: 'running',
+			url: 'https://one.trycloudflare.com',
+			pid: 12345,
+			startedAt: Date.now(),
+			publicStatus: 'checking',
+			publicCheckedAt: null,
+			publicError: null
+		});
+		const dnsError = Object.assign(new Error('DNS failed'), { code: 'ENOTFOUND' });
+		vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('fetch failed', { cause: dnsError })));
+		mocks.resolve4.mockResolvedValue(['104.16.230.132']);
+		const response = Object.assign(new EventEmitter(), {
+			headers: kind === 'declared' ? { 'content-length': '65537' } : {},
+			statusCode: 200,
+			destroy: vi.fn()
+		});
+		mocks.httpsRequest.mockImplementation((_options, callback) => {
+			const request = Object.assign(new EventEmitter(), { destroy: vi.fn(), end: vi.fn() });
+			request.end.mockImplementation(() => {
+				(callback as (response: EventEmitter) => void)(response);
+				if (kind === 'streamed') response.emit('data', Buffer.alloc(65537));
+			});
+
+			return request;
+		});
+		await (manager as unknown as { probePublicHealth(force: boolean): Promise<void> }).probePublicHealth(true);
+		expect(response.destroy).toHaveBeenCalled();
+		expect(manager.getState().publicError).toContain('65536-byte');
+		vi.unstubAllGlobals();
+	});
 	it('installs a verified binary, uses a loopback origin and detached file-backed logs', async () => {
 		await manager.start(DEFAULT_API_PORT);
 		expect(mocks.install).toHaveBeenCalledWith(getCloudflaredBinPath());
@@ -270,7 +314,7 @@ describe('detached tunnel lifecycle', () => {
 		vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('fetch failed', { cause: dnsError })));
 		mocks.resolve4.mockResolvedValue(['104.16.230.132']);
 		mocks.httpsRequest.mockImplementation((_options, callback) => {
-			const response = new EventEmitter() as EventEmitter & { statusCode: number };
+			const response = Object.assign(new EventEmitter(), { headers: {}, destroy: vi.fn(), statusCode: 200 });
 			response.statusCode = 200;
 			const request = new EventEmitter() as EventEmitter & {
 				end: () => void;

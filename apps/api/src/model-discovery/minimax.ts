@@ -1,5 +1,5 @@
 import { MINIMAX_BASE_URLS } from '@ungate/shared';
-import { validateMiniMaxBaseUrl } from 'src/security/minimax-url';
+import { fetchMiniMax, validateMiniMaxBaseUrl } from 'src/security/minimax-url';
 import { PROVIDER_READ_TIMEOUT_MS } from 'src/security/outbound-request';
 
 import { MAX_MODELS, modelWithLimits, readJson, uniqueModels, type ProviderCatalog } from './common';
@@ -12,7 +12,7 @@ export async function discoverMiniMaxModels(accessToken: string, baseUrl: string
 	const root = await validateMiniMaxBaseUrl(baseUrl);
 	const china = root === MINIMAX_BASE_URLS.china;
 	const url = china ? `${root}/anthropic/v1/models` : `${root}/v1/models`;
-	const response = await fetch(url, {
+	const response = await fetchMiniMax(url, {
 		method: 'GET',
 		redirect: 'error',
 		signal: AbortSignal.timeout(PROVIDER_READ_TIMEOUT_MS),

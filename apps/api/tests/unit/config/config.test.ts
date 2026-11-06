@@ -25,7 +25,7 @@ describe('config', () => {
 	});
 
 	it('falls back to settings when env is absent', () => {
-		vi.stubEnv('PORT', '');
+		vi.stubEnv('PORT', undefined);
 
 		const cfg = getConfig({
 			port: 3000,
@@ -41,10 +41,15 @@ describe('config', () => {
 		expect(cfg).toEqual({ port: 3000, apiKey: undefined, quietMode: false });
 	});
 
-	it('falls back to settings when env port is invalid number', () => {
-		vi.stubEnv('PORT', 'abc');
+	it('preserves environment-only ephemeral port allocation', () => {
+		vi.stubEnv('PORT', '0');
+		expect(getConfig({ port: 4123 } as Parameters<typeof getConfig>[0]).port).toBe(0);
+	});
 
-		const cfg = getConfig({
+	it.each(['abc', '', '3000junk', '1.5', '-1', '65536', ' 3000', '1e3'])('rejects invalid env port %j', (port) => {
+		vi.stubEnv('PORT', port);
+
+		expect(() => getConfig({
 			port: 4123,
 			apiKey: null,
 			quiet: false,
@@ -53,8 +58,6 @@ describe('config', () => {
 			claudeCliVersionCustom: null,
 			tunnelProtocol: 'http2',
 			models: []
-		});
-
-		expect(cfg).toEqual({ port: 4123, apiKey: undefined, quietMode: false });
+		})).toThrow('PORT must be an integer');
 	});
 });

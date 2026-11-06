@@ -55,6 +55,17 @@ function create(active = true) {
 }
 
 describe('shared service actions', () => {
+	it.each(['tunnel', 'api'] as const)(
+		'preserves stop intent after a failed %s stop and attempts both services',
+		async (service) => {
+			const { api, tunnel, controller } = create();
+			(service === 'tunnel' ? tunnel : api).stop.mockRejectedValue(new Error('stop denied'));
+			await expect(controller.run('stop-services')).rejects.toThrow(/Restart Services/);
+			expect(state.api.startSuppressed).toBe(true);
+			expect(tunnel.stop).toHaveBeenCalledOnce();
+			expect(api.stop).toHaveBeenCalledOnce();
+		}
+	);
 	it('upgrades in the requesting window and preserves a same-port tunnel', async () => {
 		mocks.health.mockResolvedValue({ service: 'ungate', pid: 123, version: null, protocolVersion: null });
 		const { api, tunnel, controller } = create();

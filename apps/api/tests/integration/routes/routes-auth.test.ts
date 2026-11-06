@@ -45,6 +45,17 @@ vi.mock('src/database/provider-settings', () => ({
 }));
 
 describe('routes-auth', () => {
+	it.each(['/auth/claude/complete', '/auth/minimax/login', '/auth/minimax/base-url'])('validates absent, null and invalid bodies on %s', async (url) => {
+		const app = await withPlugin(authPlugin);
+		for (const payload of [undefined, 'null', '{}', '{"apiKey":{},"baseUrl":3,"code":[],"sessionId":{}}']) {
+			const response = await app.inject({ method: 'POST', url, ...(payload === undefined ? {} : { payload, headers: { 'content-type': 'application/json' } }) });
+			expect(response.statusCode).toBe(400);
+		}
+		expect(oauthCompleteLoginMock).not.toHaveBeenCalled();
+		expect(providerUpsertApiKeyMock).not.toHaveBeenCalled();
+		await app.close();
+	});
+
 	afterEach(() => {
 		vi.clearAllMocks();
 	});

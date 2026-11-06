@@ -26,6 +26,7 @@ interface ClearRecord {
 	id: string;
 	source: LogSource;
 	clearedAt: number;
+	entryIds?: string[];
 }
 
 type SharedLogRecord = EntryRecord | ClearRecord;
@@ -46,7 +47,10 @@ export class SharedLogStore {
 
 	public static clear(source: LogSource): void {
 		this.ensureDirectory();
-		this.appendRecord({ kind: 'clear', id: randomUUID(), source, clearedAt: Date.now() });
+		const entryIds = this.readAllRecords()
+			.filter((record) => record.source === source && record.kind === 'entry')
+			.map((record) => record.id);
+		this.appendRecord({ kind: 'clear', id: randomUUID(), source, clearedAt: Date.now(), entryIds });
 	}
 
 	public static readAll(source: LogSource): LogEntry[] {
@@ -57,12 +61,16 @@ export class SharedLogStore {
 		this.ensureDirectory();
 		const records = this.readAllRecords().filter((record) => record.source === source);
 		const clearAt = records.reduce(
-			(latest, record) => (record.kind === 'clear' ? Math.max(latest, record.clearedAt) : latest),
+			(latest, record) => (record.kind === 'clear' && !record.entryIds ? Math.max(latest, record.clearedAt) : latest),
 			Number.NEGATIVE_INFINITY
 		);
 
+		const clearedIds = new Set(records.flatMap((record) => (record.kind === 'clear' ? (record.entryIds ?? []) : [])));
 		const entries = records
-			.filter((record): record is EntryRecord => record.kind === 'entry' && record.entry.timestamp > clearAt)
+			.filter(
+				(record): record is EntryRecord =>
+					record.kind === 'entry' && !clearedIds.has(record.id) && record.entry.timestamp > clearAt
+			)
 			.sort((left, right) => left.entry.timestamp - right.entry.timestamp || left.id.localeCompare(right.id))
 			.slice(-normalizeLogEntryLimit(maxEntries));
 
@@ -92,7 +100,9 @@ export class SharedLogStore {
 						(record.source === 'api' || record.source === 'tunnel') &&
 						typeof record.id === 'string' &&
 						(record.kind === 'clear'
-							? Number.isFinite(record.clearedAt)
+							? Number.isFinite(record.clearedAt) &&
+								(record.entryIds === undefined ||
+									(Array.isArray(record.entryIds) && record.entryIds.every((id) => typeof id === 'string')))
 							: record.entry &&
 								Number.isFinite(record.entry.timestamp) &&
 								['info', 'warn', 'error'].includes(record.entry.level) &&

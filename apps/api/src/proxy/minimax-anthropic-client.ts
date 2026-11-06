@@ -3,7 +3,7 @@ import { ANTHROPIC_API_VERSION, MINIMAX_BASE_URLS } from '@ungate/shared';
 import { getProvider } from '../auth';
 import { config } from '../config';
 import { ProviderSettings } from '../database/provider-settings';
-import { validateMiniMaxBaseUrl } from '../security/minimax-url';
+import { fetchMiniMax, validateMiniMaxBaseUrl } from '../security/minimax-url';
 import { fetchWithHeaderTimeout } from '../security/outbound-request';
 
 import type { AnthropicRequest } from '../types';
@@ -40,6 +40,7 @@ export async function proxyMiniMaxAnthropicRequest(
 			body: JSON.stringify({ ...body, model: upstreamModel })
 		},
 		signal,
-		'minimax'
+		'minimax',
+		fetchMiniMax
 	);
 }
