@@ -49,8 +49,8 @@ and rewrites custom history to `{"patch":"..."}`. Grammar `syntax` and
 `definition`, including `customToolFormat`, are not forwarded, logged or copied
 into the description. A schemaless custom tool other than ApplyPatch stays a
 same-name function with no invented parameter, and its history input stays the
-original string. Namespace, provider-defined and other tool types are passed
-through; they do not abort the chat.
+original string. Namespace, provider-defined and other unsupported tool types
+are dropped by `ChatToolCodec.normalize`; they do not abort the chat.
 
 Cursor does not rename tool names on the way to a provider. Claude receives
 the same `Shell`, `StrReplace`, `ApplyPatch` and `Write` names the agent

@@ -1,109 +1,47 @@
 # Ungate — my fork based on 1.7.14
 
-Use connected Claude, ChatGPT/Codex and MiniMax accounts in Cursor's native chat through a local proxy and a public tunnel. This is my fork of [orchidfiles/ungate](https://github.com/orchidfiles/ungate), not an official Marketplace release.
+Use Claude and ChatGPT/Codex subscriptions or a MiniMax API key in Cursor's native chat through a local proxy and a public tunnel. This is my fork of [orchidfiles/ungate](https://github.com/orchidfiles/ungate), not an official Marketplace release. Provider access and limits depend on the connected account or plan; this does not turn a subscription into unrestricted API access.
 
 ## Why this fork
 
 The original extension worked unreliably in my setup, and its routing, process lifecycle and interaction with Cursor were difficult to understand and troubleshoot. I audited and refactored the project, fixed the failures I encountered, and added the behavior, diagnostics and safeguards I considered missing.
 
-The main changes in this fork are:
+## Features
 
 - Reworked API and tunnel lifecycle management so local and Remote SSH windows share state safely without unexpectedly stopping active services.
 - Corrected provider routing and request/stream conversion for Claude, ChatGPT/Codex and MiniMax, including tool calls and reasoning variants.
 - Simplified and hardened the Cursor integration by removing unsupported key/database manipulation and making model configuration explicit.
 - Redesigned the dashboard around connection management, subscription usage and actionable logs; removed request tracking, price estimates and speculative analytics.
-- Hardened credentials, local storage, artifact downloads and native dependency packaging, including verified cross-platform `better-sqlite3` prebuilds.
-- Modernized the dependencies, build and packaging pipeline, and added broader unit, integration, process and browser regression coverage.
+- Hardened credentials, local storage and verified cross-platform dependency packaging.
+- Modernized dependencies and added unit, integration, process and browser regression coverage.
 
 The dashboard contains **Connection**, **Usage** and **Logs**. Analytics, request history, hypothetical savings and model-price calculations have been removed.
+
+## Requirements
+
+- Cursor desktop; install Ungate locally even for Remote SSH.
+- Standalone x64/arm64 Node.js with Node-API 10 (Node 22.14+); **Node.js 24 LTS recommended**. Ungate discovers Node but does not install it.
+- A connected Claude or ChatGPT/Codex account, or a MiniMax API key, and a public tunnel: Cursor's backend cannot reach localhost.
+
+See [runtime setup and troubleshooting](docs/runtime-and-operations.md) for supported platforms, Node selection and Remote SSH caveats.
 
 ## Install
 
 1. Stop shared API and tunnel in the previous build. Back up `~/.ungate` with services stopped: the upgrade migration removes the old request-history table. Account credentials, application settings and model mappings are preserved.
-2. Install the supplied VSIX locally through **Extensions → Install from VSIX**, then reload the window. Node.js is required for the API; the existing verified native installer selects a supported host runtime.
+2. Install the supplied VSIX locally through **Extensions → Install from VSIX**, then reload the window. Install a supported standalone Node.js runtime yourself if needed; startup validates it and selects a bundled SQLite prebuild.
 3. Open **Ungate → Connection**, connect a provider and start the tunnel.
 4. Copy the tunnel URL including `/v1` into **Cursor Settings → Models → Override OpenAI Base URL**. Enable the override and paste the saved Ungate API key into Cursor's OpenAI API Key field.
 5. Choose a custom model ID configured under **Providers & models**. **Open Cursor Models** navigates to Cursor settings; it does not change the route or key automatically.
 
-The model API key is mandatory. It authenticates model requests and is separate from provider credentials and the local administration capability.
+## Security and limitations
 
-Provider credentials are stored as plaintext in the local SQLite database under `~/.ungate`, protected with owner-only filesystem permissions. This protects against other OS users, not compromise of the same local user account, malware running as that user, or privileged access.
+The model API key is mandatory and separate from provider credentials and the local administration token. Keep it private: the tunnel exposes model endpoints publicly. Provider credentials are plaintext in `~/.ungate`, protected by owner-only filesystem permissions—not against same-user malware or privileged access.
 
-## Node.js startup on Windows, macOS and Linux
-
-The API needs a standalone x64/arm64 Node.js with Node-API 10 (Node 22.14+); **Node.js 24 LTS is recommended**. The Node embedded in desktop Cursor's Electron executable is not used as a separate server runtime.
-
-If Node is missing, install Node.js 24 LTS from https://nodejs.org/en/download, completely quit Cursor and reopen it. A window reload alone may keep the old application environment. If Node is installed but not detected, use **Choose Node.js** in the error banner or **Ungate: Choose Node.js Executable**. Select `node.exe` on Windows (often `C:\Program Files\nodejs\node.exe`) or `node` on Linux/macOS. The executable is validated before its canonical path is saved in the local machine setting `ungate.nodePath`. Cancellation or validation failure preserves the old setting.
-
-Selection order is the explicit local `ungate.nodePath`, then `UNGATE_NODE_BIN`, then automatic discovery. Workspace settings cannot override the executable. Discovery checks PATH entries, standard OS installations, nvm/nvm-windows, fnm, Volta and Unix asdf installations without launching a shell. An invalid explicit override produces an error instead of silently choosing another runtime. The SQLite prebuild is load-tested before the API starts.
-
-Useful diagnostics in PowerShell:
-
-```powershell
-where.exe node
-node -p "JSON.stringify({version:process.version,napi:process.versions.napi,exe:process.execPath})"
-```
-
-On macOS/Linux:
-
-```sh
-command -v node
-node -p 'JSON.stringify({version:process.version,napi:process.versions.napi,exe:process.execPath})'
-```
-
-Startup logs use `[runtime]` for Node discovery, `[sqlite]` for the native SQLite module and `[process]` for the server lifecycle. User-facing errors omit these component tags. API and tunnel log panes use paired editor background/foreground colors in dark, light and high-contrast themes.
-
-The whole dashboard follows Cursor/VS Code theme tokens, including provider authentication, Usage, model tables, form controls, tooltips and confirmation dialogs. There is no separate Skeleton/Wintry color palette. Switching the editor theme updates the panel immediately; the editor theme also controls native form controls independently of the OS color preference.
-
-Set **Ungate › Logs: Max Entries** (`ungate.logs.maxEntries`) in Cursor's user settings to control the recent entries displayed per source. Default: **500**; range: **100–5000**. It applies to all local and SSH dashboard windows without restarting the API or tunnel. This is a display limit, not a change to bounded shared-journal file retention.
-
-```json
-{
-  "ungate.logs.maxEntries": 1000
-}
-```
-
-Controls, menus and tooltips are checked at 320, 420 and 580 CSS pixels. Tooltips support keyboard focus and Escape and stay within the viewport. Windows forced-colors is checked separately from the editor's high-contrast themes.
-
-Both log panels resize independently with the drag handle or keyboard (Up/Down, Shift for a larger step, Home/End for bounds). Their heights survive page changes and webview content reloads; **Reset height** restores the default. Opening Logs or revealing the retained dashboard starts both panels at the latest entry. Scrolling up pauses following and shows the count of new entries; clicking that count returns to the tail. **Clear** starts a fresh following session, including when the next update is a history snapshot. Increasing the display limit loads older history without counting it as new messages; new live entries still increase the counter.
-
-
-## Cursor models and SSH
-
-To use built-in Cursor models, open **Cursor Models**, disable Cursor's Base URL override and select the built-in model. The misleading **Use Cursor Models**, **Use Ungate Models** and **Toggle OpenAI Key Fix** commands have been removed, together with the background SQLite reader and toggle loop. Automatic Base URL assignment and independent simultaneous routes are not implemented; no supported public setter/request-routing hook has been confirmed.
-
-Install Ungate on the desktop client for Remote SSH. It runs in the local UI extension host, and local and SSH windows for the same local account share API and tunnel state. There is no requirement to keep another local project window open just to run the proxy. A live Remote SSH acceptance test is still required on the installed Cursor version.
-
-Closing or reloading a window leaves shared services running and preserves the tunnel URL. **Restart Tunnel** creates a new connector; copy its newly reported URL into Cursor if it changes. **Restart Shared API** replaces the API from the requesting window and preserves a same-port tunnel. A mismatched API produces an **Update shared API** banner, not an unsupported Usage request. No automatic restart interrupts active chats. Use **Ungate: Stop Shared API and Tunnel** to stop them explicitly. Unknown legacy processes are not killed by name.
-
-Cursor controls requests that do not reach Ungate. A green status is not evidence of a particular request's route or a guarantee of zero Cursor billing. Cloudflare documents that Quick Tunnels do not support SSE and have no uptime guarantee; native-chat streaming still depends on the tunnel service.
-
-## Dashboard actions
-
-**Models** and **Reload window** are in the header and editor toolbar. The **More actions** menu contains API restart, tunnel restart, tunnel-only stop, and **Stop API and tunnel · all windows**. Destructive shared actions explain their scope before execution. Advanced server settings and provider details are collapsed by default; the UI uses VS Code theme tokens.
-
-A stopped shared service stays stopped across window reloads until explicitly started. Account Usage errors do not disable Connection, Logs or recovery actions. Matching release and protocol identities are required for management requests; older windows cannot use a newer API or downgrade it through the new lifecycle controller. Reload old extension windows after installing an update.
-
-## Subscription Usage
-
-The panel reuses connected credentials. It does not ask for another login or API key.
-
-Usage refresh is manual by default. Enable **Automatically refresh** for background updates, including when the dashboard is closed. The application-wide interval defaults to **60 seconds**, accepts whole seconds from **15–3600**, and saves on blur or Enter; Escape restores the saved value. With automatic refresh enabled, each connected provider offers an independent **Show in status bar** checkbox (all off by default). Turning automatic refresh off hides these items without forgetting the selections.
-
-Each provider item shows its most restrictive reported basic window, using the actual duration and conservatively rounded percentage **left**; additional pools remain in Usage and the tooltip. Stale figures are explicitly marked. A reset date describes a usage window, not subscription expiry. Disconnected accounts are omitted. One extension-host snapshot feeds both views; only the existing runtime leader polls providers, while other windows read the API's memory cache. Manual refresh shares server-side single-flight and rate limiting. No usage history is persisted.
-
-| Provider | Source | Limits |
-| --- | --- | --- |
-| ChatGPT / Codex | Existing OAuth token and account ID, first-party Codex usage endpoint | Internal backend interface; availability is account-dependent. Window duration and reset time come from the response. |
-| Claude | Existing OAuth token, OAuth usage endpoint | Internal interface and scope-dependent access. Recognized five-hour and weekly windows are displayed separately. |
-| MiniMax Global | Official M Plan remains endpoint, existing key | Only explicitly reported percentages are displayed. Undocumented time/count fields are not converted into invented limits. |
-| MiniMax China or custom URL | No cross-region credential forwarding | Usage is marked unsupported until the corresponding contract is verified. |
-
-A failed or missing response is not displayed as zero. The panel shows last update time, refresh failures and stale data explicitly. Live provider credentials were unavailable during development; successful access for an individual account is confirmed only by that account's response.
+Closing a window leaves shared services running; use **Ungate: Stop Shared API and Tunnel** to stop them. A green status does not prove a request's route or guarantee zero Cursor billing. Quick Tunnels have no uptime guarantee; streaming depends on the tunnel service. See [operations and security boundaries](docs/runtime-and-operations.md).
 
 ## Develop and package
 
-Use Node 24 (`.nvmrc`) and the pnpm version pinned in `package.json`. Production API runtime support is separate from the development toolchain.
+Use Node 24 (`.nvmrc`) and the pnpm version pinned in `package.json`:
 
 ```sh
 nvm install
@@ -113,23 +51,16 @@ corepack pnpm browser:install
 corepack pnpm package
 ```
 
-If Linux browser dependencies are missing, install them explicitly with `corepack pnpm --filter @ungate/scripts exec playwright install --with-deps chromium`. Browser installation is a development requirement; VSIX users do not need Playwright.
+The verified VSIX is written to `apps/extension/out/ungate-1.7.14.vsix`. Builds do not install or publish automatically. Task equivalents are `task setup`, `task check` and `task package`; see [development and packaging](docs/development.md) for prerequisites, faster iteration and acceptance limits.
 
-With [Task](https://taskfile.dev/docs/installation) installed:
+## Documentation
 
-```sh
-task setup
-task check
-task package
-```
-
-`Taskfile.yml` delegates to the same package scripts. Ordered operations run sequentially. The normal `package` command builds, checks types, lints, runs API/extension tests, exercises HTTP and real-process coordination, runs the built dashboard in Chromium, stages a clean extension, verifies actual VSIX entries and hashes, and smoke-tests the bundled API before publishing the artifact to `apps/extension/out/ungate-1.7.14.vsix`.
-
-`corepack pnpm package:vsix` is a faster build-and-package command for iteration; it does not replace the complete `package` checks. `task install` explicitly runs checks and installs the verified package using Cursor CLI. Builds do not install or publish automatically.
-
-An existing compatible browser can be selected with `UNGATE_CHROMIUM_EXECUTABLE_PATH`; `UNGATE_CHROMIUM_ARGS` accepts a JSON array for constrained test environments. The default uses Playwright's Chromium. No browser binary is shipped in VSIX.
-
-The Node packaging pipeline replaces platform-specific shell copies. The legacy `scripts/build-package/run.sh` delegates to the same pipeline. Windows and macOS execution still require acceptance testing; Linux validation is recorded in the report.
+- [Runtime and operations](docs/runtime-and-operations.md): Node troubleshooting, credentials, shared services, SSH and dashboard controls.
+- [Subscription Usage](docs/subscription-usage.md): refresh, status-bar widgets and provider limitations.
+- [Provider protocols](docs/provider-protocols.md): routing, endpoint and tool compatibility boundaries.
+- [Caching and accounting](docs/claude-caching.md): policies, reported counters and verification limits.
+- [Cursor compatibility evidence](docs/cursor-compatibility.md): build-specific observations and historical checks.
+- [Development and packaging](docs/development.md): test pipeline and VSIX verification.
 
 ## Credits
 
