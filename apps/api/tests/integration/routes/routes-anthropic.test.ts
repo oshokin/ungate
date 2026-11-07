@@ -32,6 +32,7 @@ describe('routes-anthropic', () => {
 		const response = await app.inject({ method: 'POST', url, headers: { 'x-api-key': 'secret' }, payload: { model: 'm', max_tokens: 10, messages: [{ role: 'user', content: 'hi' }] } });
 		expect(response.statusCode).toBe(200);
 		expect(minimaxRequestMock.mock.calls[0][2]).toBe('MiniMax-M2.7');
+		expect(minimaxRequestMock.mock.calls[0][1]).not.toHaveProperty('cache_control');
 		expect(proxyRequestMock).not.toHaveBeenCalled();
 		await app.close();
 	});

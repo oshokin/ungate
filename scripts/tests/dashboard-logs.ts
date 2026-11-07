@@ -49,6 +49,14 @@ export async function verifyLogPanels(page: Page, emit: (message: unknown) => Pr
 		await section.locator('.ug-log-message').getByText(`${source} resize 79`, { exact: true }).waitFor();
 		await tail(section, `${label} initial snapshot`);
 		await handle.evaluate((element) => element.scrollIntoView({ block: 'center' }));
+		// Raw mouse coordinates skip Playwright's hit-target checks. Wait for layout
+		// to settle and transient notifications to stop covering the handle first.
+		await handle.hover();
+		// Hover can dismiss a transient overlay and change scroll anchoring. Sample
+		// coordinates only after the resulting frame has been laid out.
+		await page.evaluate(
+			() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+		);
 		const bounds = await handle.boundingBox();
 		assert.ok(bounds);
 		await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);

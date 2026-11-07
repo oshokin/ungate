@@ -1,3 +1,5 @@
+import type { CacheControl } from './anthropic';
+
 export interface OpenAIMessage {
 	role: 'system' | 'user' | 'assistant' | 'tool' | 'developer' | 'function';
 	content: string | OpenAIContentPart[] | null;
@@ -49,6 +51,7 @@ export interface OpenAIChatRequest {
 	frequency_penalty?: number;
 	user?: string;
 	prompt_cache_key?: string;
+	cache_control?: CacheControl;
 	service_tier?: 'default' | 'priority';
 	tools?: OpenAITool[];
 	tool_choice?: 'none' | 'auto' | 'required' | { type: 'function'; function: { name: string } };

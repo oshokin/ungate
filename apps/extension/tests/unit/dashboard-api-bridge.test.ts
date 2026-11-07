@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { DashboardApiBridge } from '../../src/dashboard-api-bridge';
 
+vi.mock('vscode', () => ({ workspace: { getConfiguration: () => ({ inspect: () => undefined }) } }));
+
 vi.mock('@ungate/shared', async (original) => {
 	const shared = await original<typeof import('@ungate/shared')>();
 
@@ -13,6 +15,46 @@ afterEach(() => {
 });
 
 describe('dashboard HTTP bridge', () => {
+	it('publishes an installed build change and recovery without recreating the bridge', async () => {
+		let installedDigest = 'a'.repeat(64);
+		const fetcher = vi.fn().mockImplementation((url: string) =>
+			Promise.resolve(
+				Response.json(
+					url.endsWith('/health')
+						? {
+								service: 'ungate',
+								pid: 123,
+								version: UNGATE_VERSION,
+								protocolVersion: API_PROTOCOL_VERSION,
+								artifactDigest: 'a'.repeat(64)
+							}
+						: { providers: [] }
+				)
+			)
+		);
+		vi.stubGlobal('fetch', fetcher);
+		const send = vi.fn();
+		const publish = vi.fn();
+		const bridge = new DashboardApiBridge(
+			() => DEFAULT_API_PORT,
+			send,
+			installedDigest,
+			undefined,
+			publish,
+			() => installedDigest
+		);
+		const request = { type: 'api-request', id: 'usage', method: 'GET', path: '/usage' };
+		await bridge.handle(request);
+		expect(publish).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'ready' }));
+		installedDigest = 'b'.repeat(64);
+		await bridge.handle(request);
+		expect(publish).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'incompatible', restartRequired: true }));
+		expect(send).toHaveBeenLastCalledWith(expect.objectContaining({ status: 503 }));
+		installedDigest = 'a'.repeat(64);
+		await bridge.handle(request);
+		expect(publish).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'ready' }));
+	});
+
 	it('uses IPv4 loopback and adds capability only in the extension host', async () => {
 		const fetcher = vi
 			.fn()
@@ -69,6 +111,37 @@ describe('dashboard HTTP bridge', () => {
 		await bridge.handle({ type: 'api-request', id: 'bad-sync', method: 'GET', path: '/models/discover' });
 		expect(fetcher).toHaveBeenCalledTimes(calls);
 	});
+	it('still reads the saved API key when only the build digest differs', async () => {
+		const expectedDigest = 'a'.repeat(64);
+		const fetcher = vi.fn().mockImplementation((url: string) => {
+			const pathname = new URL(url).pathname;
+
+			return Promise.resolve(
+				Response.json(
+					pathname === '/health'
+						? { status: 'ok', service: 'ungate' }
+						: pathname === '/admin/health'
+							? {
+									service: 'ungate',
+									pid: 123,
+									version: UNGATE_VERSION,
+									protocolVersion: API_PROTOCOL_VERSION,
+									artifactDigest: 'b'.repeat(64)
+								}
+							: { apiKey: 'still-saved' }
+				)
+			);
+		});
+		vi.stubGlobal('fetch', fetcher);
+		const send = vi.fn();
+		const bridge = new DashboardApiBridge(() => DEFAULT_API_PORT, send, expectedDigest);
+		await bridge.handle({ type: 'api-request', id: 'key', method: 'GET', path: '/settings' });
+		expect(send).toHaveBeenCalledWith({ type: 'api-response', id: 'key', status: 200, body: { apiKey: 'still-saved' } });
+		await bridge.handle({ type: 'api-request', id: 'write', method: 'POST', path: '/settings', body: { apiKey: 'next' } });
+		expect(send).toHaveBeenCalledWith(
+			expect.objectContaining({ id: 'write', status: 503, error: expect.stringContaining('different Ungate API build') })
+		);
+	});
 	it('blocks management forwarding when the running API digest differs', async () => {
 		const expectedDigest = 'a'.repeat(64);
 		const fetcher = vi.fn().mockImplementation((url: string) => {
@@ -96,9 +169,9 @@ describe('dashboard HTTP bridge', () => {
 			type: 'api-request',
 			id: 'digest',
 			method: 'GET',
-			path: '/settings'
+			path: '/usage'
 		});
-		expect(fetcher).not.toHaveBeenCalledWith(expect.stringContaining('/settings'), expect.anything());
+		expect(fetcher).not.toHaveBeenCalledWith(expect.stringContaining('/usage'), expect.anything());
 		expect(send).toHaveBeenCalledWith(
 			expect.objectContaining({ status: 503, error: expect.stringContaining('different Ungate API build') })
 		);

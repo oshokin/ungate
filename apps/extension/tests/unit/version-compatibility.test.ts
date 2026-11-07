@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DashboardApiBridge } from '../../src/dashboard-api-bridge';
 import { readApiHealth } from '../../src/local-api';
 
+vi.mock('vscode', () => ({ workspace: { getConfiguration: () => ({ inspect: () => undefined }) } }));
+
 vi.mock('@ungate/shared', async (original) => {
 	const actual = await original<typeof import('@ungate/shared')>();
 

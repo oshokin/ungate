@@ -7,9 +7,35 @@ const LOGGED_TOOL_ARGUMENT_CHARS = 200;
 import { ToolTranslator } from '../tools/translator';
 
 import type { ContentBlock, AnthropicResponse } from '../types';
-import type { OpenAIChatResponse, OpenAIStreamChunkToolCall, OpenAIStreamChunk, OpenAIToolCall } from '../types/openai';
+import type {
+	ChatCompletionUsage,
+	OpenAIChatResponse,
+	OpenAIStreamChunkToolCall,
+	OpenAIStreamChunk,
+	OpenAIToolCall
+} from '../types/openai';
 
 export class AnthropicToOpenai {
+	static convertUsage(usage?: {
+		input_tokens?: number;
+		output_tokens?: number;
+		cache_creation_input_tokens?: number;
+		cache_read_input_tokens?: number;
+	}): ChatCompletionUsage {
+		const promptTokens =
+			(usage?.input_tokens ?? 0) + (usage?.cache_creation_input_tokens ?? 0) + (usage?.cache_read_input_tokens ?? 0);
+		const completionTokens = usage?.output_tokens ?? 0;
+
+		return {
+			prompt_tokens: promptTokens,
+			completion_tokens: completionTokens,
+			total_tokens: promptTokens + completionTokens,
+			...(usage?.cache_read_input_tokens !== undefined
+				? { prompt_tokens_details: { cached_tokens: usage.cache_read_input_tokens } }
+				: {})
+		};
+	}
+
 	static convert(
 		anthropicResponse: AnthropicResponse,
 		model: string,
@@ -62,11 +88,7 @@ export class AnthropicToOpenai {
 			created: Math.floor(Date.now() / MILLISECONDS_PER_SECOND),
 			model,
 			choices: [{ index: 0, message, finish_reason: finishReason }],
-			usage: {
-				prompt_tokens: anthropicResponse.usage?.input_tokens ?? 0,
-				completion_tokens: anthropicResponse.usage?.output_tokens ?? 0,
-				total_tokens: (anthropicResponse.usage?.input_tokens ?? 0) + (anthropicResponse.usage?.output_tokens ?? 0)
-			}
+			usage: this.convertUsage(anthropicResponse.usage)
 		};
 
 		return result;
@@ -89,7 +111,7 @@ export class AnthropicToOpenai {
 		model: string,
 		content?: string,
 		finishReason?: 'stop' | 'length' | 'tool_calls' | null,
-		usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number } | null
+		usage?: ChatCompletionUsage | null
 	): string {
 		const chunk: {
 			id: string;
@@ -97,7 +119,7 @@ export class AnthropicToOpenai {
 			created: number;
 			model: string;
 			choices: { index: number; delta: { content?: string }; finish_reason: string | null }[];
-			usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number } | null;
+			usage?: ChatCompletionUsage | null;
 		} = {
 			id: `chatcmpl-${id}`,
 			object: 'chat.completion.chunk',

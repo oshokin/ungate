@@ -112,6 +112,7 @@ try {
 	if (screenshotDirectory) mkdirSync(screenshotDirectory, { recursive: true });
 	const errors: string[] = [];
 	const browserFetches: string[] = [];
+	const usagePreferences = { autoRefresh: false, intervalSeconds: 60, widgets: { claude: false, openai: false, minimax: false } };
 	page.on('pageerror', (error) => {
 		errors.push(error.message);
 		console.error(`Dashboard script error: ${error.message}`);
@@ -138,8 +139,37 @@ try {
 		artifactDigest: null
 	});
 	const emit = (message: unknown) => page.evaluate((value) => window.postMessage(value, '*'), message);
+	const dashboardPreferences: Record<string, number> = {
+		'logs.maxEntries': 700,
+		'tunnel.connectTimeoutSeconds': 60,
+		'network.providerHeaderTimeoutSeconds': 40
+	};
+	const preferenceWrites: unknown[] = [];
 	await page.exposeBinding('ungateBridge', async (_source, raw: unknown) => {
+		const preference = raw as { type: string; key: string; value: number };
+		if (preference.type === 'get-dashboard-preferences' || preference.type === 'set-dashboard-preference') {
+			if (preference.type === 'set-dashboard-preference') {
+				preferenceWrites.push(raw);
+				dashboardPreferences[preference.key] = preference.value;
+				await emit({ type: 'dashboard-preference-result', key: preference.key, error: null });
+			}
+			await emit({ type: 'dashboard-preferences', values: dashboardPreferences });
+
+			return;
+		}
 		const message = raw as { type: string; id?: string; action?: string };
+		const operation = raw as { type: string; id: string; path?: string; method?: string; body?: Record<string, unknown> };
+		if (operation.type === 'api-request' && operation.path === '/usage/preferences') {
+			for (const [key, value] of Object.entries(operation.body ?? {})) {
+				if (key === 'autoRefresh') usagePreferences.autoRefresh = value === true;
+				if (key === 'intervalSeconds') usagePreferences.intervalSeconds = Number(value);
+				if (key.startsWith('widgets.'))
+					usagePreferences.widgets[key.slice(8) as 'claude' | 'openai' | 'minimax'] = value === true;
+			}
+			await emit({ type: 'api-response', id: operation.id, status: 200, body: usagePreferences });
+
+			return;
+		}
 		if (message.type === 'webview-ready') {
 			await emit({ type: 'service-state', state: readyState });
 			await emit({ type: 'tunnel-status', state: { status: 'running', url: 'https://example.trycloudflare.com', error: null } });
@@ -232,6 +262,31 @@ try {
 	});
 	await page.getByRole('button', { name: 'Models', exact: true }).click();
 	await page.getByLabel('More actions', { exact: true }).click();
+	await page.getByRole('button', { name: 'Extension settings', exact: true }).click();
+	assert.ok(actionRequests.includes('open-extension-settings'));
+	await page.getByText('Advanced editor preferences', { exact: true }).click();
+	assert.equal(await page.getByLabel('Provider header timeout (s)', { exact: true }).inputValue(), '40');
+	assert.equal(await page.getByLabel('Connect timeout (s)', { exact: true }).inputValue(), '60');
+	const timeoutInput = page.getByLabel('Provider header timeout (s)', { exact: true });
+	await timeoutInput.fill('4');
+	await timeoutInput.press('Enter');
+	await page.getByRole('alert').filter({ hasText: 'Enter 5–120.' }).waitFor();
+	assert.equal(preferenceWrites.length, 0);
+	await timeoutInput.fill('55');
+	assert.equal(preferenceWrites.length, 0, 'typing does not save');
+	await timeoutInput.press('Enter');
+	await page.getByRole('status').filter({ hasText: 'Saved' }).waitFor();
+	assert.equal(dashboardPreferences['network.providerHeaderTimeoutSeconds'], 55);
+	await emit({ type: 'dashboard-preferences', values: { ...dashboardPreferences, 'network.providerHeaderTimeoutSeconds': 65 } });
+	assert.equal(await timeoutInput.inputValue(), '65', 'configuration changes synchronize without API save');
+	const dismissNotification = page.getByRole('button', { name: 'Dismiss notification', exact: true });
+	let notices = await dismissNotification.count();
+	while (notices > 0) {
+		await dismissNotification.click();
+		notices = await dismissNotification.count();
+	}
+	await page.getByText('Advanced editor preferences', { exact: true }).click();
+	await page.getByLabel('More actions', { exact: true }).click();
 	await page.getByRole('button', { name: 'Stop API and tunnel · all windows', exact: true }).waitFor();
 	await page.keyboard.press('Escape');
 	assert.equal(await page.locator('details.ug-overflow').getAttribute('open'), null);
@@ -252,17 +307,88 @@ try {
 	assert.equal(await page.getByLabel('Tunnel protocol', { exact: true }).inputValue(), 'quic');
 	await page.getByRole('button', { name: 'Usage', exact: true }).click();
 	await page.getByRole('heading', { name: 'Subscription usage', exact: true }).waitFor();
-	await page.getByRole('heading', { name: 'ChatGPT / Codex', exact: true }).waitFor();
-	await page.getByText('Connect this provider in Settings.', { exact: true }).first().waitFor();
-	assert.equal(await page.getByText('Connect this provider in Settings.', { exact: true }).count(), 3);
+	await page.getByText('Connect a provider in Connection to see subscription usage.', { exact: true }).waitFor();
+	assert.equal(await page.getByRole('heading', { name: 'ChatGPT / Codex', exact: true }).count(), 0);
+	assert.equal(await page.getByLabel('Automatically refresh', { exact: true }).isChecked(), false);
+	await page
+		.getByText('Enable automatic refresh to use status bar widgets. Your widget selections are kept.', { exact: true })
+		.waitFor();
+	assert.equal(await page.getByLabel('Refresh interval in seconds', { exact: true }).count(), 0);
+	await page.getByLabel('Automatically refresh', { exact: true }).check();
+	const refreshInterval = page.getByLabel('Refresh interval in seconds', { exact: true });
+	await refreshInterval.waitFor();
+	assert.equal(await refreshInterval.inputValue(), '60');
+	await refreshInterval.fill('14');
+	await refreshInterval.press('Enter');
+	await page.getByText('Enter a whole number from 15 to 3600 seconds.', { exact: true }).waitFor();
+	await refreshInterval.press('Escape');
+	assert.equal(await refreshInterval.inputValue(), '60');
+	await refreshInterval.fill('30');
+	await refreshInterval.press('Enter');
+	await page.waitForFunction(
+		() => document.querySelector<HTMLInputElement>('[aria-label="Refresh interval in seconds"]')?.value === '30'
+	);
+	assert.equal(await refreshInterval.inputValue(), '30');
+	await page.getByLabel('Automatically refresh', { exact: true }).uncheck();
 	assert.equal(await page.locator('progress').count(), 0);
 	if (screenshotDirectory) await page.screenshot({ path: join(screenshotDirectory, 'usage.png'), fullPage: true });
 	await page.getByRole('button', { name: 'Refresh', exact: true }).click();
 	await page.getByRole('button', { name: 'Refresh', exact: true }).waitFor();
 	await page.getByRole('button', { name: 'Connection', exact: true }).click();
 	await page.getByRole('button', { name: 'Usage', exact: true }).click();
-	assert.equal(await page.getByText('Connect this provider in Settings.', { exact: true }).count(), 3);
+	assert.equal(await page.getByText('Connect a provider in Connection to see subscription usage.', { exact: true }).count(), 1);
 	assert.equal(await page.getByText('Reading subscription limits…', { exact: true }).count(), 0);
+	// Background snapshots must not shift cards, replace focused drafts, or tick timestamps.
+	const usageState = {
+		data: {
+			providers: [
+				{
+					provider: 'claude',
+					status: 'ok',
+					message: null,
+					checkedAt: '2026-11-07T10:00:00Z',
+					fetchedAt: '2026-11-07T10:00:00Z',
+					stale: false,
+					windows: [],
+					source: null,
+					contract: 'internal'
+				}
+			]
+		},
+		preferences: { autoRefresh: true, intervalSeconds: 30, widgets: { claude: false, openai: false, minimax: false } },
+		loading: false,
+		error: null,
+		nextUpdate: '2026-11-07T10:00:30Z'
+	};
+	await emit({ type: 'usage-state', state: usageState });
+	const usageCard = page.locator('article').filter({ has: page.getByRole('heading', { name: 'Claude', exact: true }) });
+	await usageCard.waitFor();
+	const lastData = usageCard.getByText(/^Last data:/);
+	const timestamp = await lastData.textContent();
+	const widget = usageCard.getByLabel('Show Claude limits in status bar');
+	const widgetBounds = await widget.boundingBox();
+	const timestampBounds = await lastData.boundingBox();
+	assert.ok(widgetBounds!.y > timestampBounds!.y);
+	await refreshInterval.fill('47');
+	const cardBounds = await usageCard.boundingBox();
+	for (const loading of [true, false, true, false]) {
+		await emit({
+			type: 'usage-state',
+			state: {
+				...usageState,
+				loading,
+				nextUpdate: loading ? null : usageState.nextUpdate,
+				data: { providers: [{ ...usageState.data.providers[0], checkedAt: '2026-11-07T10:00:01Z' }] }
+			}
+		});
+		assert.equal(await refreshInterval.inputValue(), '47');
+		assert.equal(await refreshInterval.evaluate((input) => input === document.activeElement), true);
+		assert.equal(await lastData.textContent(), timestamp);
+		assert.deepEqual(await usageCard.boundingBox(), cardBounds);
+		assert.equal(await page.getByText(/Next update:/).count(), 0);
+		assert.equal(await page.getByText('Reading subscription limits…', { exact: true }).count(), 0);
+	}
+	await refreshInterval.press('Escape');
 	// An older API gets a recovery action, never a dead-end 404 Usage screen.
 	await emit({
 		type: 'service-state',
@@ -358,6 +484,12 @@ try {
 		entryIds: ['api-initial']
 	});
 	await page.getByRole('button', { name: 'Logs', exact: true }).click();
+	await page.waitForFunction(() => document.querySelector<HTMLInputElement>('input[type="number"]')?.value === '700');
+	assert.equal(await page.getByLabel('Entries per source', { exact: true }).inputValue(), '700');
+	await page.getByLabel('Entries per source', { exact: true }).fill('900');
+	await page.getByLabel('Entries per source', { exact: true }).blur();
+	await page.getByRole('status').filter({ hasText: 'Saved' }).waitFor();
+	assert.equal(dashboardPreferences['logs.maxEntries'], 900);
 	const logPanel = page.getByRole('region', { name: 'API log entries', exact: true });
 	const logText = logPanel.locator('.ug-log-message');
 	await logText.getByText('Node.js was not found or is incompatible.', { exact: true }).waitFor();

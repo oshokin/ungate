@@ -2,9 +2,9 @@ import * as vscode from 'vscode';
 
 import { extensionCommands } from './extension-commands';
 
-import type { ApiStatus as ApiBarStatus, TunnelState } from '@ungate/shared/frontend';
+import type { ApiStatus as ApiBarStatus, ServiceState, TunnelState } from '@ungate/shared/frontend';
 
-export type UngateConnectionStatus = 'ready' | 'connecting' | 'offline';
+export type UngateConnectionStatus = 'ready' | 'connecting' | 'restart' | 'offline';
 
 /** Node's resolver names an IPv4 lookup "queryA". The tooltip shows what to do instead. */
 function readablePublicError(error: string | null | undefined): string {
@@ -16,29 +16,33 @@ function readablePublicError(error: string | null | undefined): string {
 }
 
 export class ExtensionStatusBar {
-	public static connectionStatus(apiState: ApiBarStatus, tunnel: TunnelState): UngateConnectionStatus {
-		if (apiState === 'running' && tunnel.status === 'running' && tunnel.publicStatus === 'reachable') {
-			return 'ready';
-		}
+	public static connectionStatus(
+		apiState: ApiBarStatus,
+		tunnel: TunnelState,
+		serviceStatus?: ServiceState['status']
+	): UngateConnectionStatus {
+		const transport =
+			apiState === 'running' && tunnel.status === 'running' && tunnel.publicStatus === 'reachable'
+				? 'ready'
+				: apiState === 'starting' ||
+					  tunnel.status === 'starting' ||
+					  tunnel.status === 'installing' ||
+					  (tunnel.status === 'running' &&
+							(tunnel.publicStatus === 'checking' || tunnel.publicStatus === 'unchecked' || !tunnel.publicStatus))
+					? 'connecting'
+					: 'offline';
+		// A reachable old build is not ready. The dashboard already asks for a restart.
+		if (transport === 'ready' && serviceStatus === 'incompatible') return 'restart';
 
-		if (
-			apiState === 'starting' ||
-			tunnel.status === 'starting' ||
-			tunnel.status === 'installing' ||
-			(tunnel.status === 'running' &&
-				(tunnel.publicStatus === 'checking' || tunnel.publicStatus === 'unchecked' || !tunnel.publicStatus))
-		) {
-			return 'connecting';
-		}
-
-		return 'offline';
+		return transport;
 	}
 
 	public static statusText(status: UngateConnectionStatus): string {
 		const labels: Record<UngateConnectionStatus, string> = {
 			ready: '$(check) Ungate: Ready',
 			connecting: '$(sync~spin) Ungate: Connecting',
-			offline: '$(warning) Ungate: Offline'
+			restart: '$(warning) Ungate: Not ready',
+			offline: '$(warning) Ungate: Not ready'
 		};
 
 		return labels[status];
@@ -48,13 +52,19 @@ export class ExtensionStatusBar {
 		const labels: Record<UngateConnectionStatus, string> = {
 			ready: 'Ungate ready. API and public tunnel are available.',
 			connecting: 'Ungate connecting. API or public tunnel is being checked.',
+			restart: 'Ungate shared API restart required. The running build does not match this window.',
 			offline: 'Ungate offline. API or public tunnel is unavailable.'
 		};
 
 		return labels[status];
 	}
 
-	public static formatApiTip(apiState: ApiBarStatus, apiUrl: string | null, apiError: string | null): string {
+	public static formatApiTip(
+		apiState: ApiBarStatus,
+		apiUrl: string | null,
+		apiError: string | null,
+		serviceMessage?: string | null
+	): string {
 		const statusLine: Record<ApiBarStatus, string> = {
 			starting: '$(sync~spin) API: starting',
 			running: '$(check) API: running',
@@ -63,8 +73,13 @@ export class ExtensionStatusBar {
 		};
 		const details = [statusLine[apiState]];
 
+		// The build note explains the API line. It stays with that line, not under the tunnel.
+		if (serviceMessage) details.push(serviceMessage);
 		if (apiUrl) details.push(`Local: \`${apiUrl}\``);
-		if (apiError) details.push(`Last error: ${apiError}`);
+		// Health-check failures can wrap the same service diagnosis with a process prefix.
+		if (apiError && !(serviceMessage && apiError.includes(serviceMessage))) {
+			details.push(`Last error: ${apiError}`);
+		}
 
 		return details.join('\n\n');
 	}
@@ -106,14 +121,15 @@ export class ExtensionStatusBar {
 		apiUrl: string | null,
 		apiError: string | null,
 		tunnel: TunnelState,
-		tunnelApiUrl: string | null
+		tunnelApiUrl: string | null,
+		serviceMessage?: string | null
 	): vscode.MarkdownString {
 		const tip = new vscode.MarkdownString('', true);
 		tip.isTrusted = true;
 
 		tip.appendMarkdown(`**${this.statusText(status).replace(/\$\([^)]+\)\s*/u, '')}**`);
 		tip.appendMarkdown('\n\n');
-		tip.appendMarkdown(this.formatApiTip(apiState, apiUrl, apiError));
+		tip.appendMarkdown(this.formatApiTip(apiState, apiUrl, apiError, serviceMessage));
 		tip.appendMarkdown('\n\n');
 		tip.appendMarkdown(this.formatTunnelTip(tunnel, tunnelApiUrl));
 

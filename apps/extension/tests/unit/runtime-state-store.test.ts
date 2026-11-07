@@ -41,8 +41,7 @@ function createState(apiStatus: RuntimeState['api']['status'], lastError: string
 			ownerWindowId: null
 		},
 		keyFix: { enabled: false },
-		clients: {},
-		commands: []
+		clients: {}
 	};
 }
 

@@ -1,10 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import { DEFAULT_API_PORT } from '@ungate/shared';
-
 import { Settings } from 'src/database/app-settings';
 import { ModelMappings } from 'src/database/model-mappings';
-import { getDb, schema } from 'src/database';
 
 describe('database-app-settings', () => {
 	it('creates defaults when row is missing', () => {

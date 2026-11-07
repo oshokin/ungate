@@ -56,6 +56,10 @@ function closeMenu(event: MouseEvent | KeyboardEvent): void {
 			<button
 				class="ug-menu-item"
 				disabled={!!store.busy}
+				onclick={() => performAction('open-extension-settings')}>Extension settings</button>
+			<button
+				class="ug-menu-item"
+				disabled={!!store.busy}
 				onclick={() => performAction('choose-node-runtime')}>Choose Node.js executable</button>
 			<button
 				class="ug-menu-item"

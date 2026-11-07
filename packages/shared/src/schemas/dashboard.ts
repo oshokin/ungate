@@ -4,6 +4,7 @@ const readPaths = [
 	'/health',
 	'/settings',
 	'/usage',
+	'/usage/preferences',
 	'/auth/claude/status',
 	'/auth/openai/start',
 	'/auth/openai/status',
@@ -12,6 +13,7 @@ const readPaths = [
 const writePaths = [
 	'/settings',
 	'/usage/refresh',
+	'/usage/preferences',
 	'/models/discover',
 	'/auth/claude/start',
 	'/auth/claude/complete',

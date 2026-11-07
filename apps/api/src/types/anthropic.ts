@@ -18,6 +18,11 @@ export interface AnthropicMessage {
 	content: string | ContentBlock[];
 }
 
+export interface CacheControl {
+	type: 'ephemeral';
+	ttl?: '5m' | '1h';
+}
+
 export interface ContentBlock {
 	type: 'text' | 'image' | 'tool_use' | 'tool_result';
 	text?: string;
@@ -27,7 +32,7 @@ export interface ContentBlock {
 	input?: unknown;
 	tool_use_id?: string;
 	content?: string | ContentBlock[];
-	cache_control?: { type: string; ttl?: number };
+	cache_control?: CacheControl;
 }
 
 export interface ImageSource {
@@ -64,12 +69,14 @@ export interface AnthropicRequest {
 	reasoning_budget?: number | string;
 	thinking?: ThinkingConfig;
 	output_config?: OutputConfig;
+	cache_control?: CacheControl;
 }
 
 export interface Tool {
 	name: string;
 	description: string;
 	input_schema: Record<string, unknown>;
+	cache_control?: CacheControl;
 }
 
 export interface ToolChoice {

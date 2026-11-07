@@ -17,7 +17,7 @@ const definitions = {
 } as const;
 
 /** How long a successful usage snapshot is reused before the provider is asked again. */
-const USAGE_CACHE_TTL_MS = 60_000;
+const USAGE_CACHE_TTL_MS = 15_000;
 /** Largest usage response body kept in memory. */
 const MAX_USAGE_BODY_BYTES = 256 * 1024;
 
@@ -25,6 +25,14 @@ interface CacheEntry {
 	identity: string;
 	expiresAt: number;
 	result: ProviderUsage;
+}
+
+function credentialIdentity(
+	credentials: { accessToken: string; accountId?: string | null; baseUrl?: string | null } | undefined
+): string {
+	return createHash('sha256')
+		.update(JSON.stringify([credentials?.accessToken, credentials?.accountId, credentials?.baseUrl]))
+		.digest('hex');
 }
 
 /** Account usage snapshots stay in memory. No prompts, request history or credentials are returned. */
@@ -42,17 +50,46 @@ export class SubscriptionUsageService {
 
 	private readProvider(provider: ModelMappingProvider, refresh: boolean): Promise<ProviderUsage> {
 		const credentials = ProviderSettings.get(provider);
-		const identity = createHash('sha256')
-			.update(`${credentials?.accessToken ?? ''}:${credentials?.accountId ?? ''}:${credentials?.baseUrl ?? ''}`)
-			.digest('hex');
+		const identity = credentialIdentity(credentials);
 		const previous = this.cache.get(provider);
-		if (previous?.identity === identity && !refresh && previous.expiresAt > Date.now()) return Promise.resolve(previous.result);
+		if (previous?.identity !== identity) this.cache.delete(provider);
+		// The extension owns age-based freshness using its configured refresh cadence.
+		// Here stale only records a failed provider refresh retaining earlier data.
+		if (previous?.identity === identity && (!refresh || previous.expiresAt > Date.now())) return Promise.resolve(previous.result);
+		if (!refresh)
+			return Promise.resolve({
+				provider,
+				status: credentials ? 'unavailable' : 'not_connected',
+				message: credentials ? 'Refresh to read subscription usage.' : 'Connect this provider in Connection.',
+				checkedAt: new Date().toISOString(),
+				fetchedAt: null,
+				stale: false,
+				windows: [],
+				source: definitions[provider].url,
+				contract: definitions[provider].contract
+			});
 		const key = `${provider}:${identity}`;
 		const active = this.flights.get(key);
 		if (active) return active;
-		const flight = this.fetchProvider(provider, credentials, previous?.identity === identity ? previous.result : undefined)
+		let requestIdentity = identity;
+		const flight = this.fetchProvider(
+			provider,
+			credentials,
+			previous?.identity === identity ? previous.result : undefined,
+			(token) => {
+				requestIdentity = credentialIdentity({ ...credentials, ...token });
+			}
+		)
 			.then((result) => {
-				this.cache.set(provider, { identity, result, expiresAt: Date.now() + USAGE_CACHE_TTL_MS });
+				const current = ProviderSettings.get(provider);
+				const currentIdentity = credentialIdentity(current);
+				if (currentIdentity === requestIdentity)
+					this.cache.set(provider, {
+						identity: requestIdentity,
+						result,
+						expiresAt: Date.now() + Math.max(USAGE_CACHE_TTL_MS, (result.retryAfterSeconds ?? 0) * 1000)
+					});
+				else return this.readProvider(provider, false);
 
 				return result;
 			})
@@ -67,7 +104,8 @@ export class SubscriptionUsageService {
 	private async fetchProvider(
 		provider: ModelMappingProvider,
 		credentials: ReturnType<typeof ProviderSettings.get>,
-		previous?: ProviderUsage
+		previous?: ProviderUsage,
+		bindToken?: (token: { accessToken: string; accountId?: string | null }) => void
 	): Promise<ProviderUsage> {
 		const definition = definitions[provider];
 		const result: ProviderUsage = {
@@ -106,6 +144,8 @@ export class SubscriptionUsageService {
 					status: 'unavailable',
 					message: 'The existing provider session could not supply a valid token. Check its connection in Settings.'
 				};
+			bindToken?.(token);
+			const accountId = 'accountId' in token ? token.accountId : credentials.accountId;
 			const response = await fetch(definition.url, {
 				method: 'GET',
 				redirect: 'error',
@@ -114,16 +154,19 @@ export class SubscriptionUsageService {
 					Authorization: `Bearer ${token.accessToken}`,
 					Accept: 'application/json',
 					...(provider === 'claude' ? { 'anthropic-beta': 'oauth-2025-04-20' } : {}),
-					...(provider === 'openai' && credentials.accountId ? { 'ChatGPT-Account-ID': credentials.accountId } : {})
+					...(provider === 'openai' && accountId ? { 'ChatGPT-Account-ID': accountId } : {})
 				}
 			});
 			if (!response.ok) {
 				await response.body?.cancel();
 				const unsupported = [401, 403, 404].includes(response.status);
+				const retry = response.headers.get('retry-after');
+				const delay = retry ? (Number.isFinite(Number(retry)) ? Number(retry) : (Date.parse(retry) - Date.now()) / 1000) : 0;
 
 				return {
 					...result,
 					status: unsupported ? 'unsupported' : 'error',
+					...(Number.isFinite(delay) && delay > 0 ? { retryAfterSeconds: Math.ceil(delay) } : {}),
 					message: `Provider usage returned HTTP ${response.status}. ${unsupported ? 'This endpoint is unavailable with the existing credentials.' : 'Refresh later.'}`,
 					...(previous?.fetchedAt ? { windows: previous.windows, fetchedAt: previous.fetchedAt, stale: true } : {})
 				};

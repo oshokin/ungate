@@ -17,6 +17,13 @@ function number(value: unknown): number | null {
 }
 function reset(value: unknown, seconds = false): string | null {
 	if (typeof value !== 'string' && typeof value !== 'number') return null;
+	// Date.parse accepts surprising inputs such as "123" and normalizes invalid days.
+	if (typeof value === 'string') {
+		const match = /^(\d{4}-\d{2}-\d{2})T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.exec(value);
+		if (!match) return null;
+		const day = Date.parse(`${match[1]}T00:00:00Z`);
+		if (!Number.isFinite(day) || new Date(day).toISOString().slice(0, 10) !== match[1]) return null;
+	}
 	const at = typeof value === 'number' ? (seconds ? secondsToMilliseconds(value) : value) : Date.parse(value);
 
 	return Number.isFinite(at) && at > 0 && at <= MAX_TIME_VALUE_MS ? new Date(at).toISOString() : null;
@@ -41,7 +48,8 @@ export function parseClaudeUsage(payload: unknown): UsageWindow[] {
 			label,
 			usedPercent: used,
 			remainingPercent: Math.max(0, 100 - used),
-			resetsAt: reset(raw.resets_at),
+			// Contemporary epoch seconds have at most ten digits; milliseconds have thirteen.
+			resetsAt: reset(raw.resets_at, typeof raw.resets_at === 'number' && raw.resets_at < 1e11),
 			windowSeconds: id === 'five_hour' ? FIVE_HOUR_WINDOW_SECONDS : SEVEN_DAY_WINDOW_SECONDS
 		});
 	}

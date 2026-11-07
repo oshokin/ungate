@@ -16,6 +16,33 @@ function parseSseChunk(raw: string): Record<string, unknown> {
 }
 
 describe('anthropic-to-openai', () => {
+	it.each([
+		{ cache: { cache_creation_input_tokens: 20, cache_read_input_tokens: 70 }, prompt: 100, details: { cached_tokens: 70 } },
+		{ cache: { cache_creation_input_tokens: 20 }, prompt: 30, details: undefined },
+		{ cache: { cache_read_input_tokens: 0 }, prompt: 10, details: { cached_tokens: 0 } },
+		{ cache: {}, prompt: 10, details: undefined }
+	])('converts nonstream cache usage without inventing reads: $cache', ({ cache, prompt, details }) => {
+		const converted = AnthropicToOpenai.convert(
+			{
+				id: 'cache',
+				type: 'message',
+				role: 'assistant',
+				model: 'claude',
+				content: [{ type: 'text', text: 'hello' }],
+				stop_reason: 'end_turn',
+				stop_sequence: null,
+				usage: { input_tokens: 10, output_tokens: 5, ...cache }
+			},
+			'claude'
+		);
+		expect(converted.usage).toEqual({
+			prompt_tokens: prompt,
+			completion_tokens: 5,
+			total_tokens: prompt + 5,
+			...(details === undefined ? {} : { prompt_tokens_details: details })
+		});
+	});
+
 	it('converts response payload and usage', () => {
 		const converted = AnthropicToOpenai.convert(
 			{
@@ -104,9 +131,11 @@ describe('anthropic-to-openai', () => {
 				type: 'message',
 				role: 'assistant',
 				model: 'claude-sonnet-4-6',
+				// @ts-expect-error Exercise an unrecognized upstream stop reason.
 				stop_reason: 'custom_reason',
 				stop_sequence: null,
 				content: [],
+				// @ts-expect-error Exercise an upstream response missing required usage.
 				usage: undefined
 			},
 			'gpt-5.4'

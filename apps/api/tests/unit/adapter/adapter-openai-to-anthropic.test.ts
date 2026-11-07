@@ -16,8 +16,8 @@ function findBlock(request: AnthropicRequest, role: 'user' | 'assistant', type: 
 function conversionLog(): string {
 	return (
 		vi
-			.mocked(logger.log)
-			.mock.calls.map((call) => String(call[0]))
+			.mocked(logger)
+			.log.mock.calls.map((call) => String(call[0]))
 			.find((line) => line.includes('[OpenAI→Anthropic]')) ?? ''
 	);
 }
@@ -98,10 +98,41 @@ describe('openai-to-anthropic', () => {
 		expect(result.messages[2].role).toBe('user');
 	});
 
+	it('converts Cursor chat tools and tool_choice without failing on a non-function entry', () => {
+		const result = openaiToAnthropic({
+			model: 'claude-opus-4-6',
+			messages: [{ role: 'user', content: 'edit' }],
+			tools: [
+				{ type: 'function', function: { name: 'Shell', description: 'Run', parameters: { type: 'object' } } },
+				{ type: 'namespace', name: 'ignored' },
+				{
+					type: 'function',
+					function: { name: 'ApplyPatch', parameters: { type: 'object', properties: { patch: { type: 'string' } } } }
+				}
+			],
+			tool_choice: { type: 'function', function: { name: 'ApplyPatch' } }
+		} as unknown as OpenAIChatRequest);
+
+		expect(result.tools?.map((tool) => tool.name)).toEqual(['Shell', 'ApplyPatch']);
+		expect(result.tool_choice).toEqual({ type: 'tool', name: 'ApplyPatch' });
+		expect(openaiToAnthropic({ model: 'claude-opus-4-6', messages: [{ role: 'user', content: 'x' }], tool_choice: 'required' }).tool_choice).toEqual({
+			type: 'any'
+		});
+		const withoutTools = openaiToAnthropic({
+			model: 'claude-opus-4-6',
+			messages: [{ role: 'user', content: 'x' }],
+			tools: [{ type: 'function', function: { name: 'Shell' } }],
+			tool_choice: 'none'
+		});
+		expect(withoutTools.tool_choice).toBeUndefined();
+		expect(withoutTools.tools).toBeUndefined();
+	});
+
 	it('keeps anthropic tool blocks and handles invalid tool json', () => {
 		const result = openaiToAnthropic({
 			model: 'claude-opus-4-6',
 			messages: [
+				// @ts-expect-error Exercise Anthropic blocks passed through a nominally OpenAI request.
 				{ role: 'assistant', content: [{ type: 'tool_use', id: 'x', name: 'Read', input: { path: 'a' } }] },
 				{
 					role: 'assistant',
@@ -119,7 +150,7 @@ describe('openai-to-anthropic', () => {
 
 		const assistantMessages = result.messages.filter((message) => message.role === 'assistant');
 		const allBlocks = assistantMessages.flatMap((message) => (Array.isArray(message.content) ? message.content : []));
-		const toolUse = allBlocks.find((block) => (block as Record<string, unknown>).type === 'tool_use' && block.id === 'call_bad');
+		const toolUse = allBlocks.find((block) => block.type === 'tool_use' && block.id === 'call_bad');
 		expect(toolUse).toBeTruthy();
 		expect((toolUse as { input?: Record<string, unknown> }).input).toEqual({ raw: '{"broken"' });
 	});
@@ -149,7 +180,8 @@ describe('openai-to-anthropic', () => {
 		expect(result.messages[0]).toEqual({ role: 'user', content: 'Continue.' });
 		expect(result.messages[1].role).toBe('assistant');
 		expect(result.messages[2].role).toBe('user');
-		const toolResults = result.messages[2].content as Record<string, unknown>[];
+		const toolResults = result.messages[2].content;
+		if (!Array.isArray(toolResults)) throw new Error('Expected tool result blocks');
 		expect(toolResults).toHaveLength(2);
 		expect(toolResults[0]).toMatchObject({ type: 'tool_result', tool_use_id: 'call_1', content: 'ok1' });
 		expect(toolResults[1]).toMatchObject({ type: 'tool_result', tool_use_id: 'call_2', content: 'ok2' });
@@ -204,9 +236,7 @@ describe('openai-to-anthropic', () => {
 				{
 					role: 'assistant',
 					content: 'calling',
-					tool_calls: [
-						{ id: 'toolu_01ABC-xyz', type: 'function', function: { name: 'read_file', arguments: '{}' } }
-					]
+					tool_calls: [{ id: 'toolu_01ABC-xyz', type: 'function', function: { name: 'read_file', arguments: '{}' } }]
 				},
 				{ role: 'tool', tool_call_id: 'toolu_01ABC-xyz', content: 'ok' }
 			]

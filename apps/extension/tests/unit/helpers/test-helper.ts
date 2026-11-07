@@ -28,8 +28,7 @@ export class TestHelper {
 			keyFix: {
 				enabled: DEFAULT_KEY_FIX_ENABLED
 			},
-			clients,
-			commands: []
+			clients
 		};
 
 		return runtimeState;

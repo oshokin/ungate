@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { ResponsesBodyBuilder } from 'src/proxy/responses-input-normalizer/build-body';
 import { ResponsesModelResolver } from 'src/proxy/responses-input-normalizer/resolve-model';
 
+import type { OpenAIChatRequest } from 'src/types/openai';
+
 describe('proxy-responses-input-normalizer', () => {
 	it('resolves model aliases and reasoning defaults', () => {
 		expect(ResponsesModelResolver.resolveModel('')).toEqual({ model: 'gpt-5.4' });
@@ -107,7 +109,23 @@ describe('proxy-responses-input-normalizer', () => {
 		]);
 		expect((payload.tools as Record<string, unknown>[])[0].name).toBe('Shell');
 		expect((payload.tools as Record<string, unknown>[])[0].function).toBeUndefined();
-		expect(payload.parallel_tool_calls).toBe(false);
+		expect(payload.parallel_tool_calls).toBeUndefined();
+		expect(payload.tool_choice).toBeUndefined();
+	});
+
+	it('keeps a flat function tool and drops a provider-defined tool', () => {
+		const flat = { type: 'function', name: 'Read', parameters: { type: 'object', properties: {} } };
+		const { payload } = ResponsesBodyBuilder.buildBody(
+			{
+				model: 'gpt-5.5',
+				messages: [{ role: 'user', content: 'hello' }],
+				tools: [flat, { type: 'provider-defined', name: 'computer' }]
+			} as unknown as OpenAIChatRequest,
+			'gpt-5.5',
+			{ instructionsFallback: 'fallback' }
+		);
+
+		expect(payload.tools).toEqual([flat]);
 	});
 
 	it('forwards only an explicit client prompt cache key', () => {

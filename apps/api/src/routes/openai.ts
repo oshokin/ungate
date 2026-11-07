@@ -2,6 +2,7 @@ import { ModelMappings } from 'src/database/model-mappings';
 import { CompletionModelRouting } from 'src/orchestration/openai';
 import { ClaudeChatHandler, MiniMaxChatHandler, OpenAiMappedChatHandler } from 'src/orchestration/openai/provider-handlers';
 import { apiKeyAuth } from 'src/plugins/auth';
+import { ChatToolCodec } from 'src/proxy/chat-tool-codec';
 import { openAiChatRequestSchema } from 'src/schemas/proxy-requests';
 import { createRequestAbortSignal } from 'src/security/outbound-request';
 import { logger } from 'src/utils/logger';
@@ -15,7 +16,7 @@ const plugin: FastifyPluginCallback = (app) => {
 	app.post('/v1/chat/completions', { onRequest: apiKeyAuth(config), schema: openAiChatRequestSchema }, async (request, reply) => {
 		const cancellation = createRequestAbortSignal(request, reply);
 		try {
-			const openaiBody = request.body as OpenAIChatRequest;
+			const openaiBody = ChatToolCodec.normalize(request.body as OpenAIChatRequest);
 			const resolvedModel = ModelMappings.resolveForChatCompletion(openaiBody.model);
 
 			if (!resolvedModel) {

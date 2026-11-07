@@ -17,6 +17,48 @@ vi.mock('src/database/app-settings', () => ({
 }));
 
 describe('routes: health/settings/models', () => {
+	it('keeps unknown catalog capabilities absent and provider limits separate', async () => {
+		settingsGetMock.mockReturnValueOnce({
+			models: [
+				{
+					id: 'claude-test',
+					provider: 'claude',
+					contextWindow: 200000,
+					maxOutputTokens: 8192,
+					capabilities: { supports_vision: true }
+				},
+				{ id: 'codex-test', provider: 'openai', contextWindow: null, maxOutputTokens: null },
+				{ id: 'minimax-test', provider: 'minimax', contextWindow: 100000, maxOutputTokens: null }
+			]
+		});
+		const app = await withPlugin(modelsPlugin, { apiKey: 'test-key' });
+		try {
+			const response = await app.inject({ method: 'GET', url: '/v1/models', headers: { authorization: 'Bearer test-key' } });
+			expect(response.statusCode).toBe(200);
+			const models = response.json<{ data: Record<string, unknown>[] }>().data;
+			expect(models[0]).toEqual({
+				id: 'claude-test',
+				object: 'model',
+				created: 1700000000,
+				owned_by: 'claude',
+				context_window: 200000,
+				context_length: 200000,
+				max_input_tokens: 200000,
+				max_output_tokens: 8192,
+				max_completion_tokens: 8192,
+				max_tokens: 8192
+			});
+			expect(models[1]).toEqual({ id: 'codex-test', object: 'model', created: 1700000000, owned_by: 'openai' });
+			expect(models[2].max_output_tokens).toBeUndefined();
+			for (const model of models) {
+				expect(model.capabilities).toBeUndefined();
+				expect(model.api_types).toBeUndefined();
+			}
+		} finally {
+			await app.close();
+		}
+	});
+
 	afterEach(() => {
 		vi.clearAllMocks();
 	});
@@ -95,7 +137,7 @@ describe('routes: health/settings/models', () => {
 		const app = await withPlugin(settingsPlugin);
 		const getRes = await app.inject({ method: 'GET', url: '/settings' });
 		expect(getRes.statusCode).toBe(200);
-		expect(getRes.json().port).toBe(4783);
+		expect(getRes.json<{ port: number }>().port).toBe(4783);
 
 		const postRes = await app.inject({
 			method: 'POST',
@@ -144,15 +186,13 @@ describe('routes: health/settings/models', () => {
 		settingsGetMock.mockReturnValue({ models: [] });
 		const app = await withPlugin(modelsPlugin, { apiKey: 'model-key' });
 
-		expect((await app.inject('/v1/models')).statusCode).toBe(403);
-		expect(
-			(
-				await app.inject({
-					url: '/v1/models',
-					headers: { authorization: 'Bearer model-key' }
-				})
-			).statusCode
-		).toBe(200);
+		const denied = await app.inject('/v1/models');
+		expect(denied.statusCode).toBe(403);
+		const allowed = await app.inject({
+			url: '/v1/models',
+			headers: { authorization: 'Bearer model-key' }
+		});
+		expect(allowed.statusCode).toBe(200);
 		await app.close();
 	});
 });

@@ -58,14 +58,14 @@ vi.mock('node:child_process', async (importOriginal) => {
 	return {
 		...actual,
 		spawnSync: (...args: unknown[]) => spawnSyncMock(...args),
-		spawn: (...args: unknown[]) => spawnMock(...args)
+		spawn: spawnMock
 	};
 });
 
 vi.mock('../../src/utils/better-sqlite3-installer', () => {
 	return {
 		BetterSqlite3Installer: {
-			ensureInstalled: (...args: unknown[]) => ensureInstalledMock(...args),
+			ensureInstalled: ensureInstalledMock,
 			resolveBindingPath: vi.fn(() => '/tmp/ungate-extension/bundled/api/node_modules/better-sqlite3/prebuilds/linux-x64.node')
 		}
 	};
@@ -105,9 +105,9 @@ vi.mock('../../src/runtime-state', () => {
 			getLiveClientIds: (state: RuntimeState) => Object.keys(state.clients),
 			hasLiveClients: runtimeHasLiveClientsMock,
 			mutate: runtimeMutateMock,
-			isApiStartSuppressed: (...args: unknown[]) => isApiStartSuppressedMock(...args),
-			suppressApiAutoStart: (...args: unknown[]) => suppressApiAutoStartMock(...args),
-			resetApiForRestart: (...args: unknown[]) => resetApiForRestartMock(...args)
+			isApiStartSuppressed: () => isApiStartSuppressedMock(),
+			suppressApiAutoStart: () => suppressApiAutoStartMock(),
+			resetApiForRestart: () => resetApiForRestartMock()
 		}
 	};
 });

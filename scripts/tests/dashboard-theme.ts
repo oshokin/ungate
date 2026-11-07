@@ -137,7 +137,7 @@ export async function verifyDashboardThemes(
 				await page.screenshot({ path: join(screenshots, `${theme.name}-${name}.png`), fullPage: true });
 		};
 		await page.getByRole('button', { name: 'Usage', exact: true }).click();
-		await page.getByText('Connect this provider in Settings.', { exact: true }).first().waitFor();
+		await page.getByText('Connect a provider in Connection to see subscription usage.', { exact: true }).waitFor();
 		await verify('usage');
 		await page.getByRole('button', { name: 'Connection', exact: true }).click();
 		for (const name of ['Restart API', 'Restart tunnel', 'Stop']) {

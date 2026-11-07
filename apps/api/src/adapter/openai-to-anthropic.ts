@@ -3,7 +3,7 @@ import { logger } from 'src/utils/logger';
 import { resolveMaxOutputTokens } from '../proxy/output-tokens';
 import { DEFAULT_MAX_TOKENS, REASONING_MAX_TOKENS } from '../proxy/token-budgets';
 
-import type { AnthropicRequest, AnthropicMessage, ContentBlock } from '../types';
+import type { AnthropicRequest, AnthropicMessage, CacheControl, ContentBlock, Tool, ToolChoice } from '../types';
 import type { OpenAIContentPart, OpenAIChatRequest } from '../types/openai';
 import type { ReasoningBudgetTier } from '@ungate/shared';
 
@@ -50,6 +50,16 @@ function sanitizeToolId(id: string): string {
 	return id.replace(ILLEGAL_TOOL_ID_CHARS, '_');
 }
 
+/** Copy only supported cache policies; never invent a TTL or mutate the client payload. */
+function cachePolicy(value: unknown): { cache_control?: CacheControl } {
+	const policy = (value as { cache_control?: CacheControl }).cache_control;
+	if (policy?.type !== 'ephemeral' || (policy.ttl !== undefined && policy.ttl !== '5m' && policy.ttl !== '1h')) {
+		return {};
+	}
+
+	return { cache_control: { type: 'ephemeral', ...(policy.ttl === undefined ? {} : { ttl: policy.ttl }) } };
+}
+
 function sanitizeToolBlockId(block: ContentBlock): ContentBlock {
 	if (block.type === 'tool_use' && block.id) {
 		return { ...block, id: sanitizeToolId(block.id) };
@@ -60,6 +70,53 @@ function sanitizeToolBlockId(block: ContentBlock): ContentBlock {
 	}
 
 	return block;
+}
+
+/** Cursor's chat client sends nested functions and does not fail the turn on another tool type. */
+function chatTools(tools: OpenAIChatRequest['tools']): Tool[] {
+	if (!tools || tools.length === 0) return [];
+	const functions: Tool[] = [];
+	const passthrough: Tool[] = [];
+
+	for (const tool of tools) {
+		const value = tool as unknown as {
+			type?: string;
+			name?: string;
+			description?: string;
+			input_schema?: Record<string, unknown>;
+			function?: { name?: string; description?: string; parameters?: Record<string, unknown> };
+		};
+		if (value.type === 'function' && typeof value.function?.name === 'string') {
+			functions.push({
+				...cachePolicy(tool),
+				name: value.function.name,
+				description: value.function.description ?? '',
+				input_schema: value.function.parameters ?? { type: 'object', properties: {} }
+			});
+			continue;
+		}
+		if (typeof value.name === 'string' && value.input_schema && typeof value.input_schema === 'object') {
+			passthrough.push({
+				...cachePolicy(tool),
+				name: value.name,
+				description: value.description ?? '',
+				input_schema: value.input_schema
+			});
+		}
+	}
+
+	return functions.length > 0 ? functions : passthrough;
+}
+
+/** OpenAI's string and function choice are not valid Anthropic tool_choice values. */
+function chatToolChoice(choice: OpenAIChatRequest['tool_choice']): ToolChoice | undefined {
+	if (!choice) return undefined;
+	if (choice === 'none') return undefined;
+	if (choice === 'auto') return { type: 'auto' };
+	if (choice === 'required') return { type: 'any' };
+	if (choice.type === 'function' && choice.function.name) return { type: 'tool', name: choice.function.name };
+
+	return undefined;
 }
 
 function convertContent(content: string | OpenAIContentPart[] | ContentBlock[]): string | ContentBlock[] {
@@ -79,7 +136,7 @@ function convertContent(content: string | OpenAIContentPart[] | ContentBlock[]):
 		const openaiPart = part as OpenAIContentPart;
 		if (openaiPart.type === 'text') {
 			if (openaiPart.text && openaiPart.text.trim().length > 0) {
-				blocks.push({ type: 'text', text: openaiPart.text });
+				blocks.push({ type: 'text', text: openaiPart.text, ...cachePolicy(part) });
 			}
 		} else if (openaiPart.type === 'image_url' && openaiPart.image_url) {
 			const url = openaiPart.image_url.url;
@@ -87,6 +144,7 @@ function convertContent(content: string | OpenAIContentPart[] | ContentBlock[]):
 				const match = /^data:([^;]+);base64,(.+)$/.exec(url);
 				if (match) {
 					blocks.push({
+						...cachePolicy(part),
 						type: 'image',
 						source: {
 							type: 'base64',
@@ -96,7 +154,7 @@ function convertContent(content: string | OpenAIContentPart[] | ContentBlock[]):
 					});
 				}
 			} else {
-				blocks.push({ type: 'image', source: { type: 'url', url } });
+				blocks.push({ type: 'image', source: { type: 'url', url }, ...cachePolicy(part) });
 			}
 		} else if ((part as ContentBlock).type === 'image' && (part as ContentBlock).source) {
 			blocks.push(part as ContentBlock);
@@ -112,9 +170,16 @@ export function openaiToAnthropic(request: OpenAIChatRequest, override?: Anthrop
 
 	for (const msg of request.messages) {
 		if (msg.role === 'system') {
-			const content = typeof msg.content === 'string' ? msg.content : (msg.content ?? []).map((p) => p.text ?? '').join('\n');
-			if (system) {
-				system = typeof system === 'string' ? `${system}\n${content}` : system;
+			const parts = typeof msg.content === 'string' ? undefined : (msg.content ?? []);
+			const content = typeof msg.content === 'string' ? msg.content : (parts ?? []).map((p) => p.text ?? '').join('\n');
+			if (Array.isArray(system) || parts?.some((part) => cachePolicy(part).cache_control)) {
+				const previous = typeof system === 'string' ? [{ type: 'text' as const, text: system }] : (system ?? []);
+				const next = parts
+					? parts.map((part) => ({ type: 'text' as const, text: part.text ?? '', ...cachePolicy(part) }))
+					: [{ type: 'text' as const, text: content }];
+				system = [...previous, ...next];
+			} else if (system) {
+				system = `${system}\n${content}`;
 			} else {
 				system = content;
 			}
@@ -225,29 +290,19 @@ export function openaiToAnthropic(request: OpenAIChatRequest, override?: Anthrop
 		stream: request.stream,
 		stop_sequences: request.stop ? (Array.isArray(request.stop) ? request.stop : [request.stop]) : undefined
 	};
-
-	if (request.tools && request.tools.length > 0) {
-		const firstTool = request.tools[0] as unknown as Record<string, unknown>;
-		if (firstTool.type === 'function' && firstTool.function) {
-			result.tools = request.tools.map((tool) => {
-				const t = tool as {
-					type: string;
-					function: { name: string; description?: string; parameters?: Record<string, unknown> };
-				};
-
-				return {
-					name: t.function.name,
-					description: t.function.description ?? '',
-					input_schema: t.function.parameters ?? { type: 'object', properties: {} }
-				};
-			});
-		} else {
-			result.tools = request.tools as unknown as typeof result.tools;
-		}
+	if (
+		request.cache_control?.type === 'ephemeral' &&
+		(request.cache_control.ttl === undefined || request.cache_control.ttl === '5m' || request.cache_control.ttl === '1h')
+	) {
+		result.cache_control = { ...request.cache_control };
 	}
 
-	if (request.tool_choice) {
-		result.tool_choice = request.tool_choice as unknown as typeof result.tool_choice;
+	// Cursor's Anthropic client sends no tools when the choice is none.
+	if (request.tool_choice !== 'none') {
+		const tools = chatTools(request.tools);
+		if (tools.length > 0) result.tools = tools;
+		const toolChoice = chatToolChoice(request.tool_choice);
+		if (toolChoice) result.tool_choice = toolChoice;
 	}
 
 	if (normalized.reasoningBudget) {

@@ -8,6 +8,7 @@ import { protectAdministration } from 'src/plugins/administration';
 import { createTestApp } from '../test-harness';
 
 afterEach(() => {
+	vi.useRealTimers();
 	vi.unstubAllGlobals();
 });
 describe('subscription usage boundary and provider access', () => {
@@ -36,13 +37,15 @@ describe('subscription usage boundary and provider access', () => {
 			);
 		vi.stubGlobal('fetch', fetcher);
 		const service = new SubscriptionUsageService();
-		const [a, b] = await Promise.all([service.read(), service.read()]);
+		await service.read();
+		expect(fetcher).not.toHaveBeenCalled();
+		const [a, b] = await Promise.all([service.read(true), service.read(true)]);
 		expect(a).toEqual(b);
 		expect(fetcher).toHaveBeenCalledTimes(1);
 		await service.read();
 		expect(fetcher).toHaveBeenCalledTimes(1);
 		await service.read(true);
-		expect(fetcher).toHaveBeenCalledTimes(2);
+		expect(fetcher).toHaveBeenCalledTimes(1);
 		expect(JSON.stringify(a)).not.toContain('test-secret');
 	});
 	it('shows rejected credentials as unsupported and retains old data as stale after a later error', async () => {
@@ -53,7 +56,9 @@ describe('subscription usage boundary and provider access', () => {
 			.mockResolvedValueOnce(new Response('', { status: 403 }));
 		vi.stubGlobal('fetch', fetcher);
 		const service = new SubscriptionUsageService();
-		await service.read();
+		vi.useFakeTimers();
+		await service.read(true);
+		vi.advanceTimersByTime(15_001);
 		const result = await service.read(true);
 		const row = result.providers.find((p) => p.provider === 'minimax');
 		expect(row).toMatchObject({ status: 'unsupported', stale: true });
@@ -63,8 +68,22 @@ describe('subscription usage boundary and provider access', () => {
 		ProviderSettings.upsertApiKey('minimax', 'private', 'https://example.org/v1');
 		const fetcher = vi.fn();
 		vi.stubGlobal('fetch', fetcher);
-		const response = await new SubscriptionUsageService().read();
+		const response = await new SubscriptionUsageService().read(true);
 		expect(response.providers.find((p) => p.provider === 'minimax')?.status).toBe('unsupported');
 		expect(fetcher).not.toHaveBeenCalled();
+	});
+	it('invalidates cached data on account replacement and logout without fetching on reads', async () => {
+		ProviderSettings.upsertApiKey('minimax', 'first', 'https://api.minimax.io/v1');
+		const fetcher = vi.fn(() => Promise.resolve(Response.json({ model_remains: [{ model_name: 'M', current_interval_remaining_percent: 20 }] })));
+		vi.stubGlobal('fetch', fetcher);
+		const service = new SubscriptionUsageService();
+		await service.read(true);
+		ProviderSettings.upsertApiKey('minimax', 'second', 'https://api.minimax.io/v1');
+		const replacement = await service.read();
+		expect(replacement.providers.find((provider) => provider.provider === 'minimax')?.windows).toEqual([]);
+		ProviderSettings.remove('minimax');
+		const disconnected = await service.read();
+		expect(disconnected.providers.find((provider) => provider.provider === 'minimax')).toMatchObject({ status: 'not_connected', windows: [], fetchedAt: null });
+		expect(fetcher).toHaveBeenCalledTimes(1);
 	});
 });

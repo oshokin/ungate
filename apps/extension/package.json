@@ -46,6 +46,26 @@
 	"contributes": {
 		"commands": [
 			{
+				"command": "ungate.openExtensionSettings",
+				"title": "Extension Settings",
+				"category": "Ungate"
+			},
+			{
+				"command": "ungate.openProviderTimeoutSettings",
+				"title": "Provider Response Timeout",
+				"category": "Ungate"
+			},
+			{
+				"command": "ungate.openTunnelTimeoutSettings",
+				"title": "Tunnel Connection Timeout",
+				"category": "Ungate"
+			},
+			{
+				"command": "ungate.openLogSettings",
+				"title": "Log Viewer Settings",
+				"category": "Ungate"
+			},
+			{
 				"command": "ungate.openDashboard",
 				"title": "Open Dashboard",
 				"category": "Ungate"
@@ -130,6 +150,11 @@
 		"configuration": {
 			"title": "Ungate",
 			"properties": {
+				"ungate.usage.autoRefresh": { "type": "boolean", "default": false, "scope": "application", "description": "Automatically refresh subscription usage in the background." },
+				"ungate.usage.intervalSeconds": { "type": "integer", "default": 60, "minimum": 15, "maximum": 3600, "scope": "application", "description": "Seconds between subscription usage refreshes." },
+				"ungate.usage.widgets.claude": { "type": "boolean", "default": false, "scope": "application", "description": "Show Claude limits in the status bar while automatic refresh is enabled." },
+				"ungate.usage.widgets.openai": { "type": "boolean", "default": false, "scope": "application", "description": "Show ChatGPT limits in the status bar while automatic refresh is enabled." },
+				"ungate.usage.widgets.minimax": { "type": "boolean", "default": false, "scope": "application", "description": "Show MiniMax limits in the status bar while automatic refresh is enabled." },
 				"ungate.network.providerHeaderTimeoutSeconds": {
 					"type": "integer",
 					"default": 30,

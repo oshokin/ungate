@@ -31,7 +31,19 @@ describe('database-model-mappings', () => {
 	});
 
 	it('rejects empty rows instead of silently dropping them', () => {
-		expect(() => ModelMappings.sanitize([{ id: ' ', label: 'Invalid', provider: 'claude', upstreamModel: 'x', sortOrder: 0, reasoningBudget: null }])).toThrow('must not be empty');
+		expect(() =>
+			ModelMappings.sanitize([
+				{
+					id: ' ',
+					label: 'Invalid',
+					provider: 'claude',
+					upstreamModel: 'x',
+					sortOrder: 0,
+					reasoningBudget: null,
+					serviceTier: null
+				}
+			])
+		).toThrow('must not be empty');
 	});
 
 	it('resolves by id/upstream/case-insensitive', () => {

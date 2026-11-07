@@ -9,6 +9,7 @@ export * from './schemas';
 export { getAdminToken } from './helpers/admin-token';
 export * from './service';
 export * from './limits';
+export * from './usage';
 export * from './fs-access';
 export * from './process-lock';
 export * from './provider-timeout';

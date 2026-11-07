@@ -52,6 +52,40 @@ function anthropicSseResponse(lines: string[]): Response {
 }
 
 describe('routes-openai', () => {
+	it('does not reject a Cursor tool list before model routing', async () => {
+		const app = await withPlugin(openaiPlugin, { apiKey: 'test-key' });
+		try {
+			const grammar = `start: begin_patch\n${'hunk '.repeat(30)}`;
+			const response = await app.inject({
+				method: 'POST',
+				url: '/v1/chat/completions',
+				headers: { authorization: 'Bearer test-key' },
+				payload: {
+					model: 'gpt-6.1-sol-high',
+					messages: [{ role: 'user', content: 'edit the file' }],
+					tools: [
+						{ type: 'function', function: { name: 'Shell', parameters: { type: 'object' } } },
+						{ type: 'namespace', name: 'a', tools: [] },
+						{
+							type: 'custom',
+							name: 'ApplyPatch',
+							description: 'Applies a patch',
+							format: { type: 'grammar', syntax: 'lark', definition: grammar }
+						}
+					]
+				}
+			});
+			expect(response.statusCode).toBe(404);
+			expect(response.json().error.message).toBe('Model not found');
+			expect(resolveForChatCompletionMock).toHaveBeenCalledWith('gpt-6.1-sol-high');
+			expect(proxyRequestMock).not.toHaveBeenCalled();
+			expect(proxyOpenAIRequestMock).not.toHaveBeenCalled();
+			expect(proxyMiniMaxRequestMock).not.toHaveBeenCalled();
+		} finally {
+			await app.close();
+		}
+	});
+
 	afterEach(() => {
 		vi.clearAllMocks();
 	});

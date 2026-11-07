@@ -1,9 +1,12 @@
-import { type RuntimeState, type TunnelState } from '@ungate/shared/frontend';
+import { API_PROTOCOL_VERSION, UNGATE_VERSION, type RuntimeState, type TunnelState } from '@ungate/shared/frontend';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { TestHelper } from './helpers/test-helper';
 
 import type { ExtensionController as ExtensionControllerType } from '../../src/extension-controller';
+
+const installedDigest = vi.hoisted(() => vi.fn<() => string | undefined>(() => undefined));
+vi.mock('../../src/api-artifact', () => ({ apiArtifactDigest: installedDigest }));
 
 interface MockApiServer {
 	start: ReturnType<typeof vi.fn>;
@@ -24,6 +27,7 @@ interface MockTunnelManager {
 }
 
 interface MockDashboard {
+	sendUsageState: ReturnType<typeof vi.fn>;
 	setPort: ReturnType<typeof vi.fn>;
 	sendTunnelState: ReturnType<typeof vi.fn>;
 	pushLog: ReturnType<typeof vi.fn>;
@@ -32,6 +36,7 @@ interface MockDashboard {
 }
 
 interface ExtensionControllerInternals {
+	runAction(action: import('@ungate/shared/frontend').DashboardAction): Promise<void>;
 	currentPort: number | null;
 	bootstrapRuntime(): Promise<void>;
 	syncFromRuntimeState(): Promise<void>;
@@ -51,6 +56,7 @@ const createStatusBarItemMock = vi.fn(() => {
 		text: '',
 		tooltip: '',
 		show: vi.fn(),
+		hide: vi.fn(),
 		dispose: vi.fn()
 	};
 });
@@ -61,6 +67,7 @@ const registerCommandMock = vi.fn(() => {
 	};
 });
 const showWarningMessageMock = vi.fn();
+const executeCommandMock = vi.fn().mockResolvedValue(undefined);
 
 const runtimeReadMock = vi.fn<() => RuntimeState>();
 const runtimeHasLiveClientsMock = vi.fn<(state: RuntimeState) => boolean>();
@@ -86,6 +93,8 @@ vi.mock('vscode', () => {
 			showWarningMessage: showWarningMessageMock
 		},
 		workspace: {
+			getConfiguration: vi.fn(() => ({ inspect: vi.fn(() => undefined) })),
+			onDidChangeConfiguration: vi.fn(() => ({ dispose: vi.fn() })),
 			createFileSystemWatcher: vi.fn(() => ({
 				onDidChange: vi.fn(),
 				onDidCreate: vi.fn(),
@@ -93,6 +102,7 @@ vi.mock('vscode', () => {
 			}))
 		},
 		commands: {
+			executeCommand: executeCommandMock,
 			registerCommand: registerCommandMock
 		},
 		StatusBarAlignment: {
@@ -139,7 +149,7 @@ vi.mock('../../src/runtime-state', () => {
 
 				return runtimeState.api.startSuppressed === true;
 			},
-			prepareApiForBootstrap: (...args: unknown[]) => prepareApiForBootstrapMock(...args)
+			prepareApiForBootstrap: prepareApiForBootstrapMock
 		}
 	};
 });
@@ -147,6 +157,7 @@ vi.mock('../../src/runtime-state', () => {
 vi.mock('../../src/dashboard', () => {
 	return {
 		Dashboard: class {
+			sendUsageState = vi.fn();
 			sendServiceState = vi.fn();
 			pushLog = vi.fn();
 			setPort = vi.fn();
@@ -230,6 +241,7 @@ function createController(windowId: string): {
 		restart: vi.fn().mockResolvedValue(undefined)
 	};
 	const dashboard: MockDashboard = {
+		sendUsageState: vi.fn(),
 		setPort: vi.fn(),
 		sendTunnelState: vi.fn(),
 		pushLog: vi.fn(),
@@ -274,12 +286,26 @@ function getInternals(controller: ExtensionControllerType): ExtensionControllerI
 }
 
 describe('ExtensionController', () => {
+	it.each([
+		['open-extension-settings', '@ext:orchidfiles.ungate'],
+		['open-provider-timeout-settings', '@id:ungate.network.providerHeaderTimeoutSeconds'],
+		['open-tunnel-timeout-settings', '@id:ungate.tunnel.connectTimeoutSeconds'],
+		['open-log-settings', '@id:ungate.logs.maxEntries']
+	] as const)('opens fixed native settings for %s without restarting services', async (action, query) => {
+		const { controller, apiServer, tunnelManager } = createController('settings-window');
+		await getInternals(controller).runAction(action);
+		expect(executeCommandMock).toHaveBeenLastCalledWith('workbench.action.openSettings', query);
+		expect(apiServer.restart).not.toHaveBeenCalled();
+		expect(tunnelManager.restart).not.toHaveBeenCalled();
+	});
+
 	beforeAll(async () => {
 		const module = await import('../../src/extension-controller');
 		ExtensionController = module.ExtensionController;
 	});
 
 	beforeEach(() => {
+		installedDigest.mockReturnValue(undefined);
 		createOutputChannelMock.mockClear();
 		createStatusBarItemMock.mockClear();
 		registerCommandMock.mockClear();
@@ -316,6 +342,56 @@ describe('ExtensionController', () => {
 		apiServerStartMock.mockResolvedValue(undefined);
 	});
 
+	it('uses the current installed bundle for dashboard and status-bar compatibility', async () => {
+		const { readApiHealth } = await import('../../src/local-api');
+		vi.mocked(readApiHealth).mockResolvedValueOnce({
+			service: 'ungate',
+			pid: 1234,
+			version: UNGATE_VERSION,
+			protocolVersion: API_PROTOCOL_VERSION,
+			artifactDigest: 'a'.repeat(64)
+		});
+		installedDigest.mockReturnValue('b'.repeat(64));
+		const { controller, dashboard, statusBar } = createController('window-a');
+		const runtime = createRuntimeState([], null);
+		runtime.api.port = 4783;
+		await (controller as unknown as { updateServiceState(state: RuntimeState): Promise<void> }).updateServiceState(runtime);
+		expect(dashboard.sendServiceState).toHaveBeenLastCalledWith(
+			expect.objectContaining({ status: 'incompatible', restartRequired: true })
+		);
+		expect(statusBar.text).not.toContain('Ready');
+	});
+
+	it('requires reload when the installed bundle changes beneath a live host', async () => {
+		installedDigest.mockReturnValue('a'.repeat(64));
+		const { controller, dashboard, statusBar } = createController('window-a');
+		installedDigest.mockReturnValue('b'.repeat(64));
+		await (controller as unknown as { updateServiceState(state: RuntimeState): Promise<void> }).updateServiceState(
+			createRuntimeState([], null)
+		);
+		expect(dashboard.sendServiceState).toHaveBeenLastCalledWith(
+			expect.objectContaining({
+				status: 'incompatible',
+				canUpdate: false,
+				restartRequired: false,
+				message: expect.stringContaining('Reload this window')
+			})
+		);
+		expect(statusBar.text).not.toContain('Ready');
+	});
+
+	it('does not restart usage polling on repeated healthy one-second heartbeats', () => {
+		const { controller } = createController('window-a');
+		const refresh = vi.fn();
+		Object.assign(controller, { lastApiStatus: 'running', refreshSubscriptionLimits: refresh });
+		const internals = controller as unknown as { handleApiServerStatusChange(status: string): void };
+		for (let tick = 0; tick < 5; tick++) internals.handleApiServerStatusChange('running');
+		expect(refresh).not.toHaveBeenCalled();
+		Object.assign(controller, { lastApiStatus: 'stopped' });
+		internals.handleApiServerStatusChange('running');
+		expect(refresh).toHaveBeenCalledTimes(1);
+	});
+
 	it('warns once only when a confirmed ready connection becomes offline', () => {
 		vi.useFakeTimers();
 		try {
@@ -348,7 +424,7 @@ describe('ExtensionController', () => {
 
 			expect(showWarningMessageMock).toHaveBeenCalledTimes(1);
 			expect(showWarningMessageMock).toHaveBeenCalledWith('Ungate tunnel is unavailable. Custom Ungate models may fail.');
-			expect(statusBar.text).toBe('$(warning) Ungate: Offline');
+			expect(statusBar.text).toBe('$(warning) Ungate: Not ready');
 			expect(statusBar.backgroundColor).toMatchObject({ id: 'statusBarItem.warningBackground' });
 
 			vi.advanceTimersByTime(8000);
@@ -356,6 +432,33 @@ describe('ExtensionController', () => {
 		} finally {
 			vi.useRealTimers();
 		}
+	});
+
+	it('shows a restart warning when the running build does not match this window', () => {
+		const { controller, statusBar } = createController('window-a');
+		const internals = getInternals(controller);
+		Object.assign(controller as object, {
+			lastApiStatus: 'running',
+			serviceState: {
+				status: 'incompatible',
+				version: '1.7.14',
+				expectedVersion: '1.7.14',
+				canUpdate: true,
+				restartRequired: true,
+				message: 'A different Ungate API build is running. Restart the shared API to apply the installed build.',
+				logsConnected: true
+			},
+			currentTunnelState: {
+				status: 'running',
+				url: 'https://example.trycloudflare.com',
+				error: null,
+				publicStatus: 'reachable'
+			}
+		});
+		internals.updateStatusBar();
+		expect(statusBar.text).toBe('$(warning) Ungate: Not ready');
+		expect(statusBar.backgroundColor).toBeUndefined();
+		expect(showWarningMessageMock).not.toHaveBeenCalled();
 	});
 
 	it('does not warn during startup, initial offline state, or a reconnect check', () => {
@@ -402,7 +505,7 @@ describe('ExtensionController', () => {
 
 		expect(createStatusBarItemMock).toHaveBeenCalledWith('ungate.connectionStatus', 1, 100);
 		expect(activatedStatusBar?.show).toHaveBeenCalledTimes(1);
-		expect(activatedStatusBar?.text).toBe('$(warning) Ungate: Offline');
+		expect(activatedStatusBar?.text).toBe('$(warning) Ungate: Not ready');
 
 		await vi.waitFor(() => {
 			expect(apiServerStartMock).toHaveBeenCalledTimes(1);

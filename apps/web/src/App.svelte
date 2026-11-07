@@ -70,6 +70,10 @@ async function selectPage(page: DashboardPage): Promise<void> {
 }
 
 onMount(() => {
+	const openUsage = (event: MessageEvent<{ type: string }>) => {
+		if (event.data?.type === 'open-usage') void selectPage('usage');
+	};
+	window.addEventListener('message', openUsage);
 	let saveFrame: number | null = null;
 
 	const onScroll = () => {
@@ -94,6 +98,7 @@ onMount(() => {
 	void restoreScrollPosition(currentPage);
 
 	return () => {
+		window.removeEventListener('message', openUsage);
 		window.removeEventListener('scroll', onScroll);
 		window.removeEventListener('wheel', onUserScroll);
 		window.removeEventListener('touchstart', onUserScroll);

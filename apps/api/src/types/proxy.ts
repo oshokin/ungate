@@ -1,4 +1,4 @@
-import type { RequestSource, Tool } from './index';
+import type { RequestSource } from './index';
 
 export interface RequestContext {
 	model: string;
@@ -13,11 +13,6 @@ export interface RequestContext {
 export interface ProxyResult {
 	response: Response;
 	context: RequestContext;
-}
-
-export interface ToolMapResult {
-	tools: Tool[];
-	reverseMapping: Record<string, string>;
 }
 
 export interface ParsedToolCall {

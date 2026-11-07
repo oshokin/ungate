@@ -6,7 +6,6 @@ import { ProviderSettings } from '../database/provider-settings';
 import { fetchWithHeaderTimeout } from '../security/outbound-request';
 
 import { RequestBuilder } from './request-builder';
-import { ToolMapper } from './tool-mapper';
 
 import type { RequestSource, AnthropicRequest, AnthropicError } from '../types';
 import type { ProxyResult } from '../types/proxy';
@@ -28,14 +27,8 @@ async function makeClaudeCodeRequest(
 	}
 
 	try {
-		const preparedBody = RequestBuilder.prepareClaudeCodeBody(body);
-
-		let reverseToolMapping: Record<string, string> = {};
-		if (preparedBody.tools && preparedBody.tools.length > 0) {
-			const mapped = ToolMapper.map(preparedBody.tools);
-			preparedBody.tools = mapped.tools;
-			reverseToolMapping = mapped.reverseMapping;
-		}
+		const preparedBody = RequestBuilder.prepareClaudeCodeBody(body, endpoint);
+		const reverseToolMapping: Record<string, string> = {};
 
 		const url = `${config.anthropic.apiUrl}${endpoint}?beta=true`;
 

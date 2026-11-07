@@ -8,6 +8,7 @@ import {
 	SSE_QUEUE_HIGH_WATER_MARK
 } from './stream-limits';
 
+import type { ChatCompletionUsage } from '../types/openai';
 import type { RequestContext, StreamResult } from '../types/proxy';
 
 type MiniMaxStreamState = 'content' | 'thinking';
@@ -35,6 +36,7 @@ interface MiniMaxStreamEvent {
 		prompt_tokens?: number;
 		completion_tokens?: number;
 		total_tokens?: number;
+		prompt_tokens_details?: ChatCompletionUsage['prompt_tokens_details'];
 	};
 }
 
@@ -58,11 +60,7 @@ function buildChunk(
 	})}\n\n`;
 }
 
-function buildUsageChunk(
-	streamId: string,
-	modelName: string,
-	usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number }
-): string {
+function buildUsageChunk(streamId: string, modelName: string, usage: ChatCompletionUsage): string {
 	return `data: ${JSON.stringify({
 		id: `chatcmpl-${streamId}`,
 		object: 'chat.completion.chunk',
@@ -191,13 +189,7 @@ export class MiniMaxStreamHandler {
 					let finishReason: 'stop' | 'length' | 'tool_calls' | null = null;
 					let sawDone = false;
 					const pendingTools = new Map<number, MiniMaxToolCallDelta>();
-					let usage:
-						| {
-								prompt_tokens: number;
-								completion_tokens: number;
-								total_tokens: number;
-						  }
-						| undefined;
+					let usage: ChatCompletionUsage | undefined;
 					let streamState: MiniMaxStreamState = 'content';
 					let pendingTag = '';
 
@@ -228,16 +220,21 @@ export class MiniMaxStreamHandler {
 
 							const { done, value } = await reader.read();
 							if (cancelled) break;
-							if (done) break;
 
-							sseBuffer += decoder.decode(value, { stream: true });
+							sseBuffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
+							// Process the final event even when EOF is not preceded by a newline.
+							if (done && sseBuffer) sseBuffer += '\n';
 							if (Buffer.byteLength(sseBuffer, 'utf8') > maxSseEventBytes && !sseBuffer.includes('\n')) {
 								throw new Error(`MiniMax SSE event exceeded ${maxSseEventBytes} bytes`);
 							}
 							const lines = sseBuffer.split('\n');
 							sseBuffer = lines.pop() ?? '';
 
-							for (const line of lines) {
+							for (const rawLine of lines) {
+								const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
+								if (Buffer.byteLength(line, 'utf8') > maxSseEventBytes) {
+									throw new Error(`MiniMax SSE event exceeded ${maxSseEventBytes} bytes`);
+								}
 								if (cancelled || !line.startsWith('data: ')) continue;
 
 								const data = line.slice(6);
@@ -266,7 +263,12 @@ export class MiniMaxStreamHandler {
 										usage = {
 											prompt_tokens: promptTokens,
 											completion_tokens: completionTokens,
-											total_tokens: totalTokens
+											total_tokens: totalTokens,
+											...(event.usage.prompt_tokens_details !== undefined
+												? {
+														prompt_tokens_details: event.usage.prompt_tokens_details
+													}
+												: {})
 										};
 									}
 
@@ -304,21 +306,35 @@ export class MiniMaxStreamHandler {
 										if (!segment.text) continue;
 
 										if (segment.kind === 'reasoning') {
-											safeEnqueue(buildChunk(streamId, modelName, { reasoning_content: segment.text }));
+											safeEnqueue(
+												buildChunk(streamId, modelName, {
+													reasoning_content: segment.text
+												})
+											);
 											continue;
 										}
 
-										safeEnqueue(buildChunk(streamId, modelName, { content: segment.text }));
+										safeEnqueue(
+											buildChunk(streamId, modelName, {
+												content: segment.text
+											})
+										);
 									}
 								} catch (error) {
 									logger.error(`MiniMax stream parse error: ${String(error)}`);
+									throw error;
 								}
 							}
+							if (done) break;
 						}
 
 						if (pendingTag) {
 							if (streamState === 'thinking') {
-								safeEnqueue(buildChunk(streamId, modelName, { reasoning_content: pendingTag }));
+								safeEnqueue(
+									buildChunk(streamId, modelName, {
+										reasoning_content: pendingTag
+									})
+								);
 							} else {
 								safeEnqueue(buildChunk(streamId, modelName, { content: pendingTag }));
 							}
@@ -332,7 +348,11 @@ export class MiniMaxStreamHandler {
 									if (!tool.id || !tool.function?.name) throw new Error('Incomplete tool identity');
 									JSON.parse(tool.function.arguments ?? '');
 								}
-								safeEnqueue(buildChunk(streamId, modelName, { tool_calls: [...pendingTools.values()] }));
+								safeEnqueue(
+									buildChunk(streamId, modelName, {
+										tool_calls: [...pendingTools.values()]
+									})
+								);
 							} catch {
 								finalReason = 'length';
 							}

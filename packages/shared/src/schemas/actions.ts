@@ -2,6 +2,10 @@ import { z } from 'zod';
 
 /** Labels, command IDs and the webview allowlist share one definition. */
 export const dashboardActions = {
+	'open-extension-settings': { command: 'ungate.openExtensionSettings', title: 'Extension Settings' },
+	'open-provider-timeout-settings': { command: 'ungate.openProviderTimeoutSettings', title: 'Provider Response Timeout' },
+	'open-tunnel-timeout-settings': { command: 'ungate.openTunnelTimeoutSettings', title: 'Tunnel Connection Timeout' },
+	'open-log-settings': { command: 'ungate.openLogSettings', title: 'Log Viewer Settings' },
 	'choose-node-runtime': { command: 'ungate.chooseNodeRuntime', title: 'Choose Node.js Executable' },
 	'open-cursor-models': { command: 'ungate.openCursorModels', title: 'Open Cursor Models' },
 	'copy-tunnel-url': { command: 'ungate.copyTunnelUrl', title: 'Copy Tunnel URL' },

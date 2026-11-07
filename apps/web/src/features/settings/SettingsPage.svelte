@@ -2,6 +2,8 @@
 import { TCP_PORT_MAX, TCP_PORT_MIN } from '@ungate/shared/frontend';
 import { untrack } from 'svelte';
 
+import { getActionStore, performAction } from '$shared/actions.svelte';
+import NumericPreference from '$shared/NumericPreference.svelte';
 import { getServiceStore } from '$shared/service-store.svelte';
 import { createToastWatcher, showToast } from '$shared/toast-store.svelte';
 
@@ -16,6 +18,7 @@ const store = getSettingsStore();
 const form = getSettingsFormStore();
 const ui = getSettingsUiStore();
 const service = getServiceStore();
+const actions = getActionStore();
 const availability = $derived(service.state.status);
 const watchSettingsError = createToastWatcher('settings');
 
@@ -45,6 +48,24 @@ $effect(() => watchSettingsError(store.settings ? store.error : null, 'error'));
 
 <div class="ug-stack">
 	<TunnelPanel />
+	<details class="ug-card ug-details">
+		<summary>Advanced editor preferences</summary>
+		<div class="ug-stack">
+			<NumericPreference
+				preference="network.providerHeaderTimeoutSeconds"
+				label="Provider header timeout (s)"
+				min={5}
+				max={120}
+				help="Applies to the next API restart; not a stream idle timeout." />
+			<div>
+				<button
+					class="ug-button"
+					disabled={!!actions.busy}
+					onclick={() => performAction('choose-node-runtime')}>Choose Node.js executable</button>
+				<p class="ug-muted">Choose a validated local runtime. A running shared API is not restarted.</p>
+			</div>
+		</div>
+	</details>
 	{#if service.state.status === 'ready'}
 		{#if store.loading && !store.settings}<p role="status">Loading settings…</p>{/if}
 		{#if store.error}

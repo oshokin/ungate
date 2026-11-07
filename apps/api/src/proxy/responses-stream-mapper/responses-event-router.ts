@@ -301,15 +301,8 @@ export class ResponsesEventRouter {
 			);
 			state.pendingFunctionCalls.clear();
 			if (error.code === 'context_length_exceeded') {
-				const message =
+				error.message =
 					'Ungate: This conversation exceeds the model context window. Start a new chat or remove older context, then retry.';
-				this.pushAssistantChunk(state, results, { content: message });
-				state.completed = true;
-				state.successfulCompletion = true;
-				results.push({ type: 'chunk', data: StreamChunkMapper.chunk(state, {}, 'stop') });
-				results.push({ type: 'done' });
-
-				return;
 			}
 			state.error = error;
 			state.completed = true;
@@ -330,13 +323,17 @@ export class ResponsesEventRouter {
 		}
 
 		const usage = resp?.usage as Record<string, number> | undefined;
-		let finish: 'tool_calls' | 'stop' | 'length' = 'stop';
+		let finish: 'tool_calls' | 'stop' | 'length' | 'content_filter' = 'stop';
 
 		if (state.toolCallsSeen) {
 			finish = 'tool_calls';
 		}
 
 		if (kind !== 'response.completed' || state.pendingFunctionCalls.size > 0) finish = 'length';
+		if (kind === 'response.incomplete') {
+			const details = resp?.incomplete_details as Record<string, unknown> | undefined;
+			if (details?.reason === 'content_filter') finish = 'content_filter';
+		}
 		state.pendingFunctionCalls.clear();
 		state.completed = true;
 		state.successfulCompletion = kind === 'response.completed' && finish !== 'length';

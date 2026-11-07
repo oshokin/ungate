@@ -3,6 +3,22 @@ import { describe, expect, it } from 'vitest';
 import { parseClaudeUsage, parseMiniMaxUsage, parseOpenAiUsage } from 'src/usage/parsers';
 
 describe('provider subscription snapshots', () => {
+	it.each(['2026-10-24T06:30:00+05:30', '2026-10-23T21:00:00-04:00', '2026-10-24T15:00:00+14:00'])(
+		'normalizes explicit UTC offset %s',
+		(value) => {
+			expect(parseClaudeUsage({ five_hour: { utilization: 0, resets_at: value } })[0].resetsAt).toBe('2026-10-24T01:00:00.000Z');
+		}
+	);
+	it.each([1792792800, 1792792800000, '2026-10-24T01:00:00Z'])('normalizes Claude reset %s', (value) => {
+		const reset = parseClaudeUsage({ five_hour: { utilization: 0, resets_at: value } })[0].resetsAt;
+		expect(reset).toBe(typeof value === 'string' ? '2026-10-24T01:00:00.000Z' : new Date(1792792800000).toISOString());
+	});
+	it.each(['123', '1792792800', '2026-02-30T00:00:00Z', '2026-11-07', Infinity, NaN, -1, 9e15])(
+		'rejects ambiguous or invalid reset %s',
+		(value) => {
+			expect(parseClaudeUsage({ five_hour: { utilization: 0, resets_at: value } })[0].resetsAt).toBeNull();
+		}
+	);
 	it('keeps separate Claude windows and a genuine zero', () => {
 		const windows = parseClaudeUsage({
 			five_hour: { utilization: 0, resets_at: '2026-10-24T01:00:00Z' },

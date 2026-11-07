@@ -8,13 +8,18 @@ import {
 	type ServiceState,
 	type LogEntry,
 	type TunnelState,
-	type WebviewToExtension
+	type WebviewToExtension,
+	type UsageState
 } from '@ungate/shared/frontend';
 import * as vscode from 'vscode';
 
+import { apiArtifactDigest } from './api-artifact';
 import { DashboardApiBridge } from './dashboard-api-bridge';
+import { readDashboardPreferences, writeDashboardPreference } from './dashboard-preferences';
 import { dashboardLogEntryLimit } from './dashboard-settings';
 import { SharedLogStore } from './runtime-state/shared-log-store';
+
+import type { UsageController } from './usage-controller';
 
 /** How often the webview is sent newly appended log lines. */
 const LOG_POLL_INTERVAL_MS = 500;
@@ -33,11 +38,14 @@ export class Dashboard {
 	private currentPort: number | null = null;
 	private logPollTimer: NodeJS.Timeout | null = null;
 	private htmlSource: string | null = null;
+	private usageNavigationPending = false;
 
 	constructor(
 		private readonly context: vscode.ExtensionContext,
 		private readonly onMessage: (message: Msg) => void,
-		private readonly expectedArtifactDigest?: string
+		private readonly expectedArtifactDigest?: string,
+		private readonly usage?: UsageController,
+		private readonly onServiceState?: (state: ServiceState) => void
 	) {
 		this.prepare();
 	}
@@ -60,6 +68,12 @@ export class Dashboard {
 
 		const panel = vscode.window.createWebviewPanel('ungate', 'Ungate', vscode.ViewColumn.Active, this.getWebviewOptions());
 		this.panel = panel;
+		const publishPreferences = (): void => {
+			void panel.webview.postMessage({ type: 'dashboard-preferences', values: readDashboardPreferences() });
+		};
+		const preferenceSubscription = vscode.workspace.onDidChangeConfiguration((event) => {
+			if (event.affectsConfiguration('ungate')) publishPreferences();
+		});
 		panel.webview.html = this.buildHtml();
 		panel.iconPath = vscode.Uri.file(path.join(this.context.extensionPath, 'resources', 'icon.png'));
 		const bridge = new DashboardApiBridge(
@@ -67,10 +81,42 @@ export class Dashboard {
 			(response) => {
 				void panel.webview.postMessage(response);
 			},
-			this.expectedArtifactDigest
+			this.expectedArtifactDigest,
+			this.usage,
+			this.onServiceState,
+			() => apiArtifactDigest(this.context)
 		);
 
 		this.panel.webview.onDidReceiveMessage((message: unknown) => {
+			if (typeof message === 'object' && message !== null && 'type' in message) {
+				if (message.type === 'webview-ready') publishPreferences();
+				if (message.type === 'get-dashboard-preferences') {
+					publishPreferences();
+
+					return;
+				}
+				if (message.type === 'set-dashboard-preference') {
+					void writeDashboardPreference(message).then(
+						() => {
+							publishPreferences();
+							void panel.webview.postMessage({
+								type: 'dashboard-preference-result',
+								...('key' in message ? { key: message.key } : {}),
+								error: null
+							});
+						},
+						(error: unknown) => {
+							void panel.webview.postMessage({
+								type: 'dashboard-preference-result',
+								...('key' in message ? { key: message.key } : {}),
+								error: error instanceof Error ? error.message : 'Unable to save.'
+							});
+						}
+					);
+
+					return;
+				}
+			}
 			if (typeof message === 'object' && message !== null && 'type' in message && message.type === 'api-request') {
 				void bridge.handle(message);
 
@@ -93,6 +139,7 @@ export class Dashboard {
 		});
 
 		panel.onDidDispose(() => {
+			preferenceSubscription.dispose();
 			bridge.dispose();
 			this.stopLogPoll();
 			if (this.panel === panel) this.panel = null;
@@ -125,6 +172,11 @@ export class Dashboard {
 	}
 
 	sendInitialState(tunnelState: TunnelState): void {
+		if (this.usageNavigationPending) {
+			this.panel?.webview.postMessage({ type: 'open-usage' });
+			this.usageNavigationPending = false;
+		}
+		if (this.usage) this.sendUsageState(this.usage.state);
 		this.sendPort();
 		this.sendBufferedLogs('api');
 		this.sendBufferedLogs('tunnel');
@@ -133,6 +185,15 @@ export class Dashboard {
 
 	sendServiceState(state: ServiceState): void {
 		this.panel?.webview.postMessage({ type: 'service-state', state });
+	}
+
+	sendUsageState(state: UsageState): void {
+		this.panel?.webview.postMessage({ type: 'usage-state', state });
+	}
+
+	openUsage(): void {
+		this.usageNavigationPending = true;
+		this.panel?.webview.postMessage({ type: 'open-usage' });
 	}
 
 	sendActionResult(id: string, result?: { error?: string; cancelled?: boolean }): void {

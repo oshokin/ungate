@@ -11,11 +11,17 @@ interface ToolCallDelta {
 export class CompletionAccumulator {
 	private content = '';
 	private readonly toolCalls = new Map<number, OpenAIToolCall>();
-	private finishReason: 'stop' | 'length' | 'tool_calls' = 'stop';
+	private finishReason: 'stop' | 'length' | 'tool_calls' | 'content_filter' = 'stop';
+	private terminal = false;
 	private usage?: ChatCompletionUsage;
 
 	consume(results: StreamProcessResult[]): void {
 		for (const result of results) {
+			if (this.terminal) break;
+			if (result.type === 'done' || result.type === 'error') {
+				this.terminal = true;
+				continue;
+			}
 			if (result.type !== 'chunk' || !result.data) continue;
 			const choice = (result.data.choices as Record<string, unknown>[] | undefined)?.[0];
 			const delta = choice?.delta as Record<string, unknown> | undefined;
@@ -36,7 +42,10 @@ export class CompletionAccumulator {
 			}
 
 			const finish = choice?.finish_reason;
-			if (finish === 'stop' || finish === 'length' || finish === 'tool_calls') this.finishReason = finish;
+			if (finish === 'stop' || finish === 'length' || finish === 'tool_calls' || finish === 'content_filter') {
+				this.finishReason = finish;
+				this.terminal = true;
+			}
 			const usage = result.data.usage;
 			if (usage && typeof usage === 'object') this.usage = usage as ChatCompletionUsage;
 		}
@@ -52,7 +61,7 @@ export class CompletionAccumulator {
 			object: 'chat.completion',
 			created: state.created,
 			model: state.model,
-			choices: [{ index: 0, message, finish_reason: toolCalls.length > 0 ? 'tool_calls' : this.finishReason }],
+			choices: [{ index: 0, message, finish_reason: this.finishReason }],
 			...((this.usage ?? state.usage) ? { usage: this.usage ?? state.usage } : {})
 		};
 	}

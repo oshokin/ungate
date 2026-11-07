@@ -47,7 +47,7 @@ export class StreamDiagnostics {
 		const promptTokens = tokenCount(raw.input_tokens) ?? tokenCount(raw.prompt_tokens);
 		const completionTokens = tokenCount(raw.output_tokens) ?? tokenCount(raw.completion_tokens);
 
-		if (promptTokens === undefined && completionTokens === undefined) {
+		if (promptTokens === undefined || completionTokens === undefined) {
 			return undefined;
 		}
 
@@ -57,7 +57,7 @@ export class StreamDiagnostics {
 		const mappedUsage: ChatCompletionUsage = {
 			prompt_tokens: prompt,
 			completion_tokens: completion,
-			total_tokens: upstreamTotal !== undefined && upstreamTotal > 0 ? upstreamTotal : prompt + completion
+			total_tokens: upstreamTotal ?? prompt + completion
 		};
 		const cachedTokens = tokenCount(asRecord(raw.input_tokens_details ?? raw.prompt_tokens_details)?.cached_tokens);
 		const reasoningTokens = tokenCount(asRecord(raw.output_tokens_details ?? raw.completion_tokens_details)?.reasoning_tokens);

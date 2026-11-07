@@ -5,6 +5,7 @@ import {
 	LOOPBACK_HOST,
 	type ApiHealth,
 	type AppSettings,
+	type SubscriptionUsage,
 	type TunnelProtocol
 } from '@ungate/shared';
 
@@ -73,6 +74,22 @@ async function readAdminJson<T>(port: number, path: string): Promise<T> {
 
 export function readAppSettings(port: number): Promise<AppSettings> {
 	return readAdminJson<AppSettings>(port, '/settings');
+}
+
+export async function readSubscriptionUsage(port: number, refresh = false, signal?: AbortSignal): Promise<SubscriptionUsage> {
+	const response = await fetch(`http://${LOOPBACK_HOST}:${port}${refresh ? '/usage/refresh' : '/usage'}`, {
+		method: refresh ? 'POST' : 'GET',
+		headers: { Authorization: `Bearer ${getAdminToken()}` },
+		redirect: 'error',
+		signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(30_000)])
+	});
+	if (!response.ok) throw new Error(`Usage: HTTP ${response.status}`);
+	const raw: unknown = await response.json();
+	if (!raw || typeof raw !== 'object' || !Array.isArray((raw as { providers?: unknown }).providers)) {
+		throw new Error('Usage response is invalid.');
+	}
+
+	return raw as SubscriptionUsage;
 }
 
 export async function assertCompatibleApi(

@@ -15,7 +15,8 @@ export function build(): void {
 
 export function check(): void {
 	build();
-	runPnpm(['--filter', 'ungate', 'exec', 'tsc', '--noEmit', '-p', 'tsconfig.build.json']);
+	for (const name of ['@ungate/dev-kit', '@ungate/shared', '@ungate/api', 'ungate'])
+		runPnpm(['--filter', name, 'exec', 'tsc', '--noEmit', '-p', 'tsconfig.json']);
 	runPnpm(['--filter', '@ungate/scripts', 'exec', 'tsc', '--noEmit', '-p', 'tsconfig.json']);
 	runPnpm(['--filter', '@ungate/web', 'run', 'check']);
 	runPnpm(['-r', 'run', 'lint']);

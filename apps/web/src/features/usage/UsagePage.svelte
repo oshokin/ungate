@@ -1,15 +1,37 @@
 <script lang="ts">
+import { formatUsageDuration, formatUsagePercent, type ModelMappingProvider, type ProviderUsage } from '@ungate/shared/frontend';
 import { onMount } from 'svelte';
 
 import ProviderIcon from '$shared/ProviderIcon.svelte';
-import { createToastWatcher } from '$shared/toast-store.svelte';
 
 import { getUsageStore } from './usage-store.svelte';
 
-import type { ModelMappingProvider, ProviderUsage } from '@ungate/shared/frontend';
-
 const usage = getUsageStore();
-const watchUsageError = createToastWatcher('usage');
+let preferenceError = $state<string | null>(null);
+let intervalDraft = $state<number | undefined>(undefined);
+let editingInterval = $state(false);
+let saving = $state(false);
+async function save(patch: Record<string, boolean | number>): Promise<void> {
+	saving = true;
+	preferenceError = null;
+	try {
+		await usage.savePreferences(patch);
+	} catch (error) {
+		preferenceError = error instanceof Error ? error.message : String(error);
+	} finally {
+		saving = false;
+	}
+}
+function commitInterval(): void {
+	if (!editingInterval) return;
+	if (!Number.isInteger(intervalDraft) || intervalDraft! < 15 || intervalDraft! > 3600) {
+		preferenceError = 'Enter a whole number from 15 to 3600 seconds.';
+
+		return;
+	}
+	editingInterval = false;
+	void save({ intervalSeconds: intervalDraft! });
+}
 const providers: ModelMappingProvider[] = ['claude', 'openai', 'minimax'];
 const labels = { claude: 'Claude', openai: 'ChatGPT / Codex', minimax: 'MiniMax' };
 const statuses = {
@@ -26,12 +48,11 @@ function date(value: string | null): string {
 	return value ? new Date(value).toLocaleString() : 'Not reported';
 }
 function percent(value: number | null): string {
-	return value === null ? 'Not reported' : `${value.toFixed(1)}%`;
+	return formatUsagePercent(value);
 }
 onMount(() => {
 	usage.ensureLoaded();
 });
-$effect(() => watchUsageError(usage.error, 'error'));
 </script>
 
 <section
@@ -43,11 +64,52 @@ $effect(() => watchUsageError(usage.error, 'error'));
 				>Limits reported by your connected provider accounts.</p
 			></div>
 		<button
-			class="ug-button ug-primary"
+			class="ug-button ug-primary min-w-28"
 			disabled={usage.loading}
 			onclick={() => void usage.refresh()}>{usage.loading ? 'Refreshing…' : 'Refresh'}</button>
 	</div>
-	{#each providers as providerName (providerName)}
+	<div class="flex flex-wrap items-center gap-3 text-sm">
+		<label class="flex items-center gap-2"
+			><input
+				type="checkbox"
+				checked={usage.preferences.autoRefresh}
+				disabled={saving}
+				onchange={(event) => void save({ autoRefresh: event.currentTarget.checked })} />Automatically refresh</label>
+		{#if usage.preferences.autoRefresh}
+			<label class="flex items-center gap-2"
+				>Every <input
+					class="ug-input w-20"
+					type="number"
+					min="15"
+					max="3600"
+					step="1"
+					aria-label="Refresh interval in seconds"
+					value={editingInterval ? intervalDraft : usage.preferences.intervalSeconds}
+					oninput={(event) => {
+						editingInterval = true;
+						intervalDraft = event.currentTarget.valueAsNumber;
+					}}
+					onblur={commitInterval}
+					onkeydown={(event) => {
+						if (event.key === 'Enter') commitInterval();
+						if (event.key === 'Escape') {
+							editingInterval = false;
+							preferenceError = null;
+						}
+					}} /> seconds</label>
+		{/if}
+	</div>
+	{#if !usage.preferences.autoRefresh}
+		<p class="text-sm ug-description">Enable automatic refresh to use status bar widgets. Your widget selections are kept.</p>
+	{/if}
+	{#if preferenceError || usage.error}<p
+			class="text-sm ug-warning"
+			role="alert">{preferenceError ?? usage.error}</p
+		>{/if}
+	{#if usage.data && !usage.data.providers.some((provider) => provider.status !== 'not_connected')}<p class="ug-description"
+			>Connect a provider in Connection to see subscription usage.</p
+		>{/if}
+	{#each providers.filter((name) => providerUsage(name)?.status !== 'not_connected' && providerUsage(name) !== null) as providerName (providerName)}
 		{@const provider = providerUsage(providerName)}
 		<article class="ug-panel p-5 space-y-4">
 			<div class="flex flex-wrap justify-between gap-2">
@@ -70,7 +132,7 @@ $effect(() => watchUsageError(usage.error, 'error'));
 				{#each provider.windows as window (window.id)}
 					<div class="space-y-2">
 						<div class="flex flex-wrap justify-between gap-2 text-sm"
-							><span>{window.label}</span><span
+							><span>{window.label} · {formatUsageDuration(window.windowSeconds)}</span><span
 								>{percent(window.usedPercent)} used · {percent(window.remainingPercent)} remaining</span
 							></div>
 						{#if window.usedPercent !== null}<progress
@@ -82,12 +144,20 @@ $effect(() => watchUsageError(usage.error, 'error'));
 						<p class="text-xs ug-description">Resets: {date(window.resetsAt)}</p>
 					</div>
 				{/each}
-				<p class="text-xs ug-description">Last data: {date(provider.fetchedAt)} · Checked: {date(provider.checkedAt)}</p>
+				<p class="text-xs ug-description">Last data: {date(provider.fetchedAt)}</p>
 			{:else}
 				<p
 					class="text-sm ug-description"
 					role="status">Reading subscription limits…</p>
 			{/if}
+			{#if usage.preferences.autoRefresh}<label class="flex items-center gap-2 text-sm"
+					><input
+						type="checkbox"
+						aria-label={`Show ${labels[providerName]} limits in status bar`}
+						checked={usage.preferences.widgets[providerName]}
+						disabled={saving}
+						onchange={(event) => void save({ [`widgets.${providerName}`]: event.currentTarget.checked })} />Show in status bar</label
+				>{/if}
 		</article>
 	{/each}
 </section>

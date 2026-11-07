@@ -1,7 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import { OpenAIStreamHandler } from 'src/streaming/openai-stream-handler';
 import { MiniMaxStreamHandler } from 'src/streaming/minimax-stream-handler';
+import { OpenAIStreamHandler } from 'src/streaming/openai-stream-handler';
 
 const context = { model: 'test', source: 'claude' as const, startTime: 0, reverseToolMapping: {} };
 function upstream(events: unknown[]): Response {
@@ -10,6 +10,7 @@ function upstream(events: unknown[]): Response {
 async function chunks(stream: ReadableStream): Promise<Record<string, unknown>[]> {
 	const text = await new Response(stream).text();
 	expect(text.match(/data: \[DONE\]/g)).toHaveLength(1);
+
 	return text
 		.split('\n')
 		.filter((line) => line.startsWith('data: {'))

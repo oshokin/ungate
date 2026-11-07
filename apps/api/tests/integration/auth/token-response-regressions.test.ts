@@ -13,19 +13,28 @@ afterEach(() => {
 
 describe('bounded OAuth responses and refresh', () => {
 	it.each([0, -1, '1', null])('rejects invalid expiry %j', async (expires_in) => {
-		await expect(
-			readTokenResponse(new Response(JSON.stringify({ access_token: 'ok', expires_in })))
-		).rejects.toMatchObject({ code: 'invalid_token_response' });
+		await expect(readTokenResponse(new Response(JSON.stringify({ access_token: 'ok', expires_in })))).rejects.toMatchObject({
+			code: 'invalid_token_response'
+		});
 	});
 
 	it('accepts a fractional positive lifetime', async () => {
-		await expect(
-			readTokenResponse(new Response(JSON.stringify({ access_token: 'ok', expires_in: 0.5 })))
-		).resolves.toMatchObject({ expires_in: 0.5 });
+		await expect(readTokenResponse(new Response(JSON.stringify({ access_token: 'ok', expires_in: 0.5 })))).resolves.toMatchObject(
+			{ expires_in: 0.5 }
+		);
 	});
 
 	it('preserves the old refresh token when persisting a valid access-token renewal', async () => {
-		const owner = { accessToken: 'old-access', refreshToken: 'old-refresh', expiresAt: 1 };
+		const owner = {
+			provider: 'openai',
+			accessToken: 'old-access',
+			refreshToken: 'old-refresh',
+			expiresAt: 1,
+			email: null,
+			accountId: null,
+			createdAt: 0,
+			baseUrl: null
+		} satisfies NonNullable<ReturnType<typeof ProviderSettings.get>>;
 		vi.spyOn(ProviderSettings, 'get').mockReturnValue(owner);
 		const persist = vi.spyOn(ProviderSettings, 'upsertOAuth').mockImplementation(() => {});
 		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{"access_token":"new-access","expires_in":3600}')));

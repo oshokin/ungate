@@ -57,8 +57,8 @@ interface ActiveToolCall {
 interface StreamUsage {
 	input_tokens: number;
 	output_tokens: number;
-	cache_read_input_tokens: number;
-	cache_creation_input_tokens: number;
+	cache_read_input_tokens?: number;
+	cache_creation_input_tokens?: number;
 }
 
 /** Claude stream event cap, overridable with PROVIDER_MAX_SSE_EVENT_BYTES. */
@@ -254,11 +254,13 @@ export class OpenAIStreamHandler {
 							if (finalUsage) {
 								safeEnqueue(
 									new TextEncoder().encode(
-										AnthropicToOpenai.streamChunk(streamId, modelName, undefined, undefined, {
-											prompt_tokens: finalUsage.input_tokens,
-											completion_tokens: finalUsage.output_tokens,
-											total_tokens: finalUsage.input_tokens + finalUsage.output_tokens
-										})
+										AnthropicToOpenai.streamChunk(
+											streamId,
+											modelName,
+											undefined,
+											undefined,
+											AnthropicToOpenai.convertUsage(finalUsage)
+										)
 									)
 								);
 							}
@@ -405,15 +407,11 @@ export class OpenAIStreamHandler {
 
 										if (event.type === 'message_start' && event.message?.usage) {
 											const usage = event.message.usage;
-											const cacheRead = usage.cache_read_input_tokens ?? 0;
-											const cacheCreate = usage.cache_creation_input_tokens ?? 0;
-											const regularInput = usage.input_tokens ?? 0;
-
 											finalUsage = {
-												input_tokens: regularInput + cacheCreate + cacheRead,
+												input_tokens: usage.input_tokens ?? 0,
 												output_tokens: usage.output_tokens ?? 0,
-												cache_read_input_tokens: cacheRead,
-												cache_creation_input_tokens: cacheCreate
+												cache_read_input_tokens: usage.cache_read_input_tokens,
+												cache_creation_input_tokens: usage.cache_creation_input_tokens
 											};
 										}
 

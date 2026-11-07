@@ -20,22 +20,29 @@ import { openCursorModels } from './cursor-settings';
 import { Dashboard, type Msg } from './dashboard';
 import { extensionCommands } from './extension-commands';
 import { ExtensionStatusBar, type UngateConnectionStatus } from './extension-status-bar';
-import { readAppSettings, readApiHealth } from './local-api';
+import { readApiHealth, readAppSettings, readSubscriptionUsage } from './local-api';
 import { chooseNodeRuntime } from './node-runtime-settings';
 import { RuntimeStateStore } from './runtime-state';
 import { config } from './runtime-state/config';
 import { SharedServiceController } from './shared-service-controller';
+import { formatSubscriptionLimitLine, formatSubscriptionLimitTooltip } from './subscription-limits';
 import { TunnelManager } from './tunnel-manager';
+import { UsageController } from './usage-controller';
 import { ManagedProcess } from './utils/managed-process';
 
 /** Right-side status bar priority. Higher values sit closer to the right edge. */
 const STATUS_BAR_PRIORITY = 100;
+/** Sits beside the connection item. Hidden until a connected provider returns windows. */
+const LIMITS_STATUS_BAR_PRIORITY = 99;
+/** Matches the API usage cache so the status line does not call providers more often. */
 
 class ActionCancelledError extends Error {}
 
 export class ExtensionController {
 	private outputChannel!: vscode.OutputChannel;
 	private statusBar!: vscode.StatusBarItem;
+	private readonly usageItems = new Map<string, vscode.StatusBarItem>();
+	private usage!: UsageController;
 	private dashboard!: Dashboard;
 	private tunnelManager!: TunnelManager;
 	private apiServer!: ApiServer;
@@ -63,8 +70,11 @@ export class ExtensionController {
 	private runtimeStateSyncDebounce: NodeJS.Timeout | null = null;
 	private syncing = false;
 	private extensionHostActive = false;
+	private readonly activatedArtifactDigest: string | undefined;
 
-	constructor(private readonly context: vscode.ExtensionContext) {}
+	constructor(private readonly context: vscode.ExtensionContext) {
+		this.activatedArtifactDigest = apiArtifactDigest(context);
+	}
 
 	public activate(): void {
 		this.extensionHostActive = true;
@@ -81,6 +91,62 @@ export class ExtensionController {
 		);
 		this.statusBar.command = extensionCommands.openDashboard;
 		this.context.subscriptions.push(this.statusBar);
+		for (const [index, provider] of ['claude', 'openai', 'minimax'].entries()) {
+			const item = vscode.window.createStatusBarItem(
+				`ungate.usage.${provider}`,
+				vscode.StatusBarAlignment.Right,
+				LIMITS_STATUS_BAR_PRIORITY - index
+			);
+			item.command = 'ungate.openUsage';
+			this.usageItems.set(provider, item);
+			this.context.subscriptions.push(item);
+		}
+		this.usage = new UsageController(
+			async (refresh, signal) => {
+				if (!this.currentPort || this.lastApiStatus !== 'running') throw new Error('Compatible local API is not available.');
+				const service = describeService(await readApiHealth(this.currentPort, signal), apiArtifactDigest(this.context));
+				this.publishServiceState(service);
+				if (service.status !== 'ready') throw new Error(service.message ?? 'Incompatible Ungate API');
+
+				return readSubscriptionUsage(this.currentPort, refresh, signal);
+			},
+			() => this.isLeaderWindow(),
+			(state) => {
+				this.dashboard?.sendUsageState(state);
+				for (const [name, item] of this.usageItems) {
+					const provider = state.data?.providers.find((entry) => entry.provider === name);
+					const line = provider ? formatSubscriptionLimitLine([provider]) : null;
+					if (
+						!state.preferences.autoRefresh ||
+						!state.preferences.widgets[name as 'claude' | 'openai' | 'minimax'] ||
+						!line ||
+						!provider
+					) {
+						item.hide();
+						continue;
+					}
+					item.text = line;
+					item.accessibilityInformation = { label: line };
+					const tip = new vscode.MarkdownString();
+					tip.appendText(formatSubscriptionLimitTooltip([provider]));
+					tip.appendMarkdown('\n\n[Open Usage](command:ungate.openUsage)');
+					tip.isTrusted = { enabledCommands: ['ungate.openUsage'] };
+					item.tooltip = tip;
+					item.show();
+				}
+			}
+		);
+		this.context.subscriptions.push(
+			this.usage,
+			vscode.workspace.onDidChangeConfiguration((event) => {
+				if (event.affectsConfiguration('ungate.usage')) this.usage.configure();
+			}),
+			vscode.commands.registerCommand('ungate.openUsage', () => {
+				this.dashboard.show();
+				this.dashboard.openUsage();
+			})
+		);
+		this.usage.configure();
 		// Render immediately in every local and Remote SSH window. Runtime-state
 		// bootstrap is asynchronous and must not gate status-bar visibility.
 		this.updateStatusBar();
@@ -90,7 +156,9 @@ export class ExtensionController {
 			(message) => {
 				this.handleDashboardMessage(message);
 			},
-			apiArtifactDigest(this.context)
+			apiArtifactDigest(this.context),
+			this.usage,
+			(service) => this.publishServiceState(service)
 		);
 
 		this.tunnelManager = new TunnelManager(
@@ -192,6 +260,8 @@ export class ExtensionController {
 			this.statusBarWarningTimer = null;
 		}
 
+		this.usage?.dispose();
+
 		if (this.runtimeStateWatcher) {
 			this.runtimeStateWatcher.dispose();
 			this.runtimeStateWatcher = null;
@@ -234,7 +304,7 @@ export class ExtensionController {
 		const apiState = this.lastApiStatus ?? 'stopped';
 		const tunnel = this.currentTunnelState;
 		const tunnelApiUrl = this.getTunnelApiUrl();
-		const status = ExtensionStatusBar.connectionStatus(apiState, tunnel);
+		const status = ExtensionStatusBar.connectionStatus(apiState, tunnel, this.serviceState.status);
 		const becameOffline = this.lastConnectionStatus === 'ready' && status === 'offline' && !this.actionInProgress;
 
 		if (becameOffline) this.scheduleWarningBackgroundReset();
@@ -249,8 +319,11 @@ export class ExtensionController {
 			this.getLocalApiUrl(),
 			this.lastApiError,
 			tunnel,
-			tunnelApiUrl
+			tunnelApiUrl,
+			this.serviceState.message
 		);
+		// A persistent warning fill is for an interruption the user did not expect.
+		// A build mismatch stays a normal Not ready item; the icon and tooltip carry it.
 		this.statusBar.backgroundColor =
 			status === 'offline' && this.statusBarWarningTimer ? new vscode.ThemeColor('statusBarItem.warningBackground') : undefined;
 		this.statusBar.show();
@@ -283,21 +356,48 @@ export class ExtensionController {
 		if (isNew) {
 			this.log(`[port] detected: ${port}`);
 			this.dashboard.setPort(port);
+			void this.refreshSubscriptionLimits();
+		}
+	}
+
+	private hideSubscriptionLimits(): void {
+		for (const item of this.usageItems.values()) item.hide();
+	}
+
+	private async refreshSubscriptionLimits(): Promise<void> {
+		if (this.usage?.state.preferences.autoRefresh) {
+			this.usage.configure();
+			await this.usage.load(this.isLeaderWindow());
 		}
 	}
 
 	private handleApiServerStatusChange(status: ApiLifecycleStatus): void {
+		const becameRunning = status === 'running' && this.lastApiStatus !== 'running';
 		if (status === 'stopped' && this.lastApiStatus === 'running') {
 			this.log(`[health] port ${this.currentPort} unreachable`);
 		}
 
 		this.applyApiServerStatus(status);
+		if (becameRunning) void this.refreshSubscriptionLimits();
+		else if (status !== 'running') this.hideSubscriptionLimits();
 	}
 
 	private async runAction(action: DashboardAction): Promise<void> {
 		if (this.actionInProgress) throw new Error('Another Ungate action is still running.');
 		this.actionInProgress = true;
 		try {
+			const settingsQueries: Partial<Record<DashboardAction, string>> = {
+				'open-extension-settings': '@ext:orchidfiles.ungate',
+				'open-provider-timeout-settings': '@id:ungate.network.providerHeaderTimeoutSeconds',
+				'open-tunnel-timeout-settings': '@id:ungate.tunnel.connectTimeoutSeconds',
+				'open-log-settings': '@id:ungate.logs.maxEntries'
+			};
+			const settingsQuery = settingsQueries[action];
+			if (settingsQuery) {
+				await vscode.commands.executeCommand('workbench.action.openSettings', settingsQuery);
+
+				return;
+			}
 			if (action === 'choose-node-runtime') {
 				const selected = await chooseNodeRuntime();
 				if (!selected) throw new ActionCancelledError('Action cancelled.');
@@ -407,7 +507,9 @@ export class ExtensionController {
 		} else {
 			try {
 				const health = await readApiHealth(state.api.port);
-				service = describeService(health, this.apiServer.getExpectedArtifactDigest());
+				// Installation can replace the bundle while this extension host stays alive.
+				// Use the same on-disk identity as Usage, not the startup-cached digest.
+				service = describeService(health, apiArtifactDigest(this.context));
 			} catch {
 				service = {
 					status: 'error',
@@ -420,8 +522,24 @@ export class ExtensionController {
 			}
 		}
 		service.logsConnected = state.api.logHealth?.status !== 'unavailable';
+		this.publishServiceState(service);
+	}
+
+	private publishServiceState(service: ServiceState): void {
+		const installedDigest = apiArtifactDigest(this.context);
+		if (this.activatedArtifactDigest && installedDigest && installedDigest !== this.activatedArtifactDigest) {
+			service = {
+				...service,
+				status: 'incompatible',
+				canUpdate: false,
+				restartRequired: false,
+				message:
+					'Ungate was updated while this window was running. Reload this window to load the installed extension before restarting the shared API.'
+			};
+		}
 		this.serviceState = service;
 		this.dashboard.sendServiceState(service);
+		this.updateStatusBar();
 	}
 
 	private startHeartbeat(): void {
@@ -491,6 +609,7 @@ export class ExtensionController {
 	}
 
 	private applyRuntimeState(runtimeState: RuntimeState): void {
+		const becameRunning = runtimeState.api.status === 'running' && this.lastApiStatus !== 'running';
 		const resolvedPort =
 			runtimeState.api.startSuppressed && runtimeState.api.status === 'stopped'
 				? null
@@ -511,6 +630,8 @@ export class ExtensionController {
 		this.dashboard.setPort(this.currentPort);
 		this.dashboard.sendTunnelState(this.currentTunnelState);
 		this.updateStatusBar();
+		if (becameRunning) void this.refreshSubscriptionLimits();
+		else if (runtimeState.api.status !== 'running') this.hideSubscriptionLimits();
 	}
 
 	private isLeaderWindow(runtimeState?: RuntimeState): boolean {

@@ -45,6 +45,38 @@ function readToolCalls(output: string): unknown[] {
 }
 
 describe('streaming-openai-stream-handler', () => {
+	it.each([
+		{ cache: { cache_creation_input_tokens: 20, cache_read_input_tokens: 70 }, prompt: 100, details: { cached_tokens: 70 } },
+		{ cache: { cache_creation_input_tokens: 20 }, prompt: 30, details: undefined },
+		{ cache: { cache_read_input_tokens: 0 }, prompt: 10, details: { cached_tokens: 0 } },
+		{ cache: {}, prompt: 10, details: undefined }
+	])('preserves stream cache presence: $cache', async ({ cache, prompt, details }) => {
+		const response = createResponseWithSse([
+			`data: ${JSON.stringify({ type: 'message_start', message: { usage: { input_tokens: 10, output_tokens: 0, ...cache } } })}`,
+			'data: {"type":"message_delta","usage":{"output_tokens":5}}',
+			'data: {"type":"message_stop"}'
+		]);
+		const { stream } = OpenAIStreamHandler.createStreamResponse(response, 'cache', 'claude', {
+			model: 'claude',
+			source: 'claude',
+			startTime: Date.now(),
+			reverseToolMapping: {}
+		});
+		const output = await readStream(stream);
+		const chunks = output
+			.split('\n')
+			.filter((line) => line.startsWith('data: {'))
+			.map((line) => JSON.parse(line.slice(6)) as { usage?: unknown });
+		expect(chunks.filter((chunk) => chunk.usage).map((chunk) => chunk.usage)).toEqual([
+			{
+				prompt_tokens: prompt,
+				completion_tokens: 5,
+				total_tokens: prompt + 5,
+				...(details === undefined ? {} : { prompt_tokens_details: details })
+			}
+		]);
+	});
+
 	afterEach(() => {});
 
 	it('creates stream headers and processes text events with usage', async () => {

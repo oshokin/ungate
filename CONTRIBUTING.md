@@ -69,7 +69,7 @@ ESLint and Prettier configs live in `packages/dev-kit`. The pre-commit hook runs
 
 - **Don't bypass `VerifiedArtifact`** when adding or updating a downloaded binary. Pin the URL and add the SHA-256 to the allowlist. Do not introduce fallbacks to `latest` releases.
 - **Don't introduce reads or writes to Cursor's `state.vscdb`.** Ungate's storage is independent and the extension must use supported/capability-checked Cursor commands.
-- **Add bidirectional entries to `src/proxy/tool-mapper.ts`** for any tool you support. Claude OAuth rejects unknown tool names server-side.
+- **Do not rename Cursor tool names.** The installed agent expects the same name it advertised (`Shell`, `ApplyPatch`, `StrReplace`). Forward unknown names; do not drop them to fit a Claude Code list.
 - **Don't drop the model-routing branch order** in `src/routes/openai.ts`. MiniMax → mapped → Claude, in that order. Reordering routes MiniMax traffic to Claude and breaks OAuth.
 
 ## Testing

@@ -196,6 +196,19 @@ export class OpenAiClient {
 
 		let cancelled = false;
 		let finalized = false;
+		let doneEmitted = false;
+		let cleanupPromise: Promise<void> | undefined;
+		const cleanup = (reason?: unknown) => {
+			cleanupPromise ??= reader
+				.cancel(reason)
+				.catch(() => {})
+				.then(() => {
+					reader.releaseLock();
+					StreamDiagnostics.logFinished(state, 'stream');
+				});
+
+			return cleanupPromise;
+		};
 		const encoder = new TextEncoder();
 		const streamBody = new ReadableStream({
 			async pull(controller) {
@@ -213,6 +226,7 @@ export class OpenAiClient {
 								controller.enqueue(
 									encoder.encode(result.type === 'done' ? 'data: [DONE]\n\n' : `data: ${JSON.stringify(result.data)}\n\n`)
 								);
+								if (result.type === 'done') doneEmitted = true;
 							}
 						}
 					}
@@ -222,6 +236,7 @@ export class OpenAiClient {
 							controller.enqueue(
 								encoder.encode(result.type === 'done' ? 'data: [DONE]\n\n' : `data: ${JSON.stringify(result.data)}\n\n`)
 							);
+							if (result.type === 'done') doneEmitted = true;
 						}
 					}
 					finalized = true;
@@ -233,21 +248,26 @@ export class OpenAiClient {
 						}
 					}
 					controller.close();
-				} catch (error) {
+				} catch {
 					finalized = true;
-					if (!cancelled) controller.error(error);
+					if (!cancelled) {
+						// Never flush interrupted tool arguments or synthesize successful completion.
+						for (const result of ResponsesSseProcessor.failTruncated(state)) {
+							if (result.type !== 'done') controller.enqueue(encoder.encode(`data: ${JSON.stringify(result.data)}\n\n`));
+						}
+						if (!doneEmitted) controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+						controller.close();
+					}
 				} finally {
 					if (finalized) {
-						await reader.cancel().catch(() => {});
-						reader.releaseLock();
-						StreamDiagnostics.logFinished(state, 'stream');
+						await cleanup();
 					}
 				}
 			},
 			cancel(reason) {
 				cancelled = true;
 
-				return reader.cancel(reason);
+				return cleanup(reason);
 			}
 		});
 
@@ -265,23 +285,29 @@ export class OpenAiClient {
 		const reader = response.body!.getReader();
 		const decoder = new TextDecoder();
 
-		while (true) {
-			const { done, value } = await reader.read();
+		try {
+			while (!state.completed) {
+				const { done, value } = await reader.read();
 
-			if (done) {
-				break;
+				if (done) {
+					break;
+				}
+
+				const text = decoder.decode(value, { stream: true });
+				const results = ResponsesSseProcessor.process(state, text);
+
+				accumulator.consume(results);
 			}
 
-			const text = decoder.decode(value, { stream: true });
-			const results = ResponsesSseProcessor.process(state, text);
-
-			accumulator.consume(results);
+			accumulator.consume(ResponsesSseProcessor.flush(state, decoder.decode()));
+			if (!state.completed) accumulator.consume(ResponsesSseProcessor.failTruncated(state));
+		} catch {
+			accumulator.consume(ResponsesSseProcessor.failTruncated(state));
+		} finally {
+			await reader.cancel().catch(() => {});
+			reader.releaseLock();
+			StreamDiagnostics.logFinished(state, 'buffer');
 		}
-
-		accumulator.consume(ResponsesSseProcessor.flush(state, decoder.decode()));
-		if (!state.completed) accumulator.consume(ResponsesSseProcessor.failTruncated(state));
-		reader.releaseLock();
-		StreamDiagnostics.logFinished(state, 'buffer');
 		if (state.error) {
 			return new Response(JSON.stringify({ error: state.error }), {
 				status: 502,

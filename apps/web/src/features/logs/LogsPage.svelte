@@ -1,5 +1,6 @@
 <script lang="ts">
 import { createCopyFeedback } from '$shared/copy-feedback.svelte';
+import NumericPreference from '$shared/NumericPreference.svelte';
 import { getSavedLogPanelHeight, type LogSource } from '$shared/vscode';
 
 import { LOG_PANEL } from './log-tail';
@@ -23,6 +24,12 @@ async function copy(source: LogSource): Promise<void> {
 </script>
 
 <div class="ug-stack">
+	<NumericPreference
+		preference="logs.maxEntries"
+		label="Entries per source"
+		min={100}
+		max={5000}
+		help="Applies immediately; not disk retention." />
 	{#if error}<p
 			class="ug-error"
 			role="alert">{error}</p

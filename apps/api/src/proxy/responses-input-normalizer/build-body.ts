@@ -56,7 +56,6 @@ export class ResponsesBodyBuilder {
 		finalInput = CodexInputUtils.normalizeAssistantText(finalInput);
 
 		const rawTools = Array.isArray(body.tools) ? body.tools : [];
-		const hasTools = rawTools.length > 0;
 		const payload: Record<string, unknown> = {
 			model: resolvedModel.model,
 			input: finalInput,
@@ -83,10 +82,16 @@ export class ResponsesBodyBuilder {
 			payload.reasoning = { effort: reasoningEffort };
 		}
 
-		if (hasTools) {
-			payload.tools = rawTools.map((tool) => this.toResponsesTool(tool));
-			payload.tool_choice = this.mapChoice(body.tool_choice, true) ?? 'auto';
-			payload.parallel_tool_calls = false;
+		const tools = rawTools.flatMap((tool) => {
+			const converted = this.toResponsesTool(tool);
+
+			return converted ? [converted] : [];
+		});
+
+		if (tools.length > 0) {
+			payload.tools = tools;
+			const toolChoice = this.mapChoice(body.tool_choice);
+			if (toolChoice !== undefined) payload.tool_choice = toolChoice;
 		}
 
 		const debug = {
@@ -99,15 +104,15 @@ export class ResponsesBodyBuilder {
 		return { payload, debug };
 	}
 
-	// The Responses API expects function tools in a flattened shape with `name`,
-	// `description`, and `parameters` at the top level — unlike Chat Completions,
-	// which nests them under `function`. Cursor sends the nested form, so flatten
-	// it here; otherwise the upstream rejects with "Missing required parameter:
-	// 'tools[0].name'". Pass through tools that are already flat or non-function.
-	private static toResponsesTool(tool: unknown): Record<string, unknown> {
+	/**
+	 * Cursor's Responses client sends flat function tools and drops every other type.
+	 * Nested Chat tools are flattened so Codex sees `tools[0].name`.
+	 */
+	private static toResponsesTool(tool: unknown): Record<string, unknown> | undefined {
 		const record = (tool ?? {}) as Record<string, unknown>;
 		const fn = record.function as Record<string, unknown> | undefined;
 
+		if (record.type === 'function' && typeof record.name === 'string' && !fn) return record;
 		if (record.type === 'function' && fn && typeof fn.name === 'string') {
 			const flattened: Record<string, unknown> = {
 				type: 'function',
@@ -126,19 +131,14 @@ export class ResponsesBodyBuilder {
 			return flattened;
 		}
 
-		return record;
+		return undefined;
 	}
 
 	private static mapChoice(
-		toolChoice: OpenAIChatRequest['tool_choice'] | undefined,
-		hasTools: boolean
+		toolChoice: OpenAIChatRequest['tool_choice'] | undefined
 	): string | Record<string, unknown> | undefined {
-		if (!hasTools) {
-			return undefined;
-		}
-
 		if (toolChoice === undefined || toolChoice === null) {
-			return 'auto';
+			return undefined;
 		}
 
 		if (typeof toolChoice === 'string') {

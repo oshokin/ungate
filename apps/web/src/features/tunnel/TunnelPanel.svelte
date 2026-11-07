@@ -7,6 +7,7 @@ import IconEyeOff from 'virtual:icons/lucide/eye-off';
 import { getActionStore, performAction, runDashboardAction } from '$shared/actions.svelte';
 import { Api } from '$shared/api';
 import { createCopyFeedback } from '$shared/copy-feedback.svelte';
+import NumericPreference from '$shared/NumericPreference.svelte';
 import { getServiceStore } from '$shared/service-store.svelte';
 import { createToastWatcher, showToast } from '$shared/toast-store.svelte';
 
@@ -74,7 +75,8 @@ async function saveApiKey(): Promise<void> {
 }
 
 $effect(() => {
-	if (service.state.status === 'ready') void loadApiKey();
+	// A restart-required build still stores the key. Cursor's OpenAI key toggle does not.
+	if (service.state.status === 'ready' || service.state.restartRequired) void loadApiKey();
 });
 $effect(() => watchTunnelError(store.tunnel.error, 'error'));
 </script>
@@ -131,7 +133,7 @@ $effect(() => watchTunnelError(store.tunnel.error, 'error'));
 				<button
 					class="ug-button ug-quiet"
 					type="button"
-					disabled={!!actions.busy || service.state.status !== 'ready'}
+					disabled={!!actions.busy || (service.state.status !== 'ready' && !service.state.restartRequired)}
 					aria-label={apiKeyCopied ? 'API key copied' : 'Copy API key'}
 					title={apiKeyCopied ? 'Copied' : 'Copy API key'}
 					onclick={() => void copyApiKey()}>
@@ -207,6 +209,12 @@ $effect(() => watchTunnelError(store.tunnel.error, 'error'));
 			</div>
 		</div>
 	</div>
+	<NumericPreference
+		preference="tunnel.connectTimeoutSeconds"
+		label="Connect timeout (s)"
+		min={15}
+		max={120}
+		help="Applies to the next tunnel start." />
 	<details class="ug-details">
 		<summary>Connection details</summary>
 		<div class="ug-stack ug-muted">

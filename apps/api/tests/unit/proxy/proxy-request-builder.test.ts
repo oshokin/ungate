@@ -13,16 +13,16 @@ vi.mock('src/database/app-settings', () => ({
 import { RequestBuilder } from 'src/proxy/request-builder';
 
 describe('proxy-request-builder', () => {
-	it('prepares claude code body: strips reasoning budget and ttl cache fields', () => {
+	it('prepares claude code body without changing explicit cache TTLs', () => {
 		const prepared = RequestBuilder.prepareClaudeCodeBody({
 			model: 'claude-sonnet-4-6',
 			max_tokens: 1024,
 			reasoning_budget: 'high',
-			system: [{ type: 'text', text: 'sys', cache_control: { type: 'ephemeral', ttl: 20 } }],
+			system: [{ type: 'text', text: 'sys', cache_control: { type: 'ephemeral', ttl: '1h' } }],
 			messages: [
 				{
 					role: 'user',
-					content: [{ type: 'text', text: 'u', cache_control: { type: 'ephemeral', ttl: 10 } }]
+					content: [{ type: 'text', text: 'u', cache_control: { type: 'ephemeral', ttl: '5m' } }]
 				}
 			]
 		});
@@ -31,11 +31,11 @@ describe('proxy-request-builder', () => {
 		expect(prepared.thinking).toEqual({ type: 'adaptive' });
 		expect(prepared.output_config).toEqual({ effort: 'high' });
 		expect(Array.isArray(prepared.system)).toBe(true);
-		const system = prepared.system as { type: string; text?: string; cache_control?: { ttl?: number } }[];
+		const system = prepared.system as { type: string; text?: string; cache_control?: { ttl?: string } }[];
 		expect(system.some((block) => block.text === 'extra instruction from settings')).toBe(true);
-		expect(system.find((block) => block.text === 'sys')?.cache_control?.ttl).toBeUndefined();
-		const userBlock = (prepared.messages[0].content as { cache_control?: { ttl?: number } }[])[0];
-		expect(userBlock.cache_control?.ttl).toBeUndefined();
+		expect(system.find((block) => block.text === 'sys')?.cache_control?.ttl).toBe('1h');
+		const userBlock = (prepared.messages[0].content as { cache_control?: { ttl?: string } }[])[0];
+		expect(userBlock.cache_control?.ttl).toBe('5m');
 	});
 
 	it('passes each reasoning tier through verbatim as the effort level', () => {

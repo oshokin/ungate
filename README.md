@@ -88,6 +88,10 @@ A stopped shared service stays stopped across window reloads until explicitly st
 
 The panel reuses connected credentials. It does not ask for another login or API key.
 
+Usage refresh is manual by default. Enable **Automatically refresh** for background updates, including when the dashboard is closed. The application-wide interval defaults to **60 seconds**, accepts whole seconds from **15–3600**, and saves on blur or Enter; Escape restores the saved value. With automatic refresh enabled, each connected provider offers an independent **Show in status bar** checkbox (all off by default). Turning automatic refresh off hides these items without forgetting the selections.
+
+Each provider item shows its most restrictive reported basic window, using the actual duration and conservatively rounded percentage **left**; additional pools remain in Usage and the tooltip. Stale figures are explicitly marked. A reset date describes a usage window, not subscription expiry. Disconnected accounts are omitted. One extension-host snapshot feeds both views; only the existing runtime leader polls providers, while other windows read the API's memory cache. Manual refresh shares server-side single-flight and rate limiting. No usage history is persisted.
+
 | Provider | Source | Limits |
 | --- | --- | --- |
 | ChatGPT / Codex | Existing OAuth token and account ID, first-party Codex usage endpoint | Internal backend interface; availability is account-dependent. Window duration and reset time come from the response. |
@@ -129,4 +133,4 @@ The Node packaging pipeline replaces platform-specific shell copies. The legacy 
 
 ## Credits
 
-Ungate retains its upstream MIT license. Build/task, package-verification and lock patterns were adapted from [Cursor Chat Transit](https://github.com/oshokin/cursor-chat-transit). Selected protocol and authentication improvements were adapted from [inudder/ungate](https://github.com/inudder/ungate).
+Ungate retains its upstream MIT license. Build/task, package-verification and lock patterns were adapted from [Cursor Chat Transit](https://github.com/oshokin/cursor-chat-transit).

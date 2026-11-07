@@ -96,21 +96,7 @@ export class RequestBuilder {
 		return headers;
 	}
 
-	private static stripCacheTtl(content: ContentBlock[] | undefined): void {
-		if (!Array.isArray(content)) return;
-
-		for (const item of content) {
-			if (item && typeof item === 'object' && 'cache_control' in item) {
-				const cc = item.cache_control as Record<string, unknown>;
-
-				if (cc && 'ttl' in cc) {
-					delete cc.ttl;
-				}
-			}
-		}
-	}
-
-	static prepareClaudeCodeBody(body: AnthropicRequest): AnthropicRequest {
+	static prepareClaudeCodeBody(body: AnthropicRequest, endpoint?: string): AnthropicRequest {
 		const prepared = { ...body };
 
 		if ('reasoning_budget' in prepared) {
@@ -153,16 +139,16 @@ export class RequestBuilder {
 
 		prepared.system = systemPrompts;
 
-		if (Array.isArray(prepared.system)) {
-			this.stripCacheTtl(prepared.system);
-		}
-
-		if (Array.isArray(prepared.messages)) {
-			for (const message of prepared.messages) {
-				if (Array.isArray(message.content)) {
-					this.stripCacheTtl(message.content);
-				}
-			}
+		// Automatic caching consumes a breakpoint slot. Leave explicit policies alone,
+		// including their TTLs, rather than risking the four-breakpoint limit.
+		const hasBlockPolicy =
+			(prepared.tools ?? []).some((tool) => 'cache_control' in tool) ||
+			systemPrompts.some((block) => 'cache_control' in block) ||
+			prepared.messages.some(
+				(message) => Array.isArray(message.content) && message.content.some((block) => 'cache_control' in block)
+			);
+		if (endpoint === '/v1/messages' && !('cache_control' in prepared) && !hasBlockPolicy) {
+			prepared.cache_control = { type: 'ephemeral' };
 		}
 
 		return prepared;

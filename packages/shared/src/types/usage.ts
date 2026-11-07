@@ -16,6 +16,7 @@ export interface ProviderUsage {
 	checkedAt: string;
 	fetchedAt: string | null;
 	stale: boolean;
+	retryAfterSeconds?: number;
 	windows: UsageWindow[];
 	source: string | null;
 	contract: 'public' | 'internal';

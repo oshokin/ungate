@@ -57,9 +57,7 @@ export async function proxyMiniMaxRequest(
 		temperature: body.temperature,
 		top_p: body.top_p,
 		...(body.tools && body.tools.length > 0 && { tools: body.tools }),
-		...(body.tool_choice && {
-			tool_choice: typeof body.tool_choice === 'string' ? body.tool_choice : 'auto'
-		})
+		...(body.tool_choice !== undefined && { tool_choice: body.tool_choice })
 	};
 
 	const startTime = Date.now();

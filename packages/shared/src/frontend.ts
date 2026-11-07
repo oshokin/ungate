@@ -8,10 +8,17 @@ export * from './helpers/utils';
 export * from './schemas';
 export * from './service';
 export * from './limits';
+export * from './usage';
 
 import type { LogEntry, TunnelState } from './types';
 
+export type DashboardPreferenceKey = 'logs.maxEntries' | 'tunnel.connectTimeoutSeconds' | 'network.providerHeaderTimeoutSeconds';
+export type DashboardPreferences = Record<DashboardPreferenceKey, number>;
+
 export type ExtensionToWebview =
+	| { type: 'dashboard-preferences'; values: DashboardPreferences }
+	| { type: 'dashboard-preference-result'; key: DashboardPreferenceKey; error: string | null }
+	| { type: 'usage-state'; state: import('./usage').UsageState }
 	| { type: 'port'; port: number | null }
 	| { type: 'tunnel-status'; state: TunnelState }
 	| { type: 'service-state'; state: import('./service').ServiceState }
@@ -20,6 +27,8 @@ export type ExtensionToWebview =
 	| { type: 'logs-cleared'; source: 'api' | 'tunnel' };
 
 export type WebviewToExtension =
+	| { type: 'get-dashboard-preferences' }
+	| { type: 'set-dashboard-preference'; key: DashboardPreferenceKey; value: number }
 	| { type: 'webview-ready' }
 	| { type: 'restart-server' }
 	| { type: 'start-tunnel' }

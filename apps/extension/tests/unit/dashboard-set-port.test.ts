@@ -61,7 +61,10 @@ vi.mock('vscode', () => {
 	}
 
 	return {
-		workspace: { getConfiguration: () => ({ inspect: () => undefined }) },
+		workspace: {
+			getConfiguration: () => ({ inspect: () => undefined }),
+			onDidChangeConfiguration: vi.fn(() => new Disposable())
+		},
 		window: {
 			createWebviewPanel: createWebviewPanelMock
 		},
