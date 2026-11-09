@@ -7,7 +7,7 @@ vi.mock('vscode', () => ({}));
 vi.mock('../../src/node-runtime-settings', () => ({ chooseNodeRuntime: mocks.select, configuredNodePath: () => undefined }));
 vi.mock('../../src/runtime-state', () => ({ RuntimeStateStore: { read: mocks.read } }));
 vi.mock('../../src/utils/managed-process', () => ({
-	ManagedProcess: { isAlive: mocks.alive },
+	ManagedProcess: { isAlive: mocks.alive, isUngateApi: mocks.alive },
 	getCloudflaredBinPath: () => '/unused/cloudflared'
 }));
 

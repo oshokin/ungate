@@ -155,8 +155,10 @@ export class ApiServer {
 			}
 		} else {
 			const savedPid = RuntimeStateStore.read().api.pid;
-			if (!this.process && savedPid && ManagedProcess.isAlive(savedPid))
+			if (!this.process && savedPid && ManagedProcess.isUngateApi(savedPid))
 				throw new Error('API process is alive but cannot be authenticated. Check its PID before stopping it.');
+			if (!this.process && savedPid && ManagedProcess.isAlive(savedPid))
+				this.callbacks.onLog('warn', `[process] saved pid ${savedPid} does not belong to the Ungate API; leaving it running`);
 			this.process?.kill();
 		}
 		this.process = null;
@@ -228,11 +230,17 @@ export class ApiServer {
 			}
 		}
 
-		if (runtimeState.api.pid && ManagedProcess.isAlive(runtimeState.api.pid)) {
+		if (runtimeState.api.pid && ManagedProcess.isUngateApi(runtimeState.api.pid)) {
 			const message =
 				'Saved Ungate API process is alive but unhealthy. Use Restart API after checking its PID; no duplicate was started.';
 			await this.recordApiFailure(message);
 			throw new Error(message);
+		}
+		if (runtimeState.api.pid && ManagedProcess.isAlive(runtimeState.api.pid)) {
+			this.callbacks.onLog(
+				'info',
+				`[process] saved pid ${runtimeState.api.pid} does not belong to the Ungate API; starting a new API`
+			);
 		}
 		await this.setStatus('starting');
 
@@ -505,7 +513,7 @@ export class ApiServer {
 	private async handleHealthFailure(message: string): Promise<void> {
 		if (++this.healthFailures < config.apiServer.healthFailureThreshold) return;
 		const pid = RuntimeStateStore.read().api.pid;
-		if (pid && !ManagedProcess.isAlive(pid)) {
+		if (pid && !ManagedProcess.isUngateApi(pid)) {
 			this.port = null;
 			this.process = null;
 			this.lastStatus = 'stopped';

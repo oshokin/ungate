@@ -402,7 +402,7 @@ export class ExtensionController {
 				const selected = await chooseNodeRuntime();
 				if (!selected) throw new ActionCancelledError('Action cancelled.');
 				const state = RuntimeStateStore.read();
-				if (state.api.status !== 'running' && (!state.api.pid || !ManagedProcess.isAlive(state.api.pid)))
+				if (state.api.status !== 'running' && (!state.api.pid || !ManagedProcess.isUngateApi(state.api.pid)))
 					await this.services.run('restart-services');
 				await this.syncFromRuntimeState();
 

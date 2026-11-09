@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
 	read: vi.fn<() => RuntimeState>(),
 	mutate: vi.fn<(mutator: (state: RuntimeState) => RuntimeState) => Promise<RuntimeState>>(),
 	alive: vi.fn(),
+	ungate: vi.fn(),
 	compatible: vi.fn()
 }));
 vi.mock('vscode', () => ({
@@ -31,7 +32,9 @@ vi.mock('../../src/runtime-state', () => ({
 }));
 vi.mock('../../src/local-api', () => ({ assertCompatibleApi: mocks.compatible, readApiHealth: vi.fn() }));
 vi.mock('../../src/utils/cross-process-lock', () => ({ CrossProcessLock: { acquire: () => Promise.resolve(() => {}) } }));
-vi.mock('../../src/utils/managed-process', () => ({ ManagedProcess: { isAlive: mocks.alive } }));
+vi.mock('../../src/utils/managed-process', () => ({
+	ManagedProcess: { isAlive: mocks.alive, isUngateApi: mocks.ungate }
+}));
 
 interface Internals {
 	checkPortHealth(port: number): Promise<boolean>;
@@ -69,6 +72,7 @@ beforeEach(() => {
 	mocks.read.mockReturnValue(state);
 	mocks.mutate.mockImplementation((mutator) => Promise.resolve(mutator(structuredClone(state))));
 	mocks.alive.mockReturnValue(true);
+	mocks.ungate.mockReturnValue(true);
 	mocks.compatible.mockResolvedValue(undefined);
 });
 
@@ -110,5 +114,22 @@ describe('shared API reconnect after window reload (#60)', () => {
 		expect(reloaded.monitor).not.toHaveBeenCalled();
 		expect(reloaded.callbacks.onStatusChange).toHaveBeenCalledWith('error');
 		expect(reloaded.callbacks.onStatusChange).not.toHaveBeenCalledWith('running');
+	});
+
+	it('starts a new API when the saved PID belongs to another process', async () => {
+		const server = createServer();
+		mocks.alive.mockReturnValue(true);
+		mocks.ungate.mockReturnValue(false);
+		vi.spyOn(server.internals, 'checkPortHealth').mockResolvedValue(false);
+
+		await expect(server.server.start()).rejects.toThrow('unexpected process spawn');
+
+		expect(server.spawn).toHaveBeenCalledOnce();
+		expect(server.native).toHaveBeenCalledOnce();
+		expect(server.callbacks.onLog).toHaveBeenCalledWith(
+			'info',
+			'[process] saved pid 1234 does not belong to the Ungate API; starting a new API'
+		);
+		expect(server.callbacks.onStatusChange).toHaveBeenCalledWith('starting');
 	});
 });

@@ -156,7 +156,7 @@ export class RuntimeStateStore {
 			)
 				return state;
 
-			if (state.api.pid && ManagedProcess.isAlive(state.api.pid)) return state;
+			if (state.api.pid && ManagedProcess.isUngateApi(state.api.pid)) return state;
 			state.api.startSuppressed = false;
 			state.api.status = 'stopped';
 			state.api.ownerWindowId = null;
