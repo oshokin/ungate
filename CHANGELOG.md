@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.15 - 2026-11-13 (oshokin fork)
+
+- Show Claude thinking summaries in Cursor while the model works.
+
 ## 1.7.14 - 2026-10-25 (oshokin fork)
 
 - Preserve independently resizable API/tunnel logs, saved panel heights, initial tail positioning and unread-entry counts from the user's 2026-10-30 source archive alongside the dashboard settings and refactoring.

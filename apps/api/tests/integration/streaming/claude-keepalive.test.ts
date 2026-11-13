@@ -152,7 +152,8 @@ describe('Claude keepalive adaptation', () => {
 		f.send({ type: 'content_block_delta', delta: { type: 'text_delta', text: 'finished' } });
 		f.send({ type: 'message_stop' });
 		const text = await output;
-		expect(text).not.toContain('private');
+		expect(text).toContain('"reasoning_content":"private"');
+		expect(text).not.toContain('"content":"private"');
 		expect(text).toContain('"content":"finished"');
 		expect(text).toContain('"finish_reason":"stop"');
 		expect(vi.getTimerCount()).toBe(0);

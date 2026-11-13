@@ -32,7 +32,7 @@ sequentially. Normal `package` builds, checks types, lints, runs API/extension
 tests, exercises HTTP and real-process coordination, runs the built dashboard
 in Chromium, stages a clean extension, verifies actual VSIX entries and hashes,
 and smoke-tests the bundled API. The artifact is written to
-`apps/extension/out/ungate-1.7.14.vsix`.
+`apps/extension/out/ungate-1.7.15.vsix`.
 
 `corepack pnpm package:vsix` is a faster build-and-package path for iteration,
 not a replacement for complete `package` checks. `task install` explicitly

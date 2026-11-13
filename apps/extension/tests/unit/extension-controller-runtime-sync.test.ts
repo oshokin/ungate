@@ -128,7 +128,7 @@ vi.mock('../../src/local-api', () => ({
 	readApiHealth: vi.fn().mockResolvedValue({
 		service: 'ungate',
 		pid: 1234,
-		version: '1.7.14',
+		version: '1.7.15',
 		protocolVersion: 3
 	}),
 	readAppSettings: vi.fn().mockResolvedValue({ models: [] })
@@ -441,8 +441,8 @@ describe('ExtensionController', () => {
 			lastApiStatus: 'running',
 			serviceState: {
 				status: 'incompatible',
-				version: '1.7.14',
-				expectedVersion: '1.7.14',
+				version: '1.7.15',
+				expectedVersion: '1.7.15',
 				canUpdate: true,
 				restartRequired: true,
 				message: 'A different Ungate API build is running. Restart the shared API to apply the installed build.',
