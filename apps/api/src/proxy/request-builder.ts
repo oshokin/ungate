@@ -6,6 +6,8 @@ import { logger } from 'src/utils/logger';
 import { config } from '../config';
 import { Settings } from '../database/app-settings';
 
+import { CLAUDE_CODE_OPUS_PACKET } from './claude-code-packet';
+
 import type { AnthropicRequest, ContentBlock, ThinkingEffort } from '../types';
 
 /** Effort values Claude accepts in output_config. Anything else is dropped. */
@@ -13,7 +15,16 @@ const VALID_EFFORTS: readonly ThinkingEffort[] = ['low', 'medium', 'high', 'xhig
 /** Part of the Claude Code request fingerprint. Changing it changes what Anthropic accepts. */
 const STAINLESS_TIMEOUT_SECONDS = '600';
 
-// Opus 4.7/4.8 reject manual budget_tokens (400). They use adaptive thinking,
+/** Anthropic rejects the dotted Opus 5.5 id and names the hyphenated one. */
+export function canonicalizeClaudeModel(model: string): string {
+	if (model.trim().toLowerCase() === 'claude-opus-5.5') {
+		return 'claude-opus-5-5';
+	}
+
+	return model;
+}
+
+// Opus 4.7, 4.8, and 5.5 reject manual budget_tokens (400). They use adaptive thinking,
 // controlled by the `effort` parameter in a top-level `output_config` object.
 // reasoning_budget is always a tier string ('low' | 'medium' | 'high' | 'xhigh')
 // set from the model mapping; pass it through verbatim as the effort level.
@@ -80,11 +91,7 @@ export class RequestBuilder {
 		const headers: Record<string, string> = {
 			Accept: 'application/json',
 			Authorization: `Bearer ${accessToken}`,
-			'anthropic-beta': [
-				config.anthropic.beta.claudeCode,
-				config.anthropic.beta.oauth,
-				config.anthropic.beta.interleavedThinking
-			].join(','),
+			'anthropic-beta': config.anthropic.betas.join(','),
 			'anthropic-dangerous-direct-browser-access': 'true',
 			'anthropic-version': ANTHROPIC_API_VERSION,
 			'Content-Type': 'application/json',
@@ -97,22 +104,28 @@ export class RequestBuilder {
 	}
 
 	static prepareClaudeCodeBody(body: AnthropicRequest, endpoint?: string): AnthropicRequest {
-		const prepared = { ...body };
+		const prepared = { ...body, model: canonicalizeClaudeModel(body.model) };
 
 		if ('reasoning_budget' in prepared) {
 			const budgetValue = prepared.reasoning_budget;
 			delete prepared.reasoning_budget;
 
-			// Translate the tier into adaptive thinking + effort. Opus 4.7/4.8 only
+			// Translate the tier into adaptive thinking + effort. Opus 4.7, 4.8, and 5.5 only
 			// support this form; manual budget_tokens returns a 400. `effort` has no
 			// effect without `thinking.type: "adaptive"`, so both must be set.
 			const effort = resolveEffort(budgetValue);
 
 			if (effort) {
 				// Claude 5 models default to `display: "omitted"`, which streams empty thinking.
-				// Ask for the summary so Cursor can show progress while Claude thinks.
-				prepared.thinking = { type: 'adaptive', display: 'summarized' };
+				// Claude Code asks for thinking updates, which Cursor shows while Claude thinks.
+				prepared.thinking = {
+					type: CLAUDE_CODE_OPUS_PACKET.thinking.type,
+					display: CLAUDE_CODE_OPUS_PACKET.thinking.display
+				};
 				prepared.output_config = { ...prepared.output_config, effort };
+				prepared.context_management = {
+					edits: CLAUDE_CODE_OPUS_PACKET.contextManagement.edits.map((edit) => ({ type: edit.type, keep: edit.keep }))
+				};
 				logger.log(`Reasoning budget (${budgetValue}) → adaptive thinking (effort: ${effort})`);
 			} else {
 				logger.log(`Reasoning budget (${budgetValue}) ignored — no matching effort tier`);

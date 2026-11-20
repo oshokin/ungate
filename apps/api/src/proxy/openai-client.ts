@@ -174,7 +174,7 @@ export class OpenAiClient {
 		const state = StreamStateFactory.create(normalizedModel);
 
 		if (stream) {
-			const streamResponse = this.streamResponse(response, state);
+			const streamResponse = await this.prepareStreamResponse(response, state);
 
 			return {
 				response: streamResponse,
@@ -190,10 +190,49 @@ export class OpenAiClient {
 		};
 	}
 
-	private static streamResponse(response: Response, state: ReturnType<typeof StreamStateFactory.create>): Response {
+	private static async prepareStreamResponse(
+		response: Response,
+		state: ReturnType<typeof StreamStateFactory.create>
+	): Promise<Response> {
 		const reader = response.body!.getReader();
 		const decoder = new TextDecoder();
+		// Codex may accept HTTP headers and then reject the input in its first SSE events.
+		// Keep those headers local until actual output starts so clients can classify the failure.
+		const initialResults: ReturnType<typeof ResponsesSseProcessor.process> = [];
+		try {
+			while (!state.completed && !state.sawTextDelta && !state.toolCallsSeen) {
+				const next = await reader.read();
+				if (next.done) {
+					initialResults.push(...ResponsesSseProcessor.flush(state, decoder.decode()));
+					if (!state.completed) initialResults.push(...ResponsesSseProcessor.failTruncated(state));
+					break;
+				}
+				initialResults.push(...ResponsesSseProcessor.process(state, decoder.decode(next.value, { stream: true })));
+			}
+		} catch {
+			initialResults.push(...ResponsesSseProcessor.failTruncated(state));
+		}
+		if (state.error?.code === 'context_length_exceeded') {
+			await reader.cancel().catch(() => {});
+			reader.releaseLock();
+			StreamDiagnostics.logFinished(state, 'stream');
 
+			return new Response(JSON.stringify({ error: state.error }), {
+				status: state.error.code === 'context_length_exceeded' ? 400 : 502,
+				headers: { 'Content-Type': 'application/json' }
+			});
+		}
+
+		return this.streamResponse(response, state, reader, decoder, initialResults);
+	}
+
+	private static streamResponse(
+		response: Response,
+		state: ReturnType<typeof StreamStateFactory.create>,
+		reader = response.body!.getReader(),
+		decoder = new TextDecoder(),
+		initialResults: ReturnType<typeof ResponsesSseProcessor.process> = []
+	): Response {
 		let cancelled = false;
 		let finalized = false;
 		let doneEmitted = false;
@@ -214,6 +253,12 @@ export class OpenAiClient {
 			async pull(controller) {
 				if (cancelled || finalized) return;
 				try {
+					for (const result of initialResults.splice(0)) {
+						controller.enqueue(
+							encoder.encode(result.type === 'done' ? 'data: [DONE]\n\n' : `data: ${JSON.stringify(result.data)}\n\n`)
+						);
+						if (result.type === 'done') doneEmitted = true;
+					}
 					let done = false;
 					let emitted = false;
 					while (!done && !emitted && !state.completed) {
@@ -310,7 +355,7 @@ export class OpenAiClient {
 		}
 		if (state.error) {
 			return new Response(JSON.stringify({ error: state.error }), {
-				status: 502,
+				status: state.error.code === 'context_length_exceeded' ? 400 : 502,
 				headers: { 'Content-Type': 'application/json' }
 			});
 		}

@@ -75,4 +75,34 @@ describe('routes: settings (real database)', () => {
 
 		await app.close();
 	});
+
+	it('saves a models-only body without failing the settings row', async () => {
+		const app = await withPlugin(settingsPlugin);
+		const before = Settings.get();
+		const model = {
+			id: 'opus-5.5-xhigh',
+			label: 'Opus 5.5 XHigh',
+			provider: 'claude',
+			upstreamModel: 'claude-opus-5-5',
+			sortOrder: 0,
+			reasoningBudget: 'xhigh',
+			serviceTier: null
+		};
+
+		const response = await app.inject({
+			method: 'POST',
+			url: '/settings',
+			payload: { models: [model] }
+		});
+
+		expect(response.statusCode).toBe(200);
+		const after = Settings.get();
+		expect(after.port).toBe(before.port);
+		expect(after.apiKey).toBe(before.apiKey);
+		expect(after.quiet).toBe(before.quiet);
+		expect(after.claudeCliVersionMode).toBe(before.claudeCliVersionMode);
+		expect(after.models).toEqual([expect.objectContaining({ id: 'opus-5.5-xhigh', reasoningBudget: 'xhigh' })]);
+
+		await app.close();
+	});
 });

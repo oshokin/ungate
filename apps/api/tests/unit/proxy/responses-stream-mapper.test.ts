@@ -195,7 +195,7 @@ describe('responses-stream-mapper replay', () => {
 
 		expect(got.errors).toEqual([expect.objectContaining({ code: 'context_length_exceeded', type: 'invalid_request_error' })]);
 		expect(got.finishReason).toBeNull();
-		expect(JSON.stringify(got.errors)).toContain('This conversation exceeds the model context window');
+		expect(JSON.stringify(got.errors)).toContain('Your input exceeds the model context window.');
 		expect(got.doneCount).toBe(1);
 	});
 
@@ -259,6 +259,6 @@ describe('responses-stream-mapper replay', () => {
 
 		expect(got.errors).toEqual([expect.objectContaining({ code: 'context_length_exceeded', type: 'invalid_request_error' })]);
 		expect(got.finishReason).toBeNull();
-		expect(JSON.stringify(got.errors)).toContain('This conversation exceeds the model context window');
+		expect(JSON.stringify(got.errors)).toContain('Your input exceeds the model context window.');
 	});
 });

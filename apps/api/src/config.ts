@@ -1,5 +1,7 @@
 import { MINIMAX_BASE_URLS, TCP_PORT_MAX, type AppSettings } from '@ungate/shared';
 
+import { CLAUDE_CODE_OPUS_PACKET } from './proxy/claude-code-packet';
+
 import type { ProxyConfig } from './types';
 
 /** Provider URLs and OAuth client values. These are upstream contracts, not local preferences. */
@@ -13,18 +15,14 @@ export const config = {
 	},
 	anthropic: {
 		apiUrl: 'https://api.anthropic.com',
-		beta: {
-			oauth: 'oauth-2025-04-20',
-			claudeCode: 'claude-code-20250219',
-			interleavedThinking: 'interleaved-thinking-2025-05-14'
-		}
+		betas: CLAUDE_CODE_OPUS_PACKET.betas
 	},
 	minimax: {
 		baseUrlGlobal: MINIMAX_BASE_URLS.global,
 		baseUrlChina: MINIMAX_BASE_URLS.china
 	},
 	claudeCode: {
-		systemPrompt: "You are Claude Code, Anthropic's official CLI for Claude."
+		systemPrompt: CLAUDE_CODE_OPUS_PACKET.identity
 	},
 	openai: {
 		oauth: {

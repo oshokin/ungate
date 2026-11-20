@@ -18,6 +18,34 @@ const events = [
 ];
 
 describe('Codex interruption (#68)', () => {
+	it('returns HTTP 400 for a context failure after Codex lifecycle events', async () => {
+		const prepare = (
+			OpenAiClient as unknown as {
+				prepareStreamResponse(response: Response, state: ReturnType<typeof StreamStateFactory.create>): Promise<Response>;
+			}
+		).prepareStreamResponse.bind(OpenAiClient);
+		const source = new Response(
+			[
+				{ type: 'response.created', response: {} },
+				{ type: 'response.in_progress', response: {} },
+				{
+					type: 'error',
+					error: { type: 'invalid_request_error', code: 'context_length_exceeded', message: 'context_length_exceeded' }
+				}
+			]
+				.map((event) => `data: ${JSON.stringify(event)}\n\n`)
+				.join('')
+		);
+		const response = await prepare(source, StreamStateFactory.create('test'));
+		expect(response.status).toBe(400);
+		expect(response.headers.get('content-type')).toBe('application/json');
+		const body = await response.json();
+		expect(body).toEqual({
+			error: { type: 'invalid_request_error', code: 'context_length_exceeded', message: 'context_length_exceeded' }
+		});
+		expect(source.body!.locked).toBe(false);
+	});
+
 	it.each([{ prefix: [] }, { prefix: events }])(
 		'serializes reader rejection without releasing partial tools (%j)',
 		async ({ prefix }) => {
@@ -150,7 +178,7 @@ describe('Codex interruption (#68)', () => {
 			StreamStateFactory.create('test')
 		).text();
 
-		expect(output).toContain('This conversation exceeds the model context window');
+		expect(output).toContain('Your input exceeds the model context window.');
 		expect(output).not.toContain('"finish_reason":"stop"');
 		expect(output).toContain('"code":"context_length_exceeded"');
 		expect(output.match(/data: \[DONE\]/g)).toHaveLength(1);
@@ -189,7 +217,7 @@ describe('Codex interruption (#68)', () => {
 			StreamStateFactory.create('test')
 		).text();
 
-		expect(output).toContain('This conversation exceeds the model context window');
+		expect(output).toContain('Your input exceeds the model context window.');
 		expect(output).not.toContain('"finish_reason":"stop"');
 		expect(output).toContain('"code":"context_length_exceeded"');
 		expect(output.match(/data: \[DONE\]/g)).toHaveLength(1);

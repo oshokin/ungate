@@ -47,7 +47,11 @@ export type ThinkingEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 export interface ThinkingConfig {
 	type: 'enabled' | 'adaptive' | 'disabled';
 	budget_tokens?: number;
-	display?: 'summarized' | 'omitted';
+	display?: 'summarized' | 'omitted' | 'updates';
+}
+
+export interface ContextManagement {
+	edits: { type: 'clear_thinking_20251015'; keep: 'all' }[];
 }
 
 export interface OutputConfig {
@@ -70,6 +74,7 @@ export interface AnthropicRequest {
 	reasoning_budget?: number | string;
 	thinking?: ThinkingConfig;
 	output_config?: OutputConfig;
+	context_management?: ContextManagement;
 	cache_control?: CacheControl;
 }
 

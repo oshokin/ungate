@@ -5,10 +5,10 @@ export const DEFAULT_KEY_FIX_ENABLED = false;
 export const CLAUDE_CLI_STABLE_VERSION = '2.1.9';
 
 /** Claude Code version sent when the user selects Latest. */
-export const CLAUDE_CLI_LATEST_VERSION = '2.1.296';
+export const CLAUDE_CLI_LATEST_VERSION = '2.1.322';
 
-/** Suffix required in the Claude Code User-Agent. Anthropic checks this fingerprint. */
-export const CLAUDE_CLI_USER_AGENT_SUFFIX = '(external, claude-vscode, agent-sdk/0.2.7)';
+/** Claude Code 2.1.322 VS Code host: entrypoint `claude-vscode`, no agent-sdk segment. */
+export const CLAUDE_CLI_USER_AGENT_SUFFIX = '(external, claude-vscode)';
 
 /** Official MiniMax API origins. A user base URL must match one of these. */
 export const MINIMAX_BASE_URLS = {

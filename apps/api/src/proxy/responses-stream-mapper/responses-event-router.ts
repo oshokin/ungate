@@ -300,10 +300,6 @@ export class ResponsesEventRouter {
 				`ChatGPT Codex stream error: event=${kind} type=${error.type}${error.code ? ` code=${error.code}` : ''} message=${JSON.stringify(error.message)}`
 			);
 			state.pendingFunctionCalls.clear();
-			if (error.code === 'context_length_exceeded') {
-				error.message =
-					'Ungate: This conversation exceeds the model context window. Start a new chat or remove older context, then retry.';
-			}
 			state.error = error;
 			state.completed = true;
 			state.successfulCompletion = false;
