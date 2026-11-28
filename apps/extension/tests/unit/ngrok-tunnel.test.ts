@@ -9,6 +9,7 @@ import { NgrokTokenStore, type NgrokSecretStorage } from '../../src/ngrok-token-
 import { config } from '../../src/runtime-state/config';
 import { RuntimeStateDefaults } from '../../src/runtime-state/default-state';
 import { TunnelManager } from '../../src/tunnel-manager';
+import { NgrokInstaller } from '../../src/utils/ngrok-installer';
 
 import type { LogEntry, RuntimeState } from '@ungate/shared/frontend';
 
@@ -72,11 +73,94 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+	vi.restoreAllMocks();
 	config.baseDir = original;
 	fs.rmSync(temporary, { recursive: true, force: true });
 });
 
 describe('ngrok tunnel', () => {
+	it('reconciles a failed running process with its reason and code', async () => {
+		const logPath = path.join(temporary, 'tunnel-failed.log');
+		fs.writeFileSync(logPath, JSON.stringify({ lvl: 'crit', err: 'authentication failed\nERR_NGROK_105' }) + '\n');
+		Object.assign(mocks.state!.tunnel, { status: 'running', pid: 4242, logPath, url: 'https://stable.ngrok-free.app' });
+		const manager = new TunnelManager('window-a', () => false, vi.fn(), vi.fn());
+		await manager.reconcile();
+		expect(manager.getState()).toMatchObject({
+			status: 'error',
+			url: null,
+			error: 'ngrok: authentication failed (ERR_NGROK_105)'
+		});
+	});
+
+	it('publishes split UTF-8 journal lines only after their newline and ignores old journals', () => {
+		const journal = vi.fn<(entry: LogEntry) => void>();
+		const manager = new TunnelManager('window-a', () => false, vi.fn(), journal);
+		const logPath = path.join(temporary, 'tunnel-split.log');
+		const record = Buffer.from(JSON.stringify({ lvl: 'info', msg: 'connected 日本' }) + '\r\n');
+		const split = record.indexOf(Buffer.from('日')) + 1;
+		fs.writeFileSync(logPath, record.subarray(0, split));
+		mocks.state!.tunnel.logPath = logPath;
+		const reader = manager as unknown as { pollLogs(): void };
+		reader.pollLogs();
+		expect(journal).not.toHaveBeenCalled();
+		fs.appendFileSync(logPath, record.subarray(split));
+		reader.pollLogs();
+		expect(journal.mock.calls[0][0].message).toBe('connected 日本');
+		const replacement = path.join(temporary, 'tunnel-replacement.log');
+		fs.writeFileSync(replacement, '');
+		mocks.state!.tunnel.logPath = replacement;
+		fs.appendFileSync(logPath, '{"lvl":"crit","err":"obsolete"}\n');
+		reader.pollLogs();
+		expect(journal).toHaveBeenCalledTimes(1);
+	});
+
+	it('cancels installation before spawning when stop is requested', async () => {
+		let finish!: (value: string) => void;
+		vi.spyOn(NgrokInstaller, 'isPinnedInstall').mockReturnValue(false);
+		vi.spyOn(NgrokInstaller, 'install').mockImplementation(
+			() =>
+				new Promise((resolve) => {
+					finish = resolve;
+				})
+		);
+		const manager = new TunnelManager('window-a', () => false, vi.fn(), vi.fn(), new NgrokTokenStore(secrets('secret-token')));
+		const starting = manager.start(47821);
+		await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+		const stopping = manager.stop();
+		finish('/test/ngrok');
+		await Promise.all([starting, stopping]);
+		expect(mocks.spawn).not.toHaveBeenCalled();
+		expect(manager.getState().status).toBe('stopped');
+	});
+
+	it('starts only the replacement after restart during installation', async () => {
+		let finish!: (value: string) => void;
+		const pinned = vi.spyOn(NgrokInstaller, 'isPinnedInstall').mockReturnValue(false);
+		vi.spyOn(NgrokInstaller, 'install').mockImplementation(
+			() =>
+				new Promise((resolve) => {
+					finish = resolve;
+				})
+		);
+		const manager = new TunnelManager('window-a', () => false, vi.fn(), vi.fn(), new NgrokTokenStore(secrets('secret-token')));
+		const starting = manager.start(47821);
+		await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+		const restarting = manager.restart(47822);
+		pinned.mockReturnValue(true);
+		finish('/test/ngrok');
+		await Promise.all([starting, restarting]);
+		expect(mocks.spawn).toHaveBeenCalledTimes(1);
+		expect(mocks.spawn.mock.calls[0][1]).toContain('http://127.0.0.1:47822');
+	});
+
+	it('surfaces installation failures without leaking the token', async () => {
+		vi.spyOn(NgrokInstaller, 'isPinnedInstall').mockReturnValue(false);
+		vi.spyOn(NgrokInstaller, 'install').mockRejectedValue(new Error('Download failed secret-token'));
+		const manager = new TunnelManager('window-a', () => false, vi.fn(), vi.fn(), new NgrokTokenStore(secrets('secret-token')));
+		await expect(manager.start(47821)).rejects.toThrow('Download failed [redacted]');
+		expect(manager.getState().error).not.toContain('secret-token');
+		expect(mocks.spawn).not.toHaveBeenCalled();
+	});
 	it('journals health transitions with timestamps, without stable probe spam or raw errors', async () => {
 		const journal = vi.fn<(entry: LogEntry) => void>();
 		const manager = new TunnelManager('window-a', () => true, vi.fn(), journal);
@@ -154,7 +238,7 @@ describe('ngrok tunnel', () => {
 			['http', 'http://127.0.0.1:47821', '--log', expect.stringMatching(/tunnel-.*\.log$/), '--log-format', 'json'],
 			expect.objectContaining({
 				detached: true,
-				stdio: 'ignore',
+				stdio: ['ignore', 'ignore', expect.any(Number)],
 				env: expect.objectContaining({ NGROK_AUTHTOKEN: 'secret-token' })
 			})
 		);

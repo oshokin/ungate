@@ -62,7 +62,7 @@ function save(): void {
 }
 </script>
 
-<div>
+<div class:ug-preference={preference !== 'logs.maxEntries'}>
 	<label class="ug-label"
 		>{label}<input
 			class="ug-input"

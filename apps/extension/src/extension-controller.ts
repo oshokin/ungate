@@ -174,6 +174,7 @@ export class ExtensionController {
 			this.usage,
 			(service) => this.publishServiceState(service)
 		);
+		this.context.subscriptions.push(this.dashboard);
 
 		this.tunnelManager = new TunnelManager(
 			this.windowId,

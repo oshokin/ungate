@@ -17,6 +17,7 @@ import {
 } from '@ungate/shared';
 
 import { tunnelConnectTimeoutMs } from './dashboard-settings';
+import { ngrokFailure, redactNgrokToken } from './ngrok-failure';
 import { NgrokTokenStore, UnavailableNgrokSecrets } from './ngrok-token-store';
 import { NgrokUrl } from './ngrok-url';
 import { RuntimeStateStore } from './runtime-state';
@@ -151,6 +152,8 @@ function isValidPublicHealth(raw: unknown): boolean {
 }
 
 export class TunnelManager {
+	private generation = 0;
+	private activeNgrokToken: string | null = null;
 	private monitor: NodeJS.Timeout | null = null;
 	private monitorInFlight = false;
 	private readonly logReader = new LogFileReader();
@@ -242,6 +245,7 @@ export class TunnelManager {
 	}
 
 	async stop(): Promise<void> {
+		this.generation++;
 		const release = await CrossProcessLock.acquire('tunnel.lock', config.locks.startupTimeoutMs);
 		try {
 			await this.stopLocked();
@@ -251,6 +255,7 @@ export class TunnelManager {
 	}
 
 	async restart(port: number, protocol: TunnelProtocol = 'http2'): Promise<void> {
+		this.generation++;
 		const release = await CrossProcessLock.acquire('tunnel.lock', config.locks.startupTimeoutMs);
 		try {
 			const provider = RuntimeStateStore.read().tunnelProvider;
@@ -287,18 +292,32 @@ export class TunnelManager {
 			return;
 		}
 		const identityChanged = !!pid && ManagedProcess.isAlive(pid);
+		let failure: string | null = null;
+		if (!identityChanged && current.logPath) {
+			try {
+				failure = ngrokFailure(fs.readFileSync(current.logPath, 'utf8').split('\n'));
+				if (failure) failure = redactNgrokToken(failure, this.activeNgrokToken);
+			} catch {
+				/* A missing journal does not hide the stopped process. */
+			}
+		}
 		await RuntimeStateStore.mutate((state) => {
-			if (state.tunnel.pid !== pid || (state.tunnel.status !== 'running' && state.tunnel.status !== 'starting')) return state;
+			if (
+				state.tunnel.pid !== pid ||
+				state.tunnel.logPath !== current.logPath ||
+				(state.tunnel.status !== 'running' && state.tunnel.status !== 'starting')
+			)
+				return state;
 			if (pid && this.matchedExecutable(pid, state.tunnel.logPath)) return state;
 			state.tunnel = {
-				status: identityChanged ? 'error' : 'stopped',
+				status: identityChanged || failure ? 'error' : 'stopped',
 				url: null,
 				publicStatus: 'unchecked',
 				publicCheckedAt: null,
 				publicError: null,
 				lastError: identityChanged
 					? 'Tunnel process identity changed. No tunnel is running.'
-					: 'The tunnel process stopped. Start it again and copy the new URL into Cursor.',
+					: (failure ?? 'The tunnel process stopped. Start it again and copy the new URL into Cursor.'),
 				lastSeenAt: Date.now(),
 				ownerWindowId: null
 			};
@@ -319,7 +338,11 @@ export class TunnelManager {
 		const otherBin = provider === 'ngrok' ? getCloudflaredBinPath() : getNgrokBinPath();
 		if (ManagedProcess.matches(previous.pid, wantedBin, previous.logPath)) {
 			const sameTunnel =
-				previous.port === port && previous.url && (provider === 'ngrok' || (previous.protocol ?? 'http2') === protocol);
+				previous.port === port &&
+				previous.url &&
+				(provider === 'ngrok' ||
+					((previous.protocol ?? 'http2') === protocol &&
+						ManagedProcess.matches(previous.pid, wantedBin, previous.logPath, port)));
 			if (sameTunnel) {
 				await this.setState({ status: 'running', url: previous.url, error: null });
 
@@ -347,6 +370,7 @@ export class TunnelManager {
 			return;
 		}
 		await this.setState({ status: 'installing', url: null, error: null });
+		const generation = this.generation;
 		const binary = getCloudflaredBinPath();
 		let spawned: { pid: number; logPath: string } | null = null;
 		try {
@@ -354,6 +378,7 @@ export class TunnelManager {
 				this.log(`Downloading cloudflared ${CLOUDFLARED_VERSION}...`);
 				await CloudflaredInstaller.install(binary);
 			}
+			if (generation !== this.generation) return;
 			const logPath = path.join(config.baseDir, `tunnel-${randomUUID()}.log`);
 			const configPath = path.join(config.baseDir, QUICK_TUNNEL_CONFIG_NAME);
 			fs.writeFileSync(logPath, '', { mode: PRIVATE_FILE_MODE, flag: 'wx' });
@@ -430,6 +455,7 @@ export class TunnelManager {
 				`Tunnel did not connect within ${timeoutMs / MILLISECONDS_PER_SECOND} seconds. Check VPN/firewall access to TCP port ${CLOUDFLARE_EDGE_PORT}.`
 			);
 		} catch (error) {
+			if (generation !== this.generation && !spawned) return;
 			this.pollLogs();
 			const message = error instanceof Error ? error.message : String(error);
 			if (spawned && ManagedProcess.matches(spawned.pid, binary, spawned.logPath)) {
@@ -457,13 +483,16 @@ export class TunnelManager {
 	}
 
 	private async startNgrokLocked(port: number): Promise<void> {
+		const generation = this.generation;
 		const token = await this.ngrokToken.read();
+		if (generation !== this.generation) return;
 		if (!token) {
 			const error = 'Add an ngrok authtoken before starting the stable tunnel.';
 			await this.setState({ status: 'error', url: null, error });
 			throw new Error(error);
 		}
 		await this.setState({ status: 'installing', url: null, error: null });
+		this.activeNgrokToken = token;
 		const binary = getNgrokBinPath();
 		let spawned: { pid: number; logPath: string } | null = null;
 		try {
@@ -471,14 +500,23 @@ export class TunnelManager {
 				this.log(`Downloading ngrok ${NGROK_VERSION}...`);
 				await NgrokInstaller.install(binary);
 			}
+			if (generation !== this.generation) return;
 			const logPath = path.join(config.baseDir, `tunnel-${randomUUID()}.log`);
 			fs.writeFileSync(logPath, '', { mode: PRIVATE_FILE_MODE, flag: 'wx' });
-			const child = spawn(binary, ['http', `http://${LOOPBACK_HOST}:${port}`, '--log', logPath, '--log-format', 'json'], {
-				detached: true,
-				stdio: 'ignore',
-				windowsHide: true,
-				env: { ...process.env, NGROK_AUTHTOKEN: token }
-			});
+			// ngrok still writes plain ERROR lines to stderr in JSON mode. Keep
+			// those in the launch journal without tying the process to this window.
+			const stderr = fs.openSync(logPath, 'a');
+			let child: ReturnType<typeof spawn>;
+			try {
+				child = spawn(binary, ['http', `http://${LOOPBACK_HOST}:${port}`, '--log', logPath, '--log-format', 'json'], {
+					detached: true,
+					stdio: ['ignore', 'ignore', stderr],
+					windowsHide: true,
+					env: { ...process.env, NGROK_AUTHTOKEN: token }
+				});
+			} finally {
+				fs.closeSync(stderr);
+			}
 			await new Promise<void>((resolve, reject) => {
 				child.once('spawn', resolve);
 				child.once('error', reject);
@@ -508,13 +546,14 @@ export class TunnelManager {
 			const timeoutMs = tunnelConnectTimeoutMs();
 			const deadline = Date.now() + timeoutMs;
 			while (Date.now() < deadline) {
+				const lines = fs.readFileSync(logPath, 'utf8').split('\n');
+				// The journal publishes complete records only. A partial JSON record is
+				// retried on the next poll, including a split UTF-8 code point.
+				lines.pop();
+				const failure = ngrokFailure(lines);
 				if (!child.pid || !ManagedProcess.matches(child.pid, binary, logPath))
-					throw new Error('ngrok exited before connecting. See tunnel logs.');
-				const url = fs
-					.readFileSync(logPath, 'utf8')
-					.split('\n')
-					.map((line) => NgrokUrl.read(line))
-					.find((value) => value !== null);
+					throw new Error(failure ?? 'ngrok exited before connecting. See tunnel logs.');
+				const url = lines.map((line) => NgrokUrl.read(line)).find((value) => value !== null);
 				if (url) {
 					await this.setState({
 						status: 'running',
@@ -531,10 +570,14 @@ export class TunnelManager {
 				}
 				await sleep(config.tunnelManager.startupPollIntervalMs);
 			}
-			throw new Error(`ngrok did not connect within ${timeoutMs / MILLISECONDS_PER_SECOND} seconds.`);
+			throw new Error(
+				ngrokFailure(fs.readFileSync(logPath, 'utf8').split('\n')) ??
+					`ngrok did not connect within ${timeoutMs / MILLISECONDS_PER_SECOND} seconds.`
+			);
 		} catch (error) {
+			if (generation !== this.generation && !spawned) return;
 			this.pollLogs();
-			const message = error instanceof Error ? error.message : String(error);
+			const message = redactNgrokToken(error instanceof Error ? error.message : String(error), token);
 			if (spawned && ManagedProcess.matches(spawned.pid, binary, spawned.logPath)) {
 				await this.stopVerifiedProcess(spawned.pid, spawned.logPath, binary);
 			}
@@ -555,7 +598,7 @@ export class TunnelManager {
 				return current;
 			});
 			this.onStateChange(this.getState());
-			throw error;
+			throw new Error(message);
 		}
 	}
 
@@ -663,7 +706,7 @@ export class TunnelManager {
 		const logPath = RuntimeStateStore.read().tunnel.logPath;
 		if (logPath)
 			for (const line of this.logReader.read(logPath)) {
-				if (!isRoutineNgrokConnection(line)) this.onLog(parseCloudflaredLogLine(line));
+				if (!isRoutineNgrokConnection(line)) this.onLog(parseCloudflaredLogLine(redactNgrokToken(line, this.activeNgrokToken)));
 			}
 		if (logPath) capAppendOnlyLog(logPath);
 	}

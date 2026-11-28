@@ -1,11 +1,25 @@
 <script lang="ts">
+import { onMount } from 'svelte';
 import IconList from 'virtual:icons/lucide/list';
 import IconRotateCcw from 'virtual:icons/lucide/rotate-ccw';
 
 import { getActionStore, performAction } from './actions.svelte';
+import { postExtensionMessage } from './vscode';
 
 const store = getActionStore();
 let menu: HTMLDetailsElement | undefined = $state();
+let placement = $state<'editor' | 'panel'>('editor');
+
+onMount(() => {
+	const receive = (event: MessageEvent): void => {
+		if (event.data?.type === 'dashboard-placement' && (event.data.placement === 'editor' || event.data.placement === 'panel'))
+			placement = event.data.placement;
+	};
+	window.addEventListener('message', receive);
+	postExtensionMessage({ type: 'get-dashboard-preferences' });
+
+	return () => window.removeEventListener('message', receive);
+});
 
 function closeMenu(event: MouseEvent | KeyboardEvent): void {
 	if (!menu?.open) return;
@@ -53,6 +67,11 @@ function closeMenu(event: MouseEvent | KeyboardEvent): void {
 			aria-label="More actions"
 			title="More actions">•••</summary>
 		<div class="ug-menu">
+			<button
+				class="ug-menu-item"
+				onclick={() =>
+					postExtensionMessage({ type: 'set-dashboard-placement', placement: placement === 'editor' ? 'panel' : 'editor' })}
+				>{placement === 'editor' ? 'Move to Bottom Panel' : 'Move to Editor Tab'}</button>
 			<button
 				class="ug-menu-item"
 				disabled={!!store.busy}

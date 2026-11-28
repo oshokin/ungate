@@ -374,6 +374,8 @@ button:disabled {
 .ug-banner-copy {
 	flex: 1 1 12rem;
 	min-width: 0;
+	display: grid;
+	gap: 4px;
 }
 .ug-banner-copy p {
 	min-height: 1.6em;
@@ -516,6 +518,44 @@ body.vscode-high-contrast-light .ug-provider-icon {
 	display: grid;
 	gap: 6px;
 	font-size: 12px;
+}
+.ug-preference,
+.ug-runtime-choice {
+	display: grid;
+	gap: 6px;
+	min-width: 0;
+}
+.ug-tunnel-options > .ug-preference {
+	margin-bottom: 12px;
+}
+.ug-tunnel-options > .ug-label + .ug-muted {
+	margin-top: 6px;
+}
+.ug-tunnel-options > .ug-muted + .ug-button {
+	margin-top: 12px;
+}
+.ug-tunnel-options > .ug-operational-warnings {
+	margin-top: 16px;
+}
+.ug-ngrok-account > .ug-muted:first-of-type {
+	margin-bottom: 12px;
+}
+.ug-ngrok-account > .ug-label + .ug-muted {
+	margin-top: 6px;
+	margin-bottom: 0;
+}
+.ug-ngrok-account > .ug-toolbar {
+	margin-top: 12px;
+}
+.ug-model-copy {
+	display: grid;
+	align-content: start;
+	gap: 4px;
+}
+.ug-model-variant {
+	display: flex;
+	align-items: center;
+	gap: 6px;
 }
 .ug-description {
 	color: var(--ug-muted);

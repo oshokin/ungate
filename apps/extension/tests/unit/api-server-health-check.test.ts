@@ -83,7 +83,7 @@ vi.mock('@ungate/shared', async (original) => {
 
 vi.mock('../../src/local-api', () => ({
 	assertCompatibleApi: vi.fn().mockResolvedValue(undefined),
-	readApiHealth: vi.fn().mockResolvedValue({ service: 'ungate', pid: 1234, version: '1.7.15', protocolVersion: 3 })
+	readApiHealth: vi.fn().mockResolvedValue({ service: 'ungate', pid: 1234, version: '1.7.17', protocolVersion: 3 })
 }));
 
 vi.mock('../../src/utils/cross-process-lock', () => ({ CrossProcessLock: { acquire: () => Promise.resolve(() => {}) } }));
@@ -572,7 +572,7 @@ describe('ApiServer.onExit', () => {
 		const { server, onLog } = createServer();
 		const internals = getInternals(server);
 		runtimeReadMock.mockReturnValue(runtimeState);
-		vi.mocked(readApiHealth).mockResolvedValue({ service: 'ungate', pid: 1234, version: '1.7.15', protocolVersion: 3 });
+		vi.mocked(readApiHealth).mockResolvedValue({ service: 'ungate', pid: 1234, version: '1.7.17', protocolVersion: 3 });
 		const listenerSpy = vi.spyOn(internals, 'isPortListening').mockResolvedValueOnce(true).mockResolvedValueOnce(false);
 		const killSpy = vi.spyOn(process, 'kill').mockReturnValue(true);
 
@@ -746,7 +746,7 @@ describe('ApiServer.onExit', () => {
 			vi.mocked(readApiHealth).mockResolvedValue({
 				service: 'ungate',
 				pid: 46681,
-				version: '1.7.15',
+				version: '1.7.17',
 				protocolVersion: 3,
 				artifactDigest: 'a'.repeat(64)
 			});
@@ -781,7 +781,7 @@ describe('ApiServer.onExit', () => {
 			expect(suppressApiAutoStartMock).not.toHaveBeenCalled();
 		} finally {
 			vi.mocked(assertCompatibleApi).mockResolvedValue(undefined);
-			vi.mocked(readApiHealth).mockResolvedValue({ service: 'ungate', pid: 1234, version: '1.7.15', protocolVersion: 3 });
+			vi.mocked(readApiHealth).mockResolvedValue({ service: 'ungate', pid: 1234, version: '1.7.17', protocolVersion: 3 });
 			fs.rmSync(directory, { recursive: true, force: true });
 		}
 	});
@@ -826,7 +826,7 @@ describe('ApiServer.onExit', () => {
 		expect(onStatusChange).toHaveBeenCalledWith('running');
 		expect(suppressApiAutoStartMock).not.toHaveBeenCalled();
 		vi.mocked(assertCompatibleApi).mockResolvedValue(undefined);
-		vi.mocked(readApiHealth).mockResolvedValue({ service: 'ungate', pid: 1234, version: '1.7.15', protocolVersion: 3 });
+		vi.mocked(readApiHealth).mockResolvedValue({ service: 'ungate', pid: 1234, version: '1.7.17', protocolVersion: 3 });
 	});
 
 	it('stops the API listening on the tunnel port before spawning a replacement', async () => {
@@ -839,7 +839,7 @@ describe('ApiServer.onExit', () => {
 		vi.mocked(readApiHealth).mockResolvedValue({
 			service: 'ungate',
 			pid: 46681,
-			version: '1.7.15',
+			version: '1.7.17',
 			protocolVersion: 3,
 			artifactDigest: 'a'.repeat(64)
 		});
@@ -863,6 +863,6 @@ describe('ApiServer.onExit', () => {
 		expect(onStatusChange).toHaveBeenCalledWith('running');
 		expect(suppressApiAutoStartMock).not.toHaveBeenCalled();
 		vi.mocked(assertCompatibleApi).mockResolvedValue(undefined);
-		vi.mocked(readApiHealth).mockResolvedValue({ service: 'ungate', pid: 1234, version: '1.7.15', protocolVersion: 3 });
+		vi.mocked(readApiHealth).mockResolvedValue({ service: 'ungate', pid: 1234, version: '1.7.17', protocolVersion: 3 });
 	});
 });

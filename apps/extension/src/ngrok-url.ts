@@ -5,9 +5,15 @@ export class NgrokUrl {
 
 		if (trimmed.startsWith('{')) {
 			try {
-				const parsed = JSON.parse(trimmed) as { url?: unknown; msg?: unknown };
+				const parsed = JSON.parse(trimmed) as { url?: unknown; msg?: unknown; lvl?: unknown; err?: unknown; error?: unknown };
 				// Other records contain URLs for updates, login and errors, not a tunnel.
-				if (parsed.msg !== 'started tunnel') return null;
+				if (
+					parsed.msg !== 'started tunnel' ||
+					parsed.err ||
+					parsed.error ||
+					['eror', 'error', 'crit', 'fatal'].includes(String(parsed.lvl))
+				)
+					return null;
 				const direct = typeof parsed.url === 'string' ? parsed.url : null;
 
 				return NgrokUrl.normalize(direct);
@@ -27,6 +33,7 @@ export class NgrokUrl {
 			const url = new URL(value);
 
 			return url.protocol === 'https:' &&
+				!/(^|\.)(ngrok\.com|ngrok-agent\.com)\.?$/i.test(url.hostname) &&
 				!url.username &&
 				!url.password &&
 				!url.port &&

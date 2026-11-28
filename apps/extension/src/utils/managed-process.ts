@@ -5,6 +5,8 @@ import * as path from 'node:path';
 
 import { UNGATE_DIR } from '@ungate/shared';
 
+import { CloudflaredProcess } from '../runtime-state/cloudflared-process';
+
 import { PROCESS_PROBE_TIMEOUT_MS } from './process-limits';
 
 const API_CWD_SUFFIXES = ['/bundled/api', '/apps/api'];
@@ -78,13 +80,17 @@ export class ManagedProcess {
 		);
 	}
 
-	static matches(pid: number | undefined, executable: string, marker: string | undefined): boolean {
+	static matches(pid: number | undefined, executable: string, marker: string | undefined, port?: number): boolean {
 		if (!pid || !Number.isInteger(pid) || pid <= 0 || !marker) return false;
 		try {
 			if (process.platform === 'linux') {
 				const args = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0');
 
-				return fs.realpathSync(`/proc/${pid}/exe`) === fs.realpathSync(executable) && args.includes(marker);
+				return (
+					fs.realpathSync(`/proc/${pid}/exe`) === fs.realpathSync(executable) &&
+					args.includes(marker) &&
+					(port === undefined || CloudflaredProcess.servesApiPort(args.join('\0'), port))
+				);
 			}
 			if (process.platform === 'win32') {
 				const raw = execFileSync(
@@ -101,7 +107,11 @@ export class ManagedProcess {
 				);
 				const result = JSON.parse(raw) as { ExecutablePath?: string; CommandLine?: string };
 
-				return result.ExecutablePath?.toLowerCase() === executable.toLowerCase() && !!result.CommandLine?.includes(marker);
+				return (
+					result.ExecutablePath?.toLowerCase() === executable.toLowerCase() &&
+					!!result.CommandLine?.includes(marker) &&
+					(port === undefined || CloudflaredProcess.servesApiPort(result.CommandLine, port))
+				);
 			}
 			const command = execFileSync('ps', ['-p', String(pid), '-o', 'command='], {
 				encoding: 'utf8',
@@ -116,7 +126,8 @@ export class ManagedProcess {
 				!!command &&
 				!!resolvedExecutable &&
 				fs.realpathSync(resolvedExecutable) === fs.realpathSync(executable) &&
-				command.includes(marker)
+				command.includes(marker) &&
+				(port === undefined || CloudflaredProcess.servesApiPort(command, port))
 			);
 		} catch {
 			return false;

@@ -314,7 +314,7 @@ $effect(() => {
 
 <div class="ug-panel p-5 space-y-4">
 	<div class="flex flex-wrap items-center justify-between gap-3">
-		<div class="space-y-1">
+		<div class="ug-model-copy">
 			<p class="text-sm font-semibold">Models · {getProviderLabel(selectedProvider)}</p>
 			<p class="text-xs ug-description"> Use these IDs when adding custom models in Cursor. </p>
 		</div>
@@ -422,7 +422,7 @@ $effect(() => {
 							aria-expanded={expandedFamilyKey === group.key}
 							aria-controls={`model-family-${group.key.replace(/[^a-zA-Z0-9_-]/g, '-')}`}
 							onclick={() => toggleFamily(group)}>
-							<span class="min-w-0 flex-1">
+							<span class="min-w-0 flex-1 ug-model-copy">
 								<span class="flex flex-wrap items-center gap-2">
 									<span class="text-sm font-semibold">{group.label}</span>
 									{#if group.isProviderDefault}
@@ -435,13 +435,13 @@ $effect(() => {
 										</span>
 									{/if}
 								</span>
-								<span class="mt-0.5 block text-xs ug-description">
+								<span class="block text-xs ug-description">
 									{reasoningCount(group)} reasoning {reasoningCount(group) === 1 ? 'level' : 'levels'} ·
 									{group.supportsFast ? 'Standard / Fast' : 'Standard'} · {variantCount(group)}
 									{variantCount(group) === 1 ? 'variant' : 'variants'}
 								</span>
 								{#if group.description}
-									<span class="mt-1 block text-xs ug-description">{group.description}</span>
+									<span class="block text-xs ug-description">{group.description}</span>
 								{/if}
 							</span>
 							<IconChevronDown
@@ -469,7 +469,7 @@ $effect(() => {
 														{#if row.standard.length}
 															<div class="space-y-1">
 																{#each row.standard as item}
-																	<div class="flex items-center gap-1">
+																	<div class="ug-model-variant">
 																		<button
 																			type="button"
 																			class="min-w-0 flex-1 rounded-md px-2 py-1.5 text-left font-mono {activeModelIndex ===
@@ -508,7 +508,7 @@ $effect(() => {
 															{#if row.fast.length}
 																<div class="space-y-1">
 																	{#each row.fast as item}
-																		<div class="flex items-center gap-1">
+																		<div class="ug-model-variant">
 																			<button
 																				type="button"
 																				class="min-w-0 flex-1 rounded-md px-2 py-1.5 text-left font-mono {activeModelIndex ===

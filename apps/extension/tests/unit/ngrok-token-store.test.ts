@@ -17,6 +17,20 @@ function memorySecrets(): NgrokSecretStorage & { values: Map<string, string> } {
 }
 
 describe('NgrokTokenStore', () => {
+	it.each(['https://stable.ngrok-free.app', 'stable.ngrok-free.app', 'ngrok config add-authtoken token', 'a\nb'])(
+		'rejects pasted non-token %s on save and read',
+		async (value) => {
+			const secrets = memorySecrets();
+			const store = new NgrokTokenStore(secrets);
+			await expect(store.save(value)).rejects.toThrow('not an ngrok authtoken');
+			secrets.values.set('ungate.ngrokAuthToken', value);
+			const stored = await store.read();
+			const isSet = await store.isSet();
+			expect(stored).toBeNull();
+			expect(isSet).toBe(false);
+		}
+	);
+
 	it('saves a trimmed token and reports only whether one exists', async () => {
 		const secrets = memorySecrets();
 		const store = new NgrokTokenStore(secrets);

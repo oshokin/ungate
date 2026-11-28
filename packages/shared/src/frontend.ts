@@ -16,6 +16,7 @@ export type DashboardPreferenceKey = 'logs.maxEntries' | 'tunnel.connectTimeoutS
 export type DashboardPreferences = Record<DashboardPreferenceKey, number>;
 
 export type ExtensionToWebview =
+	| { type: 'dashboard-placement'; placement: 'editor' | 'panel' }
 	| { type: 'dashboard-preferences'; values: DashboardPreferences }
 	| { type: 'dashboard-preference-result'; key: DashboardPreferenceKey; error: string | null }
 	| { type: 'usage-state'; state: import('./usage').UsageState }
@@ -28,6 +29,7 @@ export type ExtensionToWebview =
 	| { type: 'logs-cleared'; source: 'api' | 'tunnel' };
 
 export type WebviewToExtension =
+	| { type: 'set-dashboard-placement'; placement: 'editor' | 'panel' }
 	| { type: 'get-dashboard-preferences' }
 	| { type: 'set-dashboard-preference'; key: DashboardPreferenceKey; value: number }
 	| { type: 'webview-ready' }

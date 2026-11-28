@@ -88,7 +88,7 @@ $effect(() => watchSettingsError(store.settings ? store.error : null, 'error'));
 					min={5}
 					max={120}
 					help="Applies to the next API restart; not a stream idle timeout." />
-				<div>
+				<div class="ug-runtime-choice">
 					<button
 						class="ug-button"
 						disabled={!!actions.busy}
@@ -113,7 +113,7 @@ $effect(() => watchSettingsError(store.settings ? store.error : null, 'error'));
 			<div
 				class="ug-banner"
 				role="alert">
-				<div><strong>Unable to load settings</strong><p class="ug-muted">{store.error}</p></div>
+				<div class="ug-banner-copy"><strong>Unable to load settings</strong><p class="ug-muted">{store.error}</p></div>
 				<button
 					class="ug-button ug-primary"
 					disabled={store.loading}

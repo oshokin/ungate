@@ -74,7 +74,7 @@ describe('routes: health/settings/models', () => {
 			status: 'ok',
 			service: 'ungate',
 			pid: process.pid,
-			version: '1.7.15',
+			version: '1.7.17',
 			protocolVersion: 3,
 			artifactDigest: expect.stringMatching(/^[a-f0-9]{64}$/)
 		});

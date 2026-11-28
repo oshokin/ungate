@@ -1,10 +1,21 @@
 # Changelog
 
-## 1.7.15 - 2026-11-13 (oshokin fork)
+## 1.7.17 - 2026-11-28
+
+- Match the upstream release number while selectively integrating changes into the fork; this is not full upstream feature parity. Upstream analytics, hostname screening and custom-domain management are not included.
+- Add optional stable ngrok tunnels using pinned SHA-256-verified downloads, including Windows ZIP extraction. Keep the authtoken in editor Secret Storage and pass it through `NGROK_AUTHTOKEN`, not command-line arguments or application settings.
+- Match cloudflared process identity to the exact loopback target port, executable and launch journal. Guard cancelled starts, stale processes and late results so they cannot replace the current tunnel state.
+- Accept ngrok endpoint URLs only from tunnel-start records; preserve actionable startup/exit failures without mistaking help URLs for endpoints, and redact the active authtoken from published logs and errors.
+- Keep the dashboard in an editor tab by default; add persistent editor/bottom-panel placement through its overflow menu, with webview handshake and action-response isolation.
+- Refine localized spacing in settings, model controls and tunnel panels; add browser geometry regressions for narrow layouts and placement-menu interactions.
+- Update the Claude OAuth request fingerprint to Claude Code 2.1.322, including adaptive thinking updates, and seed corrected Opus 5.5 model IDs through a database migration.
+- Fix models-only settings saves failing on an empty application-settings update.
+
+## 1.7.15 - 2026-11-13
 
 - Show Claude thinking summaries in Cursor while the model works.
 
-## 1.7.14 - 2026-10-25 (oshokin fork)
+## 1.7.14 - 2026-10-25
 
 - Preserve independently resizable API/tunnel logs, saved panel heights, initial tail positioning and unread-entry counts from the user's 2026-10-30 source archive alongside the dashboard settings and refactoring.
 - Reset paused log following after Clear so a delayed history snapshot opens at the latest entry.

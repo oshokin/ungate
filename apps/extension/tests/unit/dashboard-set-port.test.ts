@@ -66,8 +66,10 @@ vi.mock('vscode', () => {
 			onDidChangeConfiguration: vi.fn(() => new Disposable())
 		},
 		window: {
+			registerWebviewViewProvider: vi.fn(() => new Disposable()),
 			createWebviewPanel: createWebviewPanelMock
 		},
+		commands: { executeCommand: vi.fn(async () => {}) },
 		ViewColumn: {
 			One: 1,
 			Active: -1
@@ -87,20 +89,28 @@ vi.mock('vscode', () => {
 let Dashboard: typeof import('../../src/dashboard').Dashboard;
 
 function createPanel() {
-	return {
+	const panel = {
 		webview: {
 			html: '',
 			options: {} as Record<string, unknown>,
 			postMessage: vi.fn(),
 			asWebviewUri: vi.fn((value) => value),
-			onDidReceiveMessage: vi.fn()
+			onDidReceiveMessage: vi.fn<(receive: (message: unknown) => void) => { dispose: () => void }>()
 		},
 		onDidChangeViewState: vi.fn(),
-		onDidDispose: vi.fn(),
+		onDidDispose: vi.fn<(dispose: () => void) => void>(),
 		reveal: vi.fn(),
+		dispose: vi.fn(),
 		visible: true,
 		iconPath: null
 	};
+	panel.webview.onDidReceiveMessage.mockImplementation((receive) => {
+		receive({ type: 'webview-ready' });
+
+		return { dispose: vi.fn() };
+	});
+
+	return panel;
 }
 
 describe('Dashboard.setPort', () => {
@@ -114,6 +124,100 @@ describe('Dashboard.setPort', () => {
 		fileUriMock.mockClear();
 		sharedLogs.api.length = 0;
 		sharedLogs.tunnel.length = 0;
+	});
+
+	it('defaults to editor and restores only a valid persisted panel choice', async () => {
+		const vscode = await import('vscode');
+		const context = {
+			extensionMode: 1,
+			extensionPath: '/tmp/ungate-extension',
+			globalState: { get: () => 'panel', update: vi.fn() }
+		};
+		const dashboard = new Dashboard(context as never, () => {});
+		dashboard.show();
+		expect(createWebviewPanelMock).not.toHaveBeenCalled();
+		expect(vscode.commands.executeCommand).toHaveBeenCalledWith('ungate.dashboard.focus');
+		dashboard.dispose();
+	});
+
+	it('waits for each host handshake and isolates disposed hosts', () => {
+		const editor = createPanel();
+		const view = createPanel();
+		editor.webview.onDidReceiveMessage.mockImplementation(() => ({ dispose: vi.fn() }));
+		view.webview.onDidReceiveMessage.mockImplementation(() => ({ dispose: vi.fn() }));
+		createWebviewPanelMock.mockReturnValue(editor);
+		const onMessage = vi.fn();
+		const dashboard = new Dashboard({ extensionMode: 1, extensionPath: '/tmp/ungate-extension' } as never, onMessage);
+		dashboard.show();
+		dashboard.resolveWebviewView(view as never);
+		dashboard.setPort(4321);
+		expect(editor.webview.postMessage).not.toHaveBeenCalled();
+		expect(view.webview.postMessage).not.toHaveBeenCalled();
+		const editorReceive = editor.webview.onDidReceiveMessage.mock.calls[0][0];
+		const viewReceive = view.webview.onDidReceiveMessage.mock.calls[0][0];
+		editorReceive({ type: 'webview-ready' });
+		dashboard.sendInitialState({ status: 'stopped', url: null, error: null });
+		expect(editor.webview.postMessage).toHaveBeenCalledWith({ type: 'port', port: 4321 });
+		expect(view.webview.postMessage).not.toHaveBeenCalled();
+		viewReceive({ type: 'webview-ready' });
+		expect(view.webview.html).toContain("connect-src 'none'");
+		editor.webview.postMessage.mockClear();
+		view.webview.postMessage.mockClear();
+		view.onDidDispose.mock.calls[0][0]();
+		dashboard.sendServiceState({ status: 'stopped' } as never);
+		expect(editor.webview.postMessage).toHaveBeenCalled();
+		expect(view.webview.postMessage).not.toHaveBeenCalled();
+		dashboard.dispose();
+	});
+
+	it('persists switching without opening duplicate editor tabs', async () => {
+		const editor = createPanel();
+		const dispose = vi.fn();
+		createWebviewPanelMock.mockReturnValue({ ...editor, dispose });
+		const update = vi.fn(async () => {});
+		const dashboard = new Dashboard(
+			{ extensionMode: 1, extensionPath: '/tmp/ungate-extension', globalState: { get: () => undefined, update } } as never,
+			() => {}
+		);
+		dashboard.show();
+		dashboard.show();
+		expect(createWebviewPanelMock).toHaveBeenCalledTimes(1);
+		await dashboard.setPlacement('panel');
+		expect(update).toHaveBeenCalledWith('dashboard.placement', 'panel');
+		expect(dispose).toHaveBeenCalledTimes(1);
+	});
+
+	it('returns bridge responses only to their originating webview even with matching request ids', async () => {
+		const editor = createPanel();
+		const view = createPanel();
+		createWebviewPanelMock.mockReturnValue(editor);
+		const usage = { state: {}, load: vi.fn(() => Promise.resolve({ data: { providers: [] } })) };
+		const dashboard = new Dashboard(
+			{ extensionMode: 1, extensionPath: '/tmp/ungate-extension' } as never,
+			() => {},
+			undefined,
+			usage as never
+		);
+		dashboard.show();
+		dashboard.resolveWebviewView(view as never);
+		editor.webview.postMessage.mockClear();
+		view.webview.postMessage.mockClear();
+		editor.webview.onDidReceiveMessage.mock.calls[0][0]({ type: 'api-request', id: 'same-id', method: 'GET', path: '/usage' });
+		await vi.waitFor(() =>
+			expect(editor.webview.postMessage).toHaveBeenCalledWith(
+				expect.objectContaining({ type: 'api-response', id: 'same-id', status: 200 })
+			)
+		);
+		expect(view.webview.postMessage).not.toHaveBeenCalled();
+		editor.webview.postMessage.mockClear();
+		view.webview.onDidReceiveMessage.mock.calls[0][0]({ type: 'api-request', id: 'same-id', method: 'GET', path: '/usage' });
+		await vi.waitFor(() =>
+			expect(view.webview.postMessage).toHaveBeenCalledWith(
+				expect.objectContaining({ type: 'api-response', id: 'same-id', status: 200 })
+			)
+		);
+		expect(editor.webview.postMessage).not.toHaveBeenCalled();
+		dashboard.dispose();
 	});
 
 	it('journals and displays received entries unchanged for both sources', () => {

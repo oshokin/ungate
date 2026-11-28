@@ -2,6 +2,10 @@ const SECRET_KEY = 'ungate.ngrokAuthToken';
 /** Rejects a pasted value that cannot be an ngrok authtoken. */
 const MAX_TOKEN_LENGTH = 512;
 
+function validToken(token: string): boolean {
+	return token.length > 0 && token.length <= MAX_TOKEN_LENGTH && !/[\s/:.]/.test(token);
+}
+
 /** SecretStorage view the token store needs. Tests pass a fake; production passes ExtensionContext.secrets. */
 export interface NgrokSecretStorage {
 	get(key: string): Thenable<string | undefined>;
@@ -30,7 +34,7 @@ export class NgrokTokenStore {
 	async read(): Promise<string | null> {
 		const stored = await this.secrets.get(SECRET_KEY);
 		const token = stored?.trim();
-		if (!token) return null;
+		if (!token || !validToken(token)) return null;
 
 		return token;
 	}
@@ -47,6 +51,7 @@ export class NgrokTokenStore {
 		if (!trimmed || trimmed.length > MAX_TOKEN_LENGTH) {
 			throw new Error('The ngrok authtoken is empty or too long.');
 		}
+		if (!validToken(trimmed)) throw new Error('That is not an ngrok authtoken. Copy the token, not a URL or command.');
 
 		await this.secrets.store(SECRET_KEY, trimmed);
 	}

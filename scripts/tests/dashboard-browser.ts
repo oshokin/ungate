@@ -15,6 +15,7 @@ import { describeService, UNGATE_VERSION, API_PROTOCOL_VERSION } from '../../pac
 import { repoDir } from '../build-package/process';
 
 import { verifyLogPanels } from './dashboard-logs';
+import { verifyBannerSpacing, verifyDashboardSpacing, verifySpacingSnapshotRegression } from './dashboard-spacing';
 import { verifyDashboardThemes } from './dashboard-theme';
 
 import type { DashboardApiBridge as ApiBridge } from '../../apps/extension/src/dashboard-api-bridge';
@@ -108,6 +109,8 @@ try {
 	});
 	const page = await browser.newPage({ colorScheme: 'dark', viewport: { width: 960, height: 820 } });
 	const actionRequests: string[] = [];
+	const placementRequests: string[] = [];
+	let dashboardPlacement: 'editor' | 'panel' = 'panel';
 	const tunnelSelections: string[] = [];
 	page.setDefaultTimeout(10000);
 	const screenshotDirectory = process.env.UNGATE_DASHBOARD_SCREENSHOTS_DIR;
@@ -156,10 +159,19 @@ try {
 				await emit({ type: 'dashboard-preference-result', key: preference.key, error: null });
 			}
 			await emit({ type: 'dashboard-preferences', values: dashboardPreferences });
+			await emit({ type: 'dashboard-placement', placement: dashboardPlacement });
 
 			return;
 		}
 		const message = raw as { type: string; id?: string; action?: string };
+		if (message.type === 'set-dashboard-placement') {
+			const placement = (raw as { placement: 'editor' | 'panel' }).placement;
+			placementRequests.push(placement);
+			dashboardPlacement = placement;
+			await emit({ type: 'dashboard-placement', placement });
+
+			return;
+		}
 		if (message.type === 'set-tunnel-provider') {
 			tunnelSelections.push((raw as { provider: string }).provider);
 
@@ -204,6 +216,32 @@ try {
 
 	await page.goto(`http://${LOOPBACK_HOST}:${address.port}/`);
 	await page.getByRole('heading', { name: 'Providers & models', exact: true }).waitFor();
+	assert.equal(await page.getByRole('region', { name: 'Dashboard placement', exact: true }).count(), 0);
+	assert.equal(await page.getByText('Open dashboard in', { exact: false }).count(), 0);
+	const moreActions = page.getByLabel('More actions', { exact: true });
+	const placementMenu = page.locator('details.ug-overflow');
+	await moreActions.click();
+	await page.getByRole('button', { name: 'Move to Editor Tab', exact: true }).waitFor();
+	assert.equal(await page.getByRole('button', { name: /^Move to / }).count(), 1);
+	await page.getByRole('button', { name: 'Move to Editor Tab', exact: true }).click();
+	assert.deepEqual(placementRequests, ['editor']);
+	assert.equal(await placementMenu.getAttribute('open'), null);
+	await moreActions.click();
+	await page.getByRole('button', { name: 'Move to Bottom Panel', exact: true }).waitFor();
+	await emit({ type: 'dashboard-placement', placement: 'invalid' });
+	await page.getByRole('button', { name: 'Move to Bottom Panel', exact: true }).waitFor();
+	assert.equal(await page.getByRole('button', { name: /^Move to / }).count(), 1);
+	await page.keyboard.press('Escape');
+	assert.equal(await placementMenu.getAttribute('open'), null);
+	assert.equal(await moreActions.evaluate((element) => element === document.activeElement), true);
+	assert.deepEqual(placementRequests, ['editor']);
+	await moreActions.click();
+	await page.getByRole('button', { name: 'Move to Bottom Panel', exact: true }).click();
+	assert.deepEqual(placementRequests, ['editor', 'panel']);
+	await moreActions.click();
+	await page.getByRole('button', { name: 'Move to Editor Tab', exact: true }).waitFor();
+	await page.getByRole('heading', { name: 'Providers & models', exact: true }).click();
+	assert.equal(await placementMenu.getAttribute('open'), null);
 	assert.equal(await page.getByRole('button', { name: 'Use a Cursor model once', exact: true }).count(), 0);
 	assert.equal(await page.getByRole('button', { name: 'Analytics', exact: true }).count(), 0);
 	assert.equal(await page.getByText('Failed to fetch', { exact: true }).count(), 0);
@@ -602,6 +640,8 @@ try {
 	if (screenshotDirectory) await page.screenshot({ path: join(screenshotDirectory, 'light-narrow.png'), fullPage: true });
 
 	// Reproduce startup failure before any API request and check recovery controls.
+	await verifySpacingSnapshotRegression(page);
+	await verifyDashboardSpacing(page);
 	await emit({
 		type: 'service-state',
 		state: {
@@ -614,6 +654,7 @@ try {
 		}
 	});
 	await page.getByRole('button', { name: 'Choose Node.js', exact: true }).click();
+	await verifyBannerSpacing(page);
 	await page.getByText('Choose Node.js Executable: done', { exact: true }).waitFor();
 	assert.ok(actionRequests.includes('choose-node-runtime'));
 	await emit({ type: 'service-state', state: readyState });

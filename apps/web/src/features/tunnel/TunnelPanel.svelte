@@ -307,7 +307,7 @@ $effect(() => watchTunnelError(store.tunnel.error, 'error'));
 		>{/if}
 	{#if store.provider === 'ngrok'}
 		<details
-			class="ug-details"
+			class="ug-details ug-ngrok-account"
 			open={needsToken}
 			><summary>ngrok account</summary>
 			{#if needsToken}<p class="ug-muted">Save an ngrok authtoken before starting ngrok.</p>{/if}
@@ -362,7 +362,7 @@ $effect(() => watchTunnelError(store.tunnel.error, 'error'));
 			{/if}
 		</details>
 	{/if}
-	<details class="ug-details"
+	<details class="ug-details ug-tunnel-options"
 		><summary>Tunnel options</summary>
 		<NumericPreference
 			preference="tunnel.connectTimeoutSeconds"
@@ -372,7 +372,7 @@ $effect(() => watchTunnelError(store.tunnel.error, 'error'));
 			help="Applies to the next tunnel start." />
 		{#if store.provider === 'quick'}{@render tunnelOptions?.()}{/if}
 
-		<div class="ug-stack ug-muted">
+		<div class="ug-stack ug-muted ug-operational-warnings">
 			<p
 				>Reloading a window keeps the shared API and tunnel alive. Cloudflare and ngrok cannot run together. Choosing the other
 				one replaces the tunnel that is running, and Cursor needs the new URL.</p>

@@ -1,6 +1,8 @@
-# Ungate — my fork based on 1.7.15
+# Ungate — my fork, version 1.7.17
 
 Use Claude and ChatGPT/Codex subscriptions or a MiniMax API key in Cursor's native chat through a local proxy and a public tunnel. This is my fork of [orchidfiles/ungate](https://github.com/orchidfiles/ungate), not an official Marketplace release. Provider access and limits depend on the connected account or plan; this does not turn a subscription into unrestricted API access.
+
+The release number matches upstream 1.7.17, with selected upstream changes integrated into this fork's architecture—not full upstream feature parity. This release includes verified ngrok tunnels and dashboard placement controls; it does not add upstream analytics, hostname screening or custom-domain management. See [the changelog](CHANGELOG.md) for the fork's actual changes.
 
 ## Why this fork
 
@@ -51,7 +53,7 @@ corepack pnpm browser:install
 corepack pnpm package
 ```
 
-The verified VSIX is written to `apps/extension/out/ungate-1.7.15.vsix`. Builds do not install or publish automatically. Task equivalents are `task setup`, `task check` and `task package`; see [development and packaging](docs/development.md) for prerequisites, faster iteration and acceptance limits.
+The verified VSIX is written to `apps/extension/out/ungate-1.7.17.vsix`. Builds do not install or publish automatically. Task equivalents are `task setup`, `task check` and `task package`; see [development and packaging](docs/development.md) for prerequisites, faster iteration and acceptance limits.
 
 ## Documentation
 
