@@ -35,6 +35,8 @@ export class RuntimeStateNormalizer {
 			};
 		}
 
+		next.tunnelProvider = parsed.data.tunnelProvider === 'ngrok' ? 'ngrok' : 'quick';
+
 		if (typeof next.api.lastSeenAt !== 'number') {
 			next.api.lastSeenAt = now;
 		}

@@ -3,17 +3,31 @@ import type { LogEntry } from '@ungate/shared/frontend';
 const LOG_LEVELS = new Set<LogEntry['level']>(['info', 'warn', 'error']);
 const DETAIL_FIELDS = ['location', 'protocol', 'target', 'status', 'details'] as const;
 
-/** Converts cloudflared JSON logs into one timestamped, human-readable entry. */
+/** Skip routine ngrok forwarding diagnostics at ingestion, before journal append. */
+export function isRoutineNgrokConnection(line: string): boolean {
+	try {
+		const raw = JSON.parse(line) as Record<string, unknown>;
+
+		return raw.obj === 'join' && raw.msg === 'join connections' && raw.lvl === 'info' && !raw.err && !raw.error;
+	} catch {
+		return false;
+	}
+}
+
+/** Converts tunnel JSON logs into one timestamped, human-readable entry. */
 export function parseCloudflaredLogLine(line: string, receivedAt = Date.now()): LogEntry {
 	try {
 		const raw = JSON.parse(line) as Record<string, unknown>;
-		const parsedTime = typeof raw.time === 'string' ? Date.parse(raw.time) : Number.NaN;
-		const rawLevel = typeof raw.level === 'string' ? raw.level : '';
+		const time = raw.time ?? raw.t;
+		const parsedTime = typeof time === 'string' ? Date.parse(time) : Number.NaN;
+		const rawLevel = typeof raw.level === 'string' ? raw.level : typeof raw.lvl === 'string' ? raw.lvl : '';
 		const level = LOG_LEVELS.has(rawLevel as LogEntry['level']) ? (rawLevel as LogEntry['level']) : 'info';
-		const message = typeof raw.message === 'string' && raw.message.trim() ? raw.message.trim() : 'cloudflared event';
+		const text = typeof raw.message === 'string' && raw.message.trim() ? raw.message : raw.msg;
+		const message = typeof text === 'string' && text.trim() ? text.trim() : 'cloudflared event';
 		const details: string[] = [];
-		if (typeof raw.error === 'string' && raw.error.trim() && raw.error.trim() !== message) {
-			details.push(`error: ${raw.error.trim()}`);
+		const error = raw.error ?? raw.err;
+		if (typeof error === 'string' && error.trim() && error.trim() !== message) {
+			details.push(`error: ${error.trim()}`);
 		}
 		for (const field of DETAIL_FIELDS) {
 			const value = raw[field];

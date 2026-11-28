@@ -1,3 +1,7 @@
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiServer } from '../../src/api-server';
@@ -693,5 +697,172 @@ describe('ApiServer.onExit', () => {
 		expect(onPortDetected).toHaveBeenCalledWith(47821);
 		expect(onStatusChange).toHaveBeenCalledWith('running');
 		expect(onStatusChange).not.toHaveBeenCalledWith('error');
+	});
+
+	it('adopts the API that already owns the port when the new process exits with EADDRINUSE', async () => {
+		const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ungate-api-busy-'));
+		const logPath = path.join(directory, 'api.log');
+		fs.writeFileSync(logPath, 'Error: listen EADDRINUSE: address already in use 127.0.0.1:47821\n');
+		try {
+			const runtimeState = createRuntimeState([], null);
+			runtimeReadMock.mockReturnValue(runtimeState);
+			runtimeMutateMock.mockImplementation((mutator) => Promise.resolve(mutator(structuredClone(runtimeState))));
+			const { server, onStatusChange, onPortDetected } = createServer();
+			const internals = getInternals(server);
+			vi.spyOn(internals, 'ensureNativeDeps').mockResolvedValue(undefined);
+			vi.spyOn(internals, 'spawn').mockImplementation(() => {
+				Object.assign(internals, { process: null, logPath });
+			});
+			vi.spyOn(internals, 'checkPortHealth').mockResolvedValue(true);
+			vi.spyOn(internals, 'startHealthCheck').mockImplementation(() => {});
+
+			await internals.startLocked();
+
+			expect(server.getPort()).toBe(47821);
+			expect(onPortDetected).toHaveBeenCalledWith(47821);
+			expect(onStatusChange).toHaveBeenCalledWith('running');
+			expect(suppressApiAutoStartMock).not.toHaveBeenCalled();
+		} finally {
+			fs.rmSync(directory, { recursive: true, force: true });
+		}
+	});
+
+	it('stops a different Ungate build that owns the port and starts this one', async () => {
+		const { assertCompatibleApi, readApiHealth } = await import('../../src/local-api');
+		const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ungate-api-replace-'));
+		const logPath = path.join(directory, 'api.log');
+		fs.writeFileSync(logPath, 'Error: listen EADDRINUSE: address already in use 127.0.0.1:47821\n');
+		try {
+			const runtimeState = createRuntimeState([], null);
+			runtimeReadMock.mockReturnValue(runtimeState);
+			runtimeMutateMock.mockImplementation((mutator) => Promise.resolve(mutator(structuredClone(runtimeState))));
+			let compatibilityChecks = 0;
+			vi.mocked(assertCompatibleApi).mockImplementation(() => {
+				compatibilityChecks += 1;
+				if (compatibilityChecks === 1) return Promise.reject(new Error('different build'));
+
+				return Promise.resolve();
+			});
+			vi.mocked(readApiHealth).mockResolvedValue({
+				service: 'ungate',
+				pid: 46681,
+				version: '1.7.15',
+				protocolVersion: 3,
+				artifactDigest: 'a'.repeat(64)
+			});
+			const { server, onStatusChange, onLog } = createServer();
+			Object.assign(server, { expectedArtifactDigest: 'b'.repeat(64) });
+			const internals = getInternals(server);
+			let spawned = 0;
+			vi.spyOn(internals, 'ensureNativeDeps').mockResolvedValue(undefined);
+			const stop = vi.spyOn(internals, 'stopLocked').mockResolvedValue(undefined);
+			vi.spyOn(internals, 'isPortListening').mockResolvedValue(false);
+			vi.spyOn(internals, 'checkPortHealth').mockImplementation((port: number) => Promise.resolve(port === 47821));
+			const nextLog = path.join(directory, 'api-next.log');
+			vi.spyOn(internals, 'spawn').mockImplementation(() => {
+				spawned += 1;
+				if (spawned === 1) {
+					Object.assign(internals, { process: null, port: null, logPath });
+
+					return;
+				}
+				fs.writeFileSync(nextLog, 'listening on localhost:47821\n');
+				Object.assign(internals, { process: { pid: 99 }, port: 47821, logPath: nextLog, addressInUsePort: null });
+			});
+			vi.spyOn(internals, 'startHealthCheck').mockImplementation(() => {});
+
+			await internals.startLocked();
+
+			expect(spawned).toBe(2);
+			expect(stop).toHaveBeenCalledOnce();
+			expect(onLog).toHaveBeenCalledWith('info', expect.stringContaining('stopping API pid=46681'));
+			expect(server.getPort()).toBe(47821);
+			expect(onStatusChange).toHaveBeenCalledWith('running');
+			expect(suppressApiAutoStartMock).not.toHaveBeenCalled();
+		} finally {
+			vi.mocked(assertCompatibleApi).mockResolvedValue(undefined);
+			vi.mocked(readApiHealth).mockResolvedValue({ service: 'ungate', pid: 1234, version: '1.7.15', protocolVersion: 3 });
+			fs.rmSync(directory, { recursive: true, force: true });
+		}
+	});
+
+	it('stops a different build even when the second health read fails', async () => {
+		const { assertCompatibleApi, readApiHealth } = await import('../../src/local-api');
+		const runtimeState = createRuntimeState([], null);
+		runtimeState.tunnel.port = 47821;
+		runtimeReadMock.mockReturnValue(runtimeState);
+		runtimeMutateMock.mockImplementation((mutator) => Promise.resolve(mutator(structuredClone(runtimeState))));
+		let compatibilityChecks = 0;
+		vi.mocked(assertCompatibleApi).mockImplementation(() => {
+			compatibilityChecks += 1;
+			if (compatibilityChecks === 1) {
+				return Promise.reject(
+					new Error('A different Ungate API build is running. Restart the shared API to apply the installed build.')
+				);
+			}
+
+			return Promise.resolve();
+		});
+		vi.mocked(readApiHealth).mockRejectedValue(new Error('admin failed'));
+		const { server, onStatusChange } = createServer();
+		const internals = getInternals(server);
+		vi.spyOn(internals, 'ensureNativeDeps').mockResolvedValue(undefined);
+		const stop = vi.spyOn(internals, 'stopLocked').mockResolvedValue(undefined);
+		vi.spyOn(internals, 'isPortListening').mockResolvedValue(false);
+		vi.spyOn(internals, 'checkPortHealth').mockImplementation(() => {
+			Object.assign(internals, { attachedPid: 46681 });
+
+			return Promise.resolve(true);
+		});
+		const spawn = vi.spyOn(internals, 'spawn').mockImplementation(() => {
+			Object.assign(internals, { process: { pid: 99 }, port: 47821 });
+		});
+		vi.spyOn(internals, 'startHealthCheck').mockImplementation(() => {});
+
+		await internals.startLocked();
+
+		expect(stop).toHaveBeenCalledOnce();
+		expect(spawn).toHaveBeenCalledOnce();
+		expect(onStatusChange).toHaveBeenCalledWith('running');
+		expect(suppressApiAutoStartMock).not.toHaveBeenCalled();
+		vi.mocked(assertCompatibleApi).mockResolvedValue(undefined);
+		vi.mocked(readApiHealth).mockResolvedValue({ service: 'ungate', pid: 1234, version: '1.7.15', protocolVersion: 3 });
+	});
+
+	it('stops the API listening on the tunnel port before spawning a replacement', async () => {
+		const { assertCompatibleApi, readApiHealth } = await import('../../src/local-api');
+		const runtimeState = createRuntimeState([], null);
+		runtimeState.tunnel.port = 47821;
+		runtimeReadMock.mockReturnValue(runtimeState);
+		runtimeMutateMock.mockImplementation((mutator) => Promise.resolve(mutator(structuredClone(runtimeState))));
+		vi.mocked(assertCompatibleApi).mockRejectedValueOnce(new Error('different build'));
+		vi.mocked(readApiHealth).mockResolvedValue({
+			service: 'ungate',
+			pid: 46681,
+			version: '1.7.15',
+			protocolVersion: 3,
+			artifactDigest: 'a'.repeat(64)
+		});
+		const { server, onStatusChange } = createServer();
+		Object.assign(server, { expectedArtifactDigest: 'b'.repeat(64) });
+		const internals = getInternals(server);
+		vi.spyOn(internals, 'ensureNativeDeps').mockResolvedValue(undefined);
+		const stop = vi.spyOn(internals, 'stopLocked').mockResolvedValue(undefined);
+		vi.spyOn(internals, 'isPortListening').mockResolvedValue(false);
+		vi.spyOn(internals, 'checkPortHealth').mockResolvedValue(true);
+		const spawn = vi.spyOn(internals, 'spawn').mockImplementation(() => {
+			Object.assign(internals, { process: { pid: 99 }, port: 47821 });
+		});
+		vi.spyOn(internals, 'startHealthCheck').mockImplementation(() => {});
+
+		await internals.startLocked();
+
+		expect(stop).toHaveBeenCalledOnce();
+		expect(spawn).toHaveBeenCalledOnce();
+		expect(server.getPort()).toBe(47821);
+		expect(onStatusChange).toHaveBeenCalledWith('running');
+		expect(suppressApiAutoStartMock).not.toHaveBeenCalled();
+		vi.mocked(assertCompatibleApi).mockResolvedValue(undefined);
+		vi.mocked(readApiHealth).mockResolvedValue({ service: 'ungate', pid: 1234, version: '1.7.15', protocolVersion: 3 });
 	});
 });

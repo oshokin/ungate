@@ -41,6 +41,7 @@ function createState(apiStatus: RuntimeState['api']['status'], lastError: string
 			ownerWindowId: null
 		},
 		keyFix: { enabled: false },
+		tunnelProvider: 'quick',
 		clients: {}
 	};
 }

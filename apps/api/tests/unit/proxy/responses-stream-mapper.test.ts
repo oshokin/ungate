@@ -25,6 +25,31 @@ function collectChunks(events: Record<string, unknown>[]) {
 }
 
 describe('responses-stream-mapper replay', () => {
+	it.each(['function_call', 'custom_tool_call'])('assigns contiguous chat tool indices for %s independently of output indices', (type) => {
+		const events: Record<string, unknown>[] = [
+			{ type: 'response.output_item.added', output_index: 0, item: { type: 'reasoning', id: 'reasoning' } }
+		];
+		for (const [outputIndex, name] of [[1, 'Task'], [3, 'Read']] as const) {
+			const item = { id: `item_${outputIndex}`, call_id: `call_${outputIndex}`, type, name };
+			events.push(
+				{ type: 'response.output_item.added', output_index: outputIndex, item },
+				{ type: 'response.function_call_arguments.delta', output_index: outputIndex, delta: '{}' },
+				{ type: 'response.output_item.done', output_index: outputIndex, item: { ...item, arguments: '{}' } }
+			);
+		}
+		events.push({ type: 'response.completed', response: {} });
+		const got = collectChunks(events);
+		const calls = got.chunks.flatMap((chunk) =>
+			(chunk.choices as { delta: { tool_calls?: { index: number; function: { name: string; arguments: string } }[] } }[])[0].delta.tool_calls ?? []
+		);
+		expect(calls).toEqual([
+			expect.objectContaining({ index: 0, function: { name: 'Task', arguments: '{}' } }),
+			expect.objectContaining({ index: 1, function: { name: 'Read', arguments: '{}' } })
+		]);
+		expect(got.finishReason).toBe('tool_calls');
+		expect(got.doneCount).toBe(1);
+	});
+
 	it('handles text-only stream', () => {
 		const events = [
 			{ type: 'response.created', response: { id: 'resp_text' } },

@@ -47,25 +47,66 @@ $effect(() => watchSettingsError(store.settings ? store.error : null, 'error'));
 </script>
 
 <div class="ug-stack">
-	<TunnelPanel />
-	<details class="ug-card ug-details">
-		<summary>Advanced editor preferences</summary>
-		<div class="ug-stack">
-			<NumericPreference
-				preference="network.providerHeaderTimeoutSeconds"
-				label="Provider header timeout (s)"
-				min={5}
-				max={120}
-				help="Applies to the next API restart; not a stream idle timeout." />
-			<div>
+	<TunnelPanel>
+		{#snippet tunnelOptions()}
+			{#if store.settings && availability === 'ready'}
+				<label class="ug-label"
+					>Cloudflare protocol<select
+						class="ug-select"
+						aria-label="Cloudflare protocol"
+						value={form.tunnelProtocol}
+						onchange={(event) => form.setTunnelProtocol(event.currentTarget.value)}>
+						<option value="http2">HTTP/2</option>
+						<option value="quic">QUIC</option>
+						<option value="auto">Auto</option>
+					</select></label>
+				<p class="ug-muted"
+					>HTTP/2 works through most firewalls. Changing protocol restarts a running Cloudflare tunnel and replaces its URL.</p>
 				<button
-					class="ug-button"
-					disabled={!!actions.busy}
-					onclick={() => performAction('choose-node-runtime')}>Choose Node.js executable</button>
-				<p class="ug-muted">Choose a validated local runtime. A running shared API is not restarted.</p>
+					class="ug-button ug-primary"
+					disabled={store.saving || store.restarting}
+					onclick={save}>Save & restart API</button>
+			{/if}
+		{/snippet}
+		{#snippet runtimeOptions()}
+			<div class="ug-stack">
+				{#if store.settings && availability === 'ready'}
+					<label class="ug-label"
+						>Port<input
+							class="ug-input"
+							type="number"
+							min={TCP_PORT_MIN}
+							max={TCP_PORT_MAX}
+							step="1"
+							required
+							value={form.port}
+							oninput={(event) => form.setPort(event.currentTarget.value)} /></label>
+				{/if}
+				<NumericPreference
+					preference="network.providerHeaderTimeoutSeconds"
+					label="Provider header timeout (s)"
+					min={5}
+					max={120}
+					help="Applies to the next API restart; not a stream idle timeout." />
+				<div>
+					<button
+						class="ug-button"
+						disabled={!!actions.busy}
+						onclick={() => performAction('choose-node-runtime')}>Choose Node.js executable</button>
+					<p class="ug-muted">Choose a validated local runtime. A running shared API is not restarted.</p>
+				</div>
+				<p class="ug-muted"
+					>Editor preferences save separately and apply on the next API start. API settings remain a draft until saved. Save &
+					restart applies all API settings drafts, including model instructions and tunnel protocol.</p>
+				{#if store.settings && availability === 'ready'}
+					<button
+						class="ug-button ug-primary"
+						disabled={store.saving || store.restarting}
+						onclick={save}>{store.restarting ? 'Restarting…' : 'Save & restart API'}</button>
+				{/if}
 			</div>
-		</div>
-	</details>
+		{/snippet}
+	</TunnelPanel>
 	{#if service.state.status === 'ready'}
 		{#if store.loading && !store.settings}<p role="status">Loading settings…</p>{/if}
 		{#if store.error}
@@ -74,41 +115,16 @@ $effect(() => watchSettingsError(store.settings ? store.error : null, 'error'));
 				role="alert">
 				<div><strong>Unable to load settings</strong><p class="ug-muted">{store.error}</p></div>
 				<button
-					class="ug-button"
+					class="ug-button ug-primary"
 					disabled={store.loading}
 					onclick={() => void store.load()}>Retry</button>
 			</div>
 		{/if}
 		{#if store.settings}
 			<details class="ug-card ug-details">
-				<summary>Advanced settings</summary>
+				<summary>Model instructions</summary>
 				<div class="ug-stack">
-					<div class="ug-form-grid">
-						<label class="ug-label"
-							>Port<input
-								class="ug-input"
-								type="number"
-								min={TCP_PORT_MIN}
-								max={TCP_PORT_MAX}
-								step="1"
-								required
-								value={form.port}
-								oninput={(event) => form.setPort(event.currentTarget.value)} /></label>
-						<label class="ug-label"
-							>Tunnel protocol<select
-								class="ug-select"
-								aria-label="Tunnel protocol"
-								value={form.tunnelProtocol}
-								onchange={(event) => form.setTunnelProtocol(event.currentTarget.value)}>
-								<option value="http2">HTTP/2</option>
-								<option value="quic">QUIC</option>
-								<option value="auto">Auto</option>
-							</select></label>
-					</div>
-					<p class="ug-muted">
-						HTTP/2 works through most firewalls. QUIC is for networks where HTTP/2 cannot reach Cloudflare. Saving a different
-						protocol restarts a running tunnel and replaces its URL.
-					</p>
+					<p class="ug-muted"> Additional system instruction for models. Save & restart applies all API settings drafts. </p>
 					<label class="ug-label"
 						>Global instruction<textarea
 							class="ug-textarea"
@@ -117,10 +133,12 @@ $effect(() => watchSettingsError(store.settings ? store.error : null, 'error'));
 							oninput={(event) => form.setExtraInstruction(event.currentTarget.value)}
 							placeholder="Additional system instruction"></textarea
 						></label>
-					<button
-						class="ug-button ug-primary"
-						disabled={store.saving || store.restarting}
-						onclick={save}>{store.restarting ? 'Restarting…' : 'Save & restart API'}</button>
+					<div class="ug-toolbar ug-end">
+						<button
+							class="ug-button ug-primary"
+							disabled={store.saving || store.restarting}
+							onclick={save}>{store.restarting ? 'Restarting…' : 'Save & restart API'}</button>
+					</div>
 				</div>
 			</details>
 			<section

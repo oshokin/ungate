@@ -1,6 +1,7 @@
 import { LOOPBACK_HOST, type RuntimeState } from '@ungate/shared/frontend';
 
 import { getCloudflaredBinPath, ManagedProcess } from '../utils/managed-process';
+import { getNgrokBinPath } from '../utils/ngrok-installer';
 
 import { config } from './config';
 import { RuntimeStateFileStore } from './file-store';
@@ -88,7 +89,10 @@ export class RuntimeStateStore {
 			}
 
 			const now = Date.now();
-			if (ManagedProcess.matches(current.tunnel.pid, getCloudflaredBinPath(), current.tunnel.logPath)) {
+			const owned =
+				ManagedProcess.matches(current.tunnel.pid, getCloudflaredBinPath(), current.tunnel.logPath) ||
+				ManagedProcess.matches(current.tunnel.pid, getNgrokBinPath(), current.tunnel.logPath);
+			if (owned) {
 				// Process ownership outlives the window. Preserve its URL across host restarts.
 				current.tunnel.ownerWindowId = this.getLeaderWindowId(current);
 

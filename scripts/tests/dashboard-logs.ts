@@ -11,6 +11,21 @@ async function panelHeight(handle: Locator): Promise<number> {
 }
 
 export async function verifyLogPanels(page: Page, emit: (message: unknown) => Promise<unknown>): Promise<void> {
+	// Re-entering schedules delayed scroll restoration. Pointer interaction must
+	// cancel it, or a restore can move the resize handle between hover and down.
+	await page.evaluate(() => window.scrollTo(0, 0));
+	await page.getByRole('button', { name: 'Connection', exact: true }).click();
+	await page.getByRole('button', { name: 'Logs', exact: true }).click();
+	await page.mouse.move(20, 20);
+	const pointerScroll = await page.evaluate(() => {
+		window.scrollTo(0, document.documentElement.scrollHeight);
+
+		return window.scrollY;
+	});
+	assert.ok(pointerScroll > 0, 'Logs page must scroll for the restoration regression');
+	// Cover every restore deadline (100, 300 and 750 ms), not just one frame.
+	await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 850)));
+	assert.equal(await page.evaluate(() => window.scrollY), pointerScroll, 'Pointer interaction cancels delayed restoration');
 	for (const unrelated of [null, 'unrelated message', 42]) await emit(unrelated);
 	const sources = ['api', 'tunnel'] as const;
 	const snapshot = (source: string, generation: string, count = 80) => ({

@@ -94,6 +94,9 @@ onMount(() => {
 	window.addEventListener('scroll', onScroll, { passive: true });
 	window.addEventListener('wheel', onUserScroll, { passive: true });
 	window.addEventListener('touchstart', onUserScroll, { passive: true });
+	// A delayed restore must not move controls out from under an active pointer.
+	window.addEventListener('pointermove', onUserScroll, { passive: true });
+	window.addEventListener('pointerdown', onUserScroll, { passive: true });
 	window.addEventListener('keydown', onUserScroll);
 	void restoreScrollPosition(currentPage);
 
@@ -102,6 +105,8 @@ onMount(() => {
 		window.removeEventListener('scroll', onScroll);
 		window.removeEventListener('wheel', onUserScroll);
 		window.removeEventListener('touchstart', onUserScroll);
+		window.removeEventListener('pointermove', onUserScroll);
+		window.removeEventListener('pointerdown', onUserScroll);
 		window.removeEventListener('keydown', onUserScroll);
 		persistCurrentScrollPosition();
 

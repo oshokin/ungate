@@ -60,7 +60,7 @@ The proxy sits between Cursor (which calls from `api2.cursor.sh`) and three upst
 
 `better-sqlite3` 13.0.3 and its eight N-API prebuilds for x64/arm64 on glibc Linux, musl Linux, macOS, and Windows are packaged inside the VSIX. Ungate selects the prebuild for the spawned Node runtime's platform/libc/architecture and load-tests it before starting the API. It does not download or compile SQLite code at runtime.
 
-`cloudflared` is the only native executable downloaded on first run. It goes through `utils/verified-artifact.ts`:
+`cloudflared` is downloaded when a quick tunnel starts. Optional ngrok 3.39.13 is downloaded only after the user selects it. Both go through `utils/verified-artifact.ts`:
 
 - Pinned upstream URL per platform.
 - SHA-256 allowlist per platform/architecture.

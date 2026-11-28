@@ -5,6 +5,7 @@ import type {
 	runtimeClientEntrySchema,
 	runtimeLogLevelSchema,
 	runtimeStateSchema,
+	runtimeTunnelProviderSchema,
 	runtimeTunnelStateSchema,
 	runtimeTunnelStatusSchema
 } from '../schemas/runtime';
@@ -17,4 +18,5 @@ export type RuntimeClientEntry = z.infer<typeof runtimeClientEntrySchema>;
 export type RuntimeApiState = z.infer<typeof runtimeApiStateSchema>;
 export type RuntimeApiLogHealth = z.infer<typeof runtimeApiLogHealthSchema>;
 export type RuntimeTunnelState = z.infer<typeof runtimeTunnelStateSchema>;
+export type TunnelProvider = z.infer<typeof runtimeTunnelProviderSchema>;
 export type RuntimeState = z.infer<typeof runtimeStateSchema>;

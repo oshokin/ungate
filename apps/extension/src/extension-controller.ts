@@ -4,6 +4,7 @@ import {
 	dashboardActions,
 	describeService,
 	LOOPBACK_HOST,
+	sameServiceState,
 	UNGATE_VERSION,
 	type DashboardAction,
 	type ServiceState,
@@ -20,7 +21,8 @@ import { openCursorModels } from './cursor-settings';
 import { Dashboard, type Msg } from './dashboard';
 import { extensionCommands } from './extension-commands';
 import { ExtensionStatusBar, type UngateConnectionStatus } from './extension-status-bar';
-import { readApiHealth, readAppSettings, readSubscriptionUsage } from './local-api';
+import { readApiHealth, readAppSettings, readSubscriptionUsage, readTunnelProtocol } from './local-api';
+import { NgrokTokenStore } from './ngrok-token-store';
 import { chooseNodeRuntime } from './node-runtime-settings';
 import { RuntimeStateStore } from './runtime-state';
 import { config } from './runtime-state/config';
@@ -45,11 +47,15 @@ export class ExtensionController {
 	private usage!: UsageController;
 	private dashboard!: Dashboard;
 	private tunnelManager!: TunnelManager;
+	private ngrokToken!: NgrokTokenStore;
+	private lastTunnelConfigProvider: 'quick' | 'ngrok' | null = null;
+	private tunnelConfigToken: Promise<string | null> | null = null;
 	private apiServer!: ApiServer;
 	private services!: SharedServiceController;
 	private actionInProgress = false;
+	private serviceStatePublished = false;
 	private serviceState: ServiceState = {
-		status: 'checking',
+		status: 'stopped',
 		version: null,
 		expectedVersion: UNGATE_VERSION,
 		canUpdate: false,
@@ -151,6 +157,14 @@ export class ExtensionController {
 		// bootstrap is asynchronous and must not gate status-bar visibility.
 		this.updateStatusBar();
 
+		this.ngrokToken = new NgrokTokenStore(this.context.secrets);
+		this.context.subscriptions.push(
+			this.context.secrets.onDidChange((event) => {
+				if (event.key !== 'ungate.ngrokAuthToken') return;
+				this.tunnelConfigToken = null;
+				void this.sendTunnelConfig().catch(() => {});
+			})
+		);
 		this.dashboard = new Dashboard(
 			this.context,
 			(message) => {
@@ -172,7 +186,8 @@ export class ExtensionController {
 			(entry) => {
 				this.log(`[tunnel] ${entry.message}`);
 				this.dashboard.pushLog('tunnel', entry);
-			}
+			},
+			this.ngrokToken
 		);
 
 		this.apiServer = new ApiServer(this.context, {
@@ -329,7 +344,9 @@ export class ExtensionController {
 		this.statusBar.show();
 
 		if (becameOffline) {
-			void vscode.window.showWarningMessage('Ungate tunnel is unavailable. Custom Ungate models may fail.');
+			// Native notifications cannot be dismissed on recovery. Keep live availability
+			// in the status item instead of leaving an obsolete outage toast visible.
+			this.log('Ungate connection became unavailable. See the status item for current API and public tunnel health.');
 		}
 
 		if (status !== 'connecting') this.lastConnectionStatus = status;
@@ -471,7 +488,19 @@ export class ExtensionController {
 		}
 		if (message.type === 'webview-ready') {
 			this.dashboard.sendInitialState(this.currentTunnelState);
-			this.dashboard.sendServiceState(this.serviceState);
+			if (!this.serviceStatePublished) this.publishStoredServiceState();
+			if (this.serviceStatePublished) this.dashboard.sendServiceState(this.serviceState);
+			void this.sendTunnelConfig();
+
+			return;
+		}
+		if (message.type === 'set-tunnel-provider') {
+			void this.setTunnelProvider(message.provider);
+
+			return;
+		}
+		if (message.type === 'set-ngrok-auth-token') {
+			void this.setNgrokAuthToken(message.token);
 
 			return;
 		}
@@ -493,11 +522,85 @@ export class ExtensionController {
 		if (message.type === 'clear-logs') this.dashboard.clearLogs(message.source);
 	}
 
+	private async sendTunnelConfig(): Promise<void> {
+		const tokenRead = (this.tunnelConfigToken ??= this.ngrokToken.read());
+		try {
+			const token = await tokenRead;
+			if (this.tunnelConfigToken !== tokenRead) return;
+			const provider = RuntimeStateStore.read().tunnelProvider === 'ngrok' ? 'ngrok' : 'quick';
+			this.lastTunnelConfigProvider = provider;
+			this.dashboard.sendTunnelConfig(provider, token);
+		} catch (error) {
+			if (this.tunnelConfigToken === tokenRead) this.tunnelConfigToken = null;
+			throw error;
+		}
+	}
+
+	private async setTunnelProvider(provider: 'quick' | 'ngrok'): Promise<void> {
+		try {
+			await this.tunnelManager.selectProvider(
+				provider,
+				async () => {
+					const next = provider === 'ngrok' ? 'ngrok' : 'Cloudflare';
+
+					const choice = await vscode.window.showWarningMessage(
+						`Replace the running tunnel with ${next}? Only one tunnel runs, and Cursor needs the new URL.`,
+						{ modal: true },
+						'Replace'
+					);
+
+					return choice === 'Replace';
+				},
+				readTunnelProtocol,
+				() => this.sendTunnelConfig()
+			);
+		} catch (error: unknown) {
+			void vscode.window.showErrorMessage(`Ungate: ${this.formatError(error)}`);
+		} finally {
+			await this.sendTunnelConfig();
+		}
+	}
+
+	private async setNgrokAuthToken(token: string): Promise<void> {
+		try {
+			await this.ngrokToken.save(token);
+			this.tunnelConfigToken = null;
+		} catch (error: unknown) {
+			void vscode.window.showErrorMessage(`Ungate: ${this.formatError(error)}`);
+		} finally {
+			await this.sendTunnelConfig();
+		}
+	}
+
+	/** The saved failure is shown as-is. A running API stays blank until its health check. */
+	private publishStoredServiceState(): void {
+		const state = RuntimeStateStore.read();
+		if (state.api.status === 'running') return;
+		const starting = state.api.status === 'starting';
+		this.publishServiceState({
+			status: starting ? 'checking' : state.api.status === 'error' ? 'error' : 'stopped',
+			version: null,
+			expectedVersion: UNGATE_VERSION,
+			canUpdate: false,
+			message: starting ? null : state.api.lastError,
+			logsConnected: state.api.logHealth?.status !== 'unavailable'
+		});
+	}
+
 	private async updateServiceState(state: RuntimeState): Promise<void> {
 		let service: ServiceState;
-		if (!state.api.port) {
+		if (state.api.status === 'starting') {
 			service = {
-				status: state.api.status === 'starting' ? 'checking' : state.api.status === 'error' ? 'error' : 'stopped',
+				status: 'checking',
+				version: null,
+				expectedVersion: UNGATE_VERSION,
+				canUpdate: false,
+				message: null,
+				logsConnected: true
+			};
+		} else if (!state.api.port) {
+			service = {
+				status: state.api.status === 'error' ? 'error' : 'stopped',
 				version: null,
 				expectedVersion: UNGATE_VERSION,
 				canUpdate: false,
@@ -537,7 +640,13 @@ export class ExtensionController {
 					'Ungate was updated while this window was running. Reload this window to load the installed extension before restarting the shared API.'
 			};
 		}
+		if (sameServiceState(this.serviceState, service)) {
+			this.serviceStatePublished = true;
+
+			return;
+		}
 		this.serviceState = service;
+		this.serviceStatePublished = true;
 		this.dashboard.sendServiceState(service);
 		this.updateStatusBar();
 	}
@@ -619,6 +728,7 @@ export class ExtensionController {
 		this.lastApiStatus = runtimeState.api.status;
 		this.lastApiError = runtimeState.api.lastError;
 		this.currentTunnelState = {
+			provider: this.tunnelManager.getState().provider,
 			status: runtimeState.tunnel.status,
 			url: runtimeState.tunnel.url,
 			error: runtimeState.tunnel.lastError,
@@ -629,6 +739,9 @@ export class ExtensionController {
 		};
 		this.dashboard.setPort(this.currentPort);
 		this.dashboard.sendTunnelState(this.currentTunnelState);
+		if (this.lastTunnelConfigProvider !== runtimeState.tunnelProvider) {
+			void this.sendTunnelConfig().catch(() => {});
+		}
 		this.updateStatusBar();
 		if (becameRunning) void this.refreshSubscriptionLimits();
 		else if (runtimeState.api.status !== 'running') this.hideSubscriptionLimits();

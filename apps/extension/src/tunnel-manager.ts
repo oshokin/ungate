@@ -17,13 +17,16 @@ import {
 } from '@ungate/shared';
 
 import { tunnelConnectTimeoutMs } from './dashboard-settings';
+import { NgrokTokenStore, UnavailableNgrokSecrets } from './ngrok-token-store';
+import { NgrokUrl } from './ngrok-url';
 import { RuntimeStateStore } from './runtime-state';
 import { config } from './runtime-state/config';
 import { CLOUDFLARED_VERSION, CloudflaredInstaller } from './utils/cloudflared-installer';
-import { parseCloudflaredLogLine } from './utils/cloudflared-log';
+import { isRoutineNgrokConnection, parseCloudflaredLogLine } from './utils/cloudflared-log';
 import { CrossProcessLock } from './utils/cross-process-lock';
 import { capAppendOnlyLog, LogFileReader } from './utils/log-file-reader';
 import { getCloudflaredBinPath, ManagedProcess } from './utils/managed-process';
+import { getNgrokBinPath, NGROK_VERSION, NgrokInstaller } from './utils/ngrok-installer';
 
 export { getCloudflaredBinPath } from './utils/managed-process';
 
@@ -160,14 +163,17 @@ export class TunnelManager {
 		private readonly windowId: string,
 		private readonly isExtensionHostActive: () => boolean,
 		private readonly onStateChange: (state: TunnelState) => void,
-		private readonly onLog: (entry: LogEntry) => void
+		private readonly onLog: (entry: LogEntry) => void,
+		private readonly ngrokToken: NgrokTokenStore = new NgrokTokenStore(new UnavailableNgrokSecrets())
 	) {}
 
 	getState(): TunnelState {
 		const state = RuntimeStateStore.read().tunnel;
+		const executable = this.matchedExecutable(state.pid, state.logPath);
 
 		return {
 			status: state.status,
+			provider: executable === getNgrokBinPath() ? 'ngrok' : executable === getCloudflaredBinPath() ? 'quick' : null,
 			url: state.url,
 			error: state.lastError,
 			publicStatus: state.publicStatus ?? 'unchecked',
@@ -186,6 +192,55 @@ export class TunnelManager {
 		}
 	}
 
+	/** Preference and replacement share the same cross-window lifecycle lock. */
+	async selectProvider(
+		provider: 'quick' | 'ngrok',
+		confirm: () => Promise<boolean>,
+		protocol: (port: number) => Promise<TunnelProtocol>,
+		acknowledgeSelection: () => Promise<void> = async () => {}
+	): Promise<void> {
+		const release = await CrossProcessLock.acquire('tunnel.lock', config.locks.startupTimeoutMs);
+		try {
+			const before = structuredClone(RuntimeStateStore.read());
+			if (before.tunnelProvider === provider) return;
+			const live = ['running', 'starting', 'installing'].includes(before.tunnel.status);
+			if (live) {
+				const confirmed = await confirm();
+				if (!confirmed) return;
+			}
+			const current = RuntimeStateStore.read();
+			// Older windows may not honor this lock. Never replace a different launch
+			// or resurrect a tunnel stopped while its confirmation was open.
+			if (
+				current.tunnelProvider !== before.tunnelProvider ||
+				current.tunnel.pid !== before.tunnel.pid ||
+				current.tunnel.logPath !== before.tunnel.logPath ||
+				current.tunnel.status !== before.tunnel.status
+			)
+				return;
+			if (live) await this.refuseNgrokWithoutToken(provider);
+			await RuntimeStateStore.mutate((state) => {
+				state.tunnelProvider = provider;
+
+				return state;
+			});
+			await acknowledgeSelection();
+			if (live && current.tunnel.port) {
+				const selectedProtocol = await protocol(current.tunnel.port);
+				const latest = RuntimeStateStore.read().tunnel;
+				if (
+					latest.pid !== before.tunnel.pid ||
+					latest.logPath !== before.tunnel.logPath ||
+					latest.status !== before.tunnel.status
+				)
+					return;
+				await this.startLocked(current.tunnel.port, selectedProtocol, provider);
+			}
+		} finally {
+			release();
+		}
+	}
+
 	async stop(): Promise<void> {
 		const release = await CrossProcessLock.acquire('tunnel.lock', config.locks.startupTimeoutMs);
 		try {
@@ -198,8 +253,10 @@ export class TunnelManager {
 	async restart(port: number, protocol: TunnelProtocol = 'http2'): Promise<void> {
 		const release = await CrossProcessLock.acquire('tunnel.lock', config.locks.startupTimeoutMs);
 		try {
+			const provider = RuntimeStateStore.read().tunnelProvider;
+			await this.refuseNgrokWithoutToken(provider);
 			await this.stopLocked();
-			await this.startLocked(port, protocol);
+			await this.startLocked(port, protocol, provider);
 		} finally {
 			release();
 		}
@@ -223,9 +280,8 @@ export class TunnelManager {
 	async reconcile(): Promise<void> {
 		const current = RuntimeStateStore.read().tunnel;
 		if (current.status !== 'running' && current.status !== 'starting') return;
-		const executable = getCloudflaredBinPath();
 		const pid = current.pid;
-		if (pid && ManagedProcess.matches(pid, executable, current.logPath)) {
+		if (pid && this.matchedExecutable(pid, current.logPath)) {
 			await this.probePublicHealth();
 
 			return;
@@ -233,7 +289,7 @@ export class TunnelManager {
 		const identityChanged = !!pid && ManagedProcess.isAlive(pid);
 		await RuntimeStateStore.mutate((state) => {
 			if (state.tunnel.pid !== pid || (state.tunnel.status !== 'running' && state.tunnel.status !== 'starting')) return state;
-			if (pid && ManagedProcess.matches(pid, executable, state.tunnel.logPath)) return state;
+			if (pid && this.matchedExecutable(pid, state.tunnel.logPath)) return state;
 			state.tunnel = {
 				status: identityChanged ? 'error' : 'stopped',
 				url: null,
@@ -252,20 +308,43 @@ export class TunnelManager {
 		this.onStateChange(this.getState());
 	}
 
-	private async startLocked(port: number, protocol: TunnelProtocol): Promise<void> {
+	private async startLocked(
+		port: number,
+		protocol: TunnelProtocol,
+		provider: 'quick' | 'ngrok' = RuntimeStateStore.read().tunnelProvider === 'ngrok' ? 'ngrok' : 'quick'
+	): Promise<void> {
 		if (!isTunnelProtocol(protocol)) throw new Error('Tunnel protocol must be http2, quic, or auto.');
 		const previous = RuntimeStateStore.read().tunnel;
-		if (ManagedProcess.matches(previous.pid, getCloudflaredBinPath(), previous.logPath)) {
-			if (previous.port === port && previous.url && (previous.protocol ?? 'http2') === protocol) {
+		const wantedBin = provider === 'ngrok' ? getNgrokBinPath() : getCloudflaredBinPath();
+		const otherBin = provider === 'ngrok' ? getCloudflaredBinPath() : getNgrokBinPath();
+		if (ManagedProcess.matches(previous.pid, wantedBin, previous.logPath)) {
+			const sameTunnel =
+				previous.port === port && previous.url && (provider === 'ngrok' || (previous.protocol ?? 'http2') === protocol);
+			if (sameTunnel) {
 				await this.setState({ status: 'running', url: previous.url, error: null });
 
 				return;
 			}
-			await this.stopLocked();
-		} else if (previous.pid && ManagedProcess.isAlive(previous.pid)) {
+		} else if (
+			previous.pid &&
+			ManagedProcess.isAlive(previous.pid) &&
+			!ManagedProcess.matches(previous.pid, otherBin, previous.logPath)
+		) {
 			throw new Error(
 				'Saved tunnel PID belongs to an unverified process. No process was stopped and no duplicate tunnel was started.'
 			);
+		}
+		await this.refuseNgrokWithoutToken(provider);
+		if (
+			ManagedProcess.matches(previous.pid, wantedBin, previous.logPath) ||
+			ManagedProcess.matches(previous.pid, otherBin, previous.logPath)
+		) {
+			await this.stopLocked();
+		}
+		if (provider === 'ngrok') {
+			await this.startNgrokLocked(port);
+
+			return;
 		}
 		await this.setState({ status: 'installing', url: null, error: null });
 		const binary = getCloudflaredBinPath();
@@ -327,6 +406,8 @@ export class TunnelManager {
 			const timeoutMs = tunnelConnectTimeoutMs();
 			const deadline = Date.now() + timeoutMs;
 			while (Date.now() < deadline) {
+				if (!child.pid || !ManagedProcess.matches(child.pid, binary, logPath))
+					throw new Error('cloudflared exited before connecting. See tunnel logs.');
 				const log = fs.readFileSync(logPath, 'utf8');
 				const url = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/.exec(log)?.[0];
 				if (url && log.includes('Registered tunnel connection')) {
@@ -343,8 +424,6 @@ export class TunnelManager {
 
 					return;
 				}
-				if (!child.pid || !ManagedProcess.matches(child.pid, binary, logPath))
-					throw new Error('cloudflared exited before connecting. See tunnel logs.');
 				await sleep(config.tunnelManager.startupPollIntervalMs);
 			}
 			throw new Error(
@@ -377,12 +456,115 @@ export class TunnelManager {
 		}
 	}
 
+	private async startNgrokLocked(port: number): Promise<void> {
+		const token = await this.ngrokToken.read();
+		if (!token) {
+			const error = 'Add an ngrok authtoken before starting the stable tunnel.';
+			await this.setState({ status: 'error', url: null, error });
+			throw new Error(error);
+		}
+		await this.setState({ status: 'installing', url: null, error: null });
+		const binary = getNgrokBinPath();
+		let spawned: { pid: number; logPath: string } | null = null;
+		try {
+			if (!NgrokInstaller.isPinnedInstall(binary)) {
+				this.log(`Downloading ngrok ${NGROK_VERSION}...`);
+				await NgrokInstaller.install(binary);
+			}
+			const logPath = path.join(config.baseDir, `tunnel-${randomUUID()}.log`);
+			fs.writeFileSync(logPath, '', { mode: PRIVATE_FILE_MODE, flag: 'wx' });
+			const child = spawn(binary, ['http', `http://${LOOPBACK_HOST}:${port}`, '--log', logPath, '--log-format', 'json'], {
+				detached: true,
+				stdio: 'ignore',
+				windowsHide: true,
+				env: { ...process.env, NGROK_AUTHTOKEN: token }
+			});
+			await new Promise<void>((resolve, reject) => {
+				child.once('spawn', resolve);
+				child.once('error', reject);
+			});
+			if (!child.pid) throw new Error('ngrok did not report a process ID.');
+			spawned = { pid: child.pid, logPath };
+			child.unref();
+			await RuntimeStateStore.mutate((current) => {
+				current.tunnel = {
+					...current.tunnel,
+					pid: child.pid,
+					logPath,
+					port,
+					startedAt: Date.now(),
+					ownerWindowId: this.windowId,
+					status: 'starting',
+					url: null,
+					publicStatus: 'unchecked',
+					publicCheckedAt: null,
+					publicError: null,
+					lastError: null,
+					lastSeenAt: Date.now()
+				};
+
+				return current;
+			});
+			const timeoutMs = tunnelConnectTimeoutMs();
+			const deadline = Date.now() + timeoutMs;
+			while (Date.now() < deadline) {
+				if (!child.pid || !ManagedProcess.matches(child.pid, binary, logPath))
+					throw new Error('ngrok exited before connecting. See tunnel logs.');
+				const url = fs
+					.readFileSync(logPath, 'utf8')
+					.split('\n')
+					.map((line) => NgrokUrl.read(line))
+					.find((value) => value !== null);
+				if (url) {
+					await this.setState({
+						status: 'running',
+						url,
+						error: null,
+						publicStatus: 'checking',
+						publicCheckedAt: null,
+						publicError: null
+					});
+					this.syncMonitor(true);
+					void this.probePublicHealth(true);
+
+					return;
+				}
+				await sleep(config.tunnelManager.startupPollIntervalMs);
+			}
+			throw new Error(`ngrok did not connect within ${timeoutMs / MILLISECONDS_PER_SECOND} seconds.`);
+		} catch (error) {
+			this.pollLogs();
+			const message = error instanceof Error ? error.message : String(error);
+			if (spawned && ManagedProcess.matches(spawned.pid, binary, spawned.logPath)) {
+				await this.stopVerifiedProcess(spawned.pid, spawned.logPath, binary);
+			}
+			await RuntimeStateStore.mutate((current) => {
+				const stillAlive = spawned ? ManagedProcess.isAlive(spawned.pid) : false;
+				current.tunnel = {
+					status: 'error',
+					url: null,
+					publicStatus: 'unchecked',
+					publicCheckedAt: null,
+					publicError: null,
+					lastError: stillAlive ? `${message} The process remains alive and requires manual verification.` : message,
+					lastSeenAt: Date.now(),
+					ownerWindowId: null,
+					...(stillAlive && spawned ? { pid: spawned.pid, logPath: spawned.logPath, port } : {})
+				};
+
+				return current;
+			});
+			this.onStateChange(this.getState());
+			throw error;
+		}
+	}
+
 	private async stopLocked(): Promise<void> {
 		const state = RuntimeStateStore.read().tunnel;
+		const executable = state.pid ? this.matchedExecutable(state.pid, state.logPath) : null;
 		if (state.pid && ManagedProcess.isAlive(state.pid)) {
-			if (!ManagedProcess.matches(state.pid, getCloudflaredBinPath(), state.logPath))
-				throw new Error('Tunnel process identity changed. Refusing to stop an unrelated process.');
-			await this.stopVerifiedProcess(state.pid, state.logPath);
+			if (!executable) throw new Error('Tunnel process identity changed. Refusing to stop an unrelated process.');
+			await this.stopVerifiedProcess(state.pid, state.logPath, executable);
 		}
 		await RuntimeStateStore.mutate((current) => {
 			current.tunnel = {
@@ -420,8 +602,29 @@ export class TunnelManager {
 		this.onStateChange(this.getState());
 	}
 
-	private async stopVerifiedProcess(pid: number, logPath: string | undefined): Promise<void> {
-		const executable = getCloudflaredBinPath();
+	/** A missing ngrok authtoken must fail before the live process is stopped. */
+	private async refuseNgrokWithoutToken(provider = RuntimeStateStore.read().tunnelProvider): Promise<void> {
+		if (provider !== 'ngrok') return;
+		const token = await this.ngrokToken.read();
+		if (token) return;
+		const error = 'Add an ngrok authtoken before starting the stable tunnel.';
+		const current = RuntimeStateStore.read().tunnel;
+		if (!this.matchedExecutable(current.pid, current.logPath)) await this.setState({ status: 'error', url: null, error });
+		throw new Error(error);
+	}
+
+	private matchedExecutable(pid: number | undefined, logPath: string | undefined): string | null {
+		if (ManagedProcess.matches(pid, getCloudflaredBinPath(), logPath)) return getCloudflaredBinPath();
+		if (ManagedProcess.matches(pid, getNgrokBinPath(), logPath)) return getNgrokBinPath();
+
+		return null;
+	}
+
+	private async stopVerifiedProcess(
+		pid: number,
+		logPath: string | undefined,
+		executable = getCloudflaredBinPath()
+	): Promise<void> {
 		const verified = (): boolean => ManagedProcess.matches(pid, executable, logPath);
 		this.signal(pid, 'SIGTERM');
 		const forceAt = Date.now() + TUNNEL_STOP_GRACE_MS;
@@ -458,7 +661,10 @@ export class TunnelManager {
 
 	private pollLogs(): void {
 		const logPath = RuntimeStateStore.read().tunnel.logPath;
-		if (logPath) for (const line of this.logReader.read(logPath)) this.onLog(parseCloudflaredLogLine(line));
+		if (logPath)
+			for (const line of this.logReader.read(logPath)) {
+				if (!isRoutineNgrokConnection(line)) this.onLog(parseCloudflaredLogLine(line));
+			}
 		if (logPath) capAppendOnlyLog(logPath);
 	}
 
@@ -484,7 +690,8 @@ export class TunnelManager {
 			await this.commitPublicProbe(identity, isValidPublicHealth(raw) ? null : `Public health returned HTTP ${response.status}.`);
 		} catch (error) {
 			const code = errorCode(error);
-			if (code && TRANSIENT_DNS_ERRORS.has(code)) {
+			const cloudflareHost = new URL(identity.url).hostname.endsWith('.trycloudflare.com');
+			if (code && TRANSIENT_DNS_ERRORS.has(code) && cloudflareHost) {
 				try {
 					const raw = await fetchQuickTunnelHealth(identity.url);
 					await this.commitPublicProbe(identity, isValidPublicHealth(raw) ? null : 'Public health returned an invalid response.');
@@ -521,6 +728,7 @@ export class TunnelManager {
 			return;
 
 		let changed = false;
+		let previousPublicStatus = current.publicStatus;
 		await RuntimeStateStore.mutate((state) => {
 			if (
 				state.tunnel.pid !== identity.pid ||
@@ -531,13 +739,22 @@ export class TunnelManager {
 			)
 				return state;
 			changed = true;
+			previousPublicStatus = state.tunnel.publicStatus;
 			state.tunnel.publicStatus = publicStatus;
 			state.tunnel.publicCheckedAt = Date.now();
 			state.tunnel.publicError = error;
 
 			return state;
 		});
-		if (changed) this.onStateChange(this.getState());
+		if (changed) {
+			// Do not include the URL or arbitrary network exception text in the journal.
+			// Error changes still persist above, but stable status must not spam logs.
+			if (previousPublicStatus !== publicStatus) {
+				const reason = !error ? 'health check succeeded' : 'health check failed';
+				this.log(`Public tunnel health: ${previousPublicStatus ?? 'unchecked'} → ${publicStatus} (${reason}).`);
+			}
+			this.onStateChange(this.getState());
+		}
 	}
 
 	private log(message: string): void {

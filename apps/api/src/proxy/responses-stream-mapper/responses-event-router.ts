@@ -84,7 +84,8 @@ export class ResponsesEventRouter {
 
 			state.pendingFunctionCalls.set(outputIndex, {
 				callId,
-				openAiIndex: outputIndex,
+				// Responses output indices include reasoning/message items; chat indices do not.
+				openAiIndex: state.toolCallIndex++,
 				argsBuffer: '',
 				deferred: true,
 				name: nameRaw

@@ -28,6 +28,7 @@ export class TestHelper {
 			keyFix: {
 				enabled: DEFAULT_KEY_FIX_ENABLED
 			},
+			tunnelProvider: 'quick',
 			clients
 		};
 

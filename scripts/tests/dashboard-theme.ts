@@ -149,9 +149,16 @@ export async function verifyDashboardThemes(
 			await verify(`hover-${name.toLowerCase().replaceAll(' ', '-')}`);
 		}
 		await page.mouse.move(0, 0);
-		const settings = page.locator('details.ug-details').filter({ hasText: 'Advanced settings' });
+		const settings = page
+			.locator('details.ug-details')
+			.filter({ has: page.locator('summary', { hasText: 'API configuration' }) });
 		const settingsOpen = await settings.getAttribute('open');
 		if (settingsOpen === null) await settings.locator('summary').click();
+		for (const label of ['Tunnel options', 'Model instructions']) {
+			const group = page.locator('details.ug-details').filter({ has: page.locator('summary', { hasText: label }) });
+			const groupOpen = await group.getAttribute('open');
+			if (groupOpen === null) await group.locator('summary').click();
+		}
 		await page.getByLabel('Port', { exact: true }).focus();
 		await verify('settings');
 		for (const name of ['Models', 'Reload window', 'More actions']) {

@@ -47,9 +47,16 @@ export const runtimeKeyFixStateSchema = z.object({
 	enabled: z.boolean()
 });
 
+/** `quick` is the Cloudflare quick tunnel. `ngrok` keeps one account domain across restarts. */
+export const TUNNEL_PROVIDERS = ['quick', 'ngrok'] as const;
+
+export const runtimeTunnelProviderSchema = z.enum(TUNNEL_PROVIDERS);
+
 export const runtimeStateSchema = z.object({
 	api: runtimeApiStateSchema,
 	tunnel: runtimeTunnelStateSchema,
 	keyFix: runtimeKeyFixStateSchema,
+	// State files written before ngrok existed have no provider; quick keeps their rotating URL.
+	tunnelProvider: runtimeTunnelProviderSchema.default('quick'),
 	clients: z.record(z.string(), runtimeClientEntrySchema)
 });

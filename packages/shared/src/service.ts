@@ -21,6 +21,19 @@ export interface ServiceState {
 	restartRequired?: boolean;
 }
 
+/** True when a new snapshot would not change the dashboard banner or status line. */
+export function sameServiceState(left: ServiceState, right: ServiceState): boolean {
+	return (
+		left.status === right.status &&
+		left.version === right.version &&
+		left.expectedVersion === right.expectedVersion &&
+		left.canUpdate === right.canUpdate &&
+		(left.message ?? null) === (right.message ?? null) &&
+		(left.logsConnected ?? true) === (right.logsConnected ?? true) &&
+		(left.restartRequired ?? false) === (right.restartRequired ?? false)
+	);
+}
+
 export function compareReleaseVersions(left: string, right: string): number | null {
 	if (!/^\d+\.\d+\.\d+$/.test(left) || !/^\d+\.\d+\.\d+$/.test(right)) return null;
 	const a = left.split('.').map(Number);

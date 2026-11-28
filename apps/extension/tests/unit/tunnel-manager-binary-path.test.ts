@@ -148,6 +148,7 @@ describe('detached tunnel lifecycle', () => {
 		expect(fs.readFileSync(configPath, 'utf8')).toBe(QUICK_TUNNEL_CONFIG);
 		expect(manager.getState()).toEqual({
 			status: 'running',
+			provider: 'quick',
 			url: 'https://one.trycloudflare.com',
 			error: null,
 			publicStatus: 'checking',

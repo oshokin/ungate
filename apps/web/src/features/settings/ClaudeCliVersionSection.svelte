@@ -4,19 +4,9 @@ import InfoTooltip from '$shared/InfoTooltip.svelte';
 import { CLAUDE_CLI_VERSION_OPTIONS } from './claude-cli-version-options';
 import { getSettingsFormStore } from './settings-form-store.svelte';
 
-import type { ClaudeCliVersionMode } from '@ungate/shared/frontend';
-
 const formStore = getSettingsFormStore();
 
 const applyHint = 'Takes effect after Save & Restart in Server Configuration.';
-
-function buttonClass(optionMode: ClaudeCliVersionMode): string {
-	if (formStore.claudeCliVersionMode === optionMode) {
-		return 'ug-primary';
-	}
-
-	return 'ug-quiet';
-}
 </script>
 
 <div class="space-y-2 border-t ug-border pt-4">
@@ -26,13 +16,13 @@ function buttonClass(optionMode: ClaudeCliVersionMode): string {
 	</div>
 
 	<div class="flex flex-wrap items-center gap-2">
-		<div class="inline-flex max-w-full flex-wrap rounded-lg border ug-border p-0.5">
+		<div class="ug-choice">
 			{#each CLAUDE_CLI_VERSION_OPTIONS as option}
 				<InfoTooltip text={option.tooltip}>
 					{#snippet children(tooltipId)}
 						<button
 							type="button"
-							class="ug-button h-auto gap-1.5 rounded-md px-3 py-1 {buttonClass(option.mode)}"
+							class="ug-button ug-compact h-auto gap-1.5"
 							aria-pressed={formStore.claudeCliVersionMode === option.mode}
 							aria-describedby={tooltipId}
 							onclick={() => formStore.setClaudeCliVersionMode(option.mode)}>

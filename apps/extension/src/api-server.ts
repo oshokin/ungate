@@ -30,6 +30,8 @@ import { capAppendOnlyLog, LogFileReader } from './utils/log-file-reader';
 import { ManagedProcess } from './utils/managed-process';
 import { NodeResolver } from './utils/node-resolver';
 
+type BusyPortResult = 'none' | 'adopted' | 'replaced' | 'blocked';
+
 interface ApiServerCallbacks {
 	onLog(level: LogEntry['level'], message: string): void;
 	onPortDetected(port: number): void;
@@ -52,6 +54,8 @@ export class ApiServer {
 	private runtimePath = '';
 	private noClientsSince: number | null = null;
 	private addressInUsePort: number | null = null;
+	private adoptPromise: Promise<BusyPortResult> | null = null;
+	private pendingBusyResult: BusyPortResult | null = null;
 	private startPromise: Promise<void> | null = null;
 	private restartInProgress = false;
 	private healthFailures = 0;
@@ -99,13 +103,15 @@ export class ApiServer {
 		let release: (() => void) | undefined;
 		try {
 			release = await CrossProcessLock.acquire('api-start.lock', config.locks.startupTimeoutMs);
-			const existingPort = this.port ?? RuntimeStateStore.read().api.port;
+			const runtimeState = RuntimeStateStore.read();
+			const existingPort = this.port ?? runtimeState.api.port ?? runtimeState.tunnel.port;
 			if (existingPort) {
-				const health = await readApiHealth(existingPort).catch(() => null);
+				const health = await this.readHeldHealth(existingPort);
 				if (health) {
-					const state = describeService(health, this.expectedArtifactDigest);
-					if (state.status === 'incompatible' && !state.canUpdate) throw new Error(state.message!);
+					const service = describeService(health, this.expectedArtifactDigest);
+					if (service.status === 'incompatible' && !service.canUpdate) throw new Error(service.message!);
 				}
+				this.port = existingPort;
 			}
 			await this.stopLocked();
 			this.port = null;
@@ -207,27 +213,10 @@ export class ApiServer {
 
 		const runtimeState = RuntimeStateStore.read();
 		this.attachLog(runtimeState.api.logPath);
-		const existingPort = runtimeState.api.port;
-
-		if (existingPort) {
-			const isAlive = await this.checkPortHealth(existingPort);
-
-			if (isAlive) {
-				this.port = existingPort;
-				this.callbacks.onPortDetected(existingPort);
-				try {
-					await assertCompatibleApi(existingPort, { expectedArtifactDigest: this.expectedArtifactDigest });
-				} catch (error) {
-					const message = error instanceof Error ? error.message : String(error);
-					await this.recordApiFailure(message);
-					throw error;
-				}
-				this.callbacks.onLog('info', `[process] attached to api pid=${this.attachedPid ?? 'unknown'} port=${existingPort}`);
-				await this.setStatus('running');
-				this.startHealthCheck();
-
-				return;
-			}
+		const candidates = [runtimeState.api.port, runtimeState.tunnel.port].filter((port): port is number => !!port);
+		for (const port of [...new Set(candidates)]) {
+			const held = await this.holdOrReplace(port);
+			if (held === 'adopted' || held === 'blocked') return;
 		}
 
 		if (runtimeState.api.pid && ManagedProcess.isUngateApi(runtimeState.api.pid)) {
@@ -246,18 +235,43 @@ export class ApiServer {
 
 		try {
 			await this.ensureNativeDeps();
-			this.shutDownDeliberately = false;
-			this.spawn();
-			const deadline = Date.now() + config.apiServer.startupTimeoutMs;
+			let replacedListener = false;
 			while (true) {
-				this.pollLogs();
-				const healthy = this.port ? await this.checkPortHealth(this.port) : false;
-				if (healthy) break;
-				if (!this.process || Date.now() > deadline)
-					throw new Error(
-						`Ungate API did not become ready within ${config.apiServer.startupTimeoutMs / MILLISECONDS_PER_SECOND} seconds.`
-					);
-				await sleep(config.apiServer.pollIntervalMs);
+				this.shutDownDeliberately = false;
+				this.pendingBusyResult = null;
+				this.spawn();
+				const deadline = Date.now() + config.apiServer.startupTimeoutMs;
+				let replaceAndSpawn = false;
+				while (true) {
+					this.pollLogs();
+					const busy = await this.takeBusyPort();
+					this.pendingBusyResult = null;
+					if (busy === 'adopted' || busy === 'blocked') return;
+					if (busy === 'replaced') {
+						replaceAndSpawn = true;
+						break;
+					}
+					const healthy = this.port ? await this.checkPortHealth(this.port) : false;
+					if (healthy) break;
+					if (!this.process || Date.now() > deadline) {
+						this.captureAddressInUseFromLog();
+						const busyAfterExit = await this.takeBusyPort();
+						this.pendingBusyResult = null;
+						if (busyAfterExit === 'adopted' || busyAfterExit === 'blocked') return;
+						if (busyAfterExit === 'replaced') {
+							replaceAndSpawn = true;
+							break;
+						}
+						throw new Error(
+							`Ungate API did not become ready within ${config.apiServer.startupTimeoutMs / MILLISECONDS_PER_SECOND} seconds.`
+						);
+					}
+					await sleep(config.apiServer.pollIntervalMs);
+				}
+				if (!replaceAndSpawn) break;
+				if (replacedListener)
+					throw new Error('The previous Ungate API was stopped, but the new process could not take its port.');
+				replacedListener = true;
 			}
 			if (this.port) await assertCompatibleApi(this.port, { expectedArtifactDigest: this.expectedArtifactDigest });
 			await this.setStatus('running');
@@ -342,11 +356,8 @@ export class ApiServer {
 		const text = data.toString();
 		this.stdoutBuffer = (this.stdoutBuffer + text).slice(-config.apiServer.stdoutBufferBytes);
 
+		this.noteAddressInUse(this.stdoutBuffer);
 		for (const line of text.split('\n').filter((l) => l.trim())) {
-			if (line.includes('EADDRINUSE')) {
-				const addressMatch = /port:\s*(\d+)/.exec(this.stdoutBuffer);
-				if (addressMatch) this.addressInUsePort = parseInt(addressMatch[1], 10);
-			}
 			this.callbacks.onLog(this.parseLogLevel(line), line);
 		}
 
@@ -375,6 +386,7 @@ export class ApiServer {
 		}
 
 		this.callbacks.onLog(level, `[process] exit code=${code} signal=${signal}`);
+		this.pollLogs();
 
 		if (this.shutDownDeliberately) {
 			this.shutDownDeliberately = false;
@@ -401,10 +413,16 @@ export class ApiServer {
 			return;
 		}
 
-		if (this.addressInUsePort) {
-			const addressInUsePort = this.addressInUsePort;
-			this.addressInUsePort = null;
-			void this.tryAttachToRunningPort(addressInUsePort).catch(() => {});
+		if (this.lastStatus === 'running' && this.port) return;
+
+		if (this.addressInUsePort || this.adoptPromise) {
+			void this.takeBusyPort()
+				.then((result) => {
+					if (result !== 'none') return;
+
+					return this.recordApiFailure(`[process] exit code=${code} signal=${signal}`);
+				})
+				.catch(() => {});
 
 			return;
 		}
@@ -422,20 +440,140 @@ export class ApiServer {
 		return this.callbacks.isLeaderWindow() && this.callbacks.isExtensionHostActive();
 	}
 
-	private async tryAttachToRunningPort(port: number): Promise<void> {
-		const isAlive = await this.checkPortHealth(port);
+	/** One decision for a port that already has a listener. The failed spawn must not hide it behind a timeout. */
+	private takeBusyPort(): Promise<BusyPortResult> {
+		if (this.adoptPromise) return this.adoptPromise;
+		const port = this.addressInUsePort;
+		if (!port) {
+			const pending = this.pendingBusyResult;
+			if (!pending) return Promise.resolve('none');
+			this.pendingBusyResult = null;
 
-		if (!isAlive) {
-			await this.recordApiFailure(`[process] port ${port} is not healthy`);
+			return Promise.resolve(pending);
+		}
+		this.addressInUsePort = null;
+		let resolveReady = (_result: BusyPortResult): void => {};
+		const ready = new Promise<BusyPortResult>((resolve) => {
+			resolveReady = resolve;
+		});
+		this.adoptPromise = ready;
+		void this.resolveBusyPort(port)
+			.then((result) => {
+				this.pendingBusyResult = result;
+				if (this.adoptPromise === ready) this.adoptPromise = null;
+				resolveReady(result);
+			})
+			.catch(async (error: unknown) => {
+				const message = error instanceof Error ? error.message : String(error);
+				await this.recordApiFailure(message);
+				this.pendingBusyResult = 'blocked';
+				if (this.adoptPromise === ready) this.adoptPromise = null;
+				resolveReady('blocked');
+			});
 
-			return;
+		return ready;
+	}
+
+	/** The crash line is `EADDRINUSE … 127.0.0.1:47821`. A later `port:` field may never arrive. */
+	private noteAddressInUse(text: string): void {
+		const line = text.split('\n').find((entry) => entry.includes('EADDRINUSE'));
+		if (!line) return;
+		const match = /:(\d{2,5})\s*$/.exec(line.trim()) ?? /port:\s*(\d+)/.exec(text);
+		if (match) this.addressInUsePort = parseInt(match[1], 10);
+	}
+
+	private captureAddressInUseFromLog(): void {
+		this.pollLogs();
+		if (this.addressInUsePort || !this.logPath) return;
+		try {
+			this.noteAddressInUse(fs.readFileSync(this.logPath, 'utf8'));
+		} catch {
+			// The child may not have created the log yet.
+		}
+	}
+
+	private async holdOrReplace(port: number): Promise<'adopted' | 'replaced' | 'absent' | 'blocked'> {
+		const healthy = await this.checkPortHealth(port);
+		if (!healthy) return 'absent';
+		try {
+			await assertCompatibleApi(port, { expectedArtifactDigest: this.expectedArtifactDigest });
+			this.port = port;
+			this.callbacks.onPortDetected(port);
+			this.callbacks.onLog('info', `[process] attached to api pid=${this.attachedPid ?? 'unknown'} port=${port}`);
+			await this.setStatus('running');
+			this.startHealthCheck();
+
+			return 'adopted';
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			const health = await this.readHeldHealth(port);
+			const state = health ? describeService(health, this.expectedArtifactDigest) : null;
+			const replaceable = state ? state.canUpdate : !message.includes('newer than this window');
+			if (!replaceable) {
+				await this.recordApiFailure(state?.message ?? message);
+
+				return 'blocked';
+			}
+			const pid = health?.pid ?? this.attachedPid;
+			if (!pid) {
+				await this.recordApiFailure(message);
+
+				return 'blocked';
+			}
+			await this.stopHeldApi(port, pid);
+
+			return 'replaced';
+		}
+	}
+
+	private async readHeldHealth(port: number): Promise<Awaited<ReturnType<typeof readApiHealth>> | null> {
+		try {
+			const health = await readApiHealth(port);
+
+			return health ?? null;
+		} catch {
+			return null;
+		}
+	}
+
+	private async resolveBusyPort(port: number): Promise<Exclude<BusyPortResult, 'none'>> {
+		const held = await this.holdOrReplace(port);
+		if (held === 'absent') {
+			await this.recordApiFailure(`[process] port ${port} is in use and is not a healthy Ungate API.`);
+
+			return 'blocked';
 		}
 
+		return held;
+	}
+
+	private async stopHeldApi(port: number, pid: number): Promise<void> {
+		this.callbacks.onLog('info', `[process] stopping API pid=${pid} on port ${port} so this build can replace it`);
 		this.port = port;
-		this.callbacks.onPortDetected(port);
-		await assertCompatibleApi(port, { expectedArtifactDigest: this.expectedArtifactDigest });
-		await this.setStatus('running');
-		this.startHealthCheck();
+		this.attachedPid = pid;
+		this.shutDownDeliberately = true;
+		try {
+			await this.stopLocked();
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			this.callbacks.onLog('warn', `[process] shutdown of pid=${pid} failed: ${message}`);
+		} finally {
+			this.shutDownDeliberately = false;
+		}
+		let listening = await this.isPortListening(port);
+		if (!listening) return;
+		this.signalProcess(pid, 'SIGTERM');
+		const deadline = Date.now() + config.apiServer.terminationGraceMs;
+		while (listening) {
+			if (Date.now() >= deadline) {
+				this.signalProcess(pid, 'SIGKILL');
+				break;
+			}
+			await sleep(config.apiServer.pollIntervalMs);
+			listening = await this.isPortListening(port);
+		}
+		listening = await this.isPortListening(port);
+		if (listening) throw new Error(`Ungate API pid ${pid} is still listening on port ${port}.`);
 	}
 
 	private async onSpawnProcessError(err: Error): Promise<void> {

@@ -7,6 +7,7 @@ import {
 	type DashboardActionRequest,
 	type ServiceState,
 	type LogEntry,
+	type TunnelProvider,
 	type TunnelState,
 	type WebviewToExtension,
 	type UsageState
@@ -29,6 +30,8 @@ const MSGS_SIMPLE = ['webview-ready', 'restart-server', 'start-tunnel', 'stop-tu
 
 export type Msg =
 	| { type: 'open-external-url'; url: string }
+	| { type: 'set-tunnel-provider'; provider: TunnelProvider }
+	| { type: 'set-ngrok-auth-token'; token: string }
 	| DashboardActionRequest
 	| { type: 'clear-logs'; source: 'api' | 'tunnel' }
 	| Extract<WebviewToExtension, { type: (typeof MSGS_SIMPLE)[number] }>;
@@ -204,6 +207,10 @@ export class Dashboard {
 		this.panel?.webview.postMessage({ type: 'tunnel-status', state });
 	}
 
+	sendTunnelConfig(provider: TunnelProvider, token: string | null): void {
+		this.panel?.webview.postMessage({ type: 'tunnel-config', provider, token });
+	}
+
 	private static parseIncomingMessage(raw: unknown): Msg | null {
 		if (typeof raw !== 'object' || raw === null || !('type' in raw)) {
 			return null;
@@ -224,6 +231,20 @@ export class Dashboard {
 			}
 
 			return { type: 'open-external-url', url };
+		}
+
+		if (type === 'set-tunnel-provider') {
+			const provider = record.provider;
+			if (provider !== 'quick' && provider !== 'ngrok') return null;
+
+			return { type: 'set-tunnel-provider', provider };
+		}
+
+		if (type === 'set-ngrok-auth-token') {
+			const token = record.token;
+			if (typeof token !== 'string' || token.trim().length === 0 || token.trim().length > 512) return null;
+
+			return { type: 'set-ngrok-auth-token', token: token.trim() };
 		}
 
 		if (type === 'dashboard-action') {

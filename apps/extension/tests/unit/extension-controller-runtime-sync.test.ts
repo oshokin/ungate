@@ -19,11 +19,13 @@ interface MockApiServer {
 }
 
 interface MockTunnelManager {
+	selectProvider: ReturnType<typeof vi.fn>;
+	getState: ReturnType<typeof vi.fn>;
 	syncMonitor: ReturnType<typeof vi.fn>;
 	reconcile: ReturnType<typeof vi.fn>;
 	start: ReturnType<typeof vi.fn>;
 	stop: ReturnType<typeof vi.fn>;
-	restart: ReturnType<typeof vi.fn>;
+	restart: ReturnType<typeof vi.fn<(port: number, protocol: 'http2' | 'quic' | 'auto') => Promise<void>>>;
 }
 
 interface MockDashboard {
@@ -32,11 +34,13 @@ interface MockDashboard {
 	sendTunnelState: ReturnType<typeof vi.fn>;
 	pushLog: ReturnType<typeof vi.fn>;
 	sendServiceState: ReturnType<typeof vi.fn>;
+	sendTunnelConfig: ReturnType<typeof vi.fn>;
 	show: ReturnType<typeof vi.fn>;
 }
 
 interface ExtensionControllerInternals {
 	runAction(action: import('@ungate/shared/frontend').DashboardAction): Promise<void>;
+	setTunnelProvider(provider: 'quick' | 'ngrok'): Promise<void>;
 	currentPort: number | null;
 	bootstrapRuntime(): Promise<void>;
 	syncFromRuntimeState(): Promise<void>;
@@ -67,6 +71,8 @@ const registerCommandMock = vi.fn(() => {
 	};
 });
 const showWarningMessageMock = vi.fn();
+const showErrorMessageMock = vi.fn();
+const runtimeMutateMock = vi.fn<(mutator: (state: RuntimeState) => RuntimeState) => Promise<RuntimeState>>();
 const executeCommandMock = vi.fn().mockResolvedValue(undefined);
 
 const runtimeReadMock = vi.fn<() => RuntimeState>();
@@ -90,7 +96,8 @@ vi.mock('vscode', () => {
 		window: {
 			createOutputChannel: createOutputChannelMock,
 			createStatusBarItem: createStatusBarItemMock,
-			showWarningMessage: showWarningMessageMock
+			showWarningMessage: showWarningMessageMock,
+			showErrorMessage: showErrorMessageMock
 		},
 		workspace: {
 			getConfiguration: vi.fn(() => ({ inspect: vi.fn(() => undefined) })),
@@ -131,7 +138,8 @@ vi.mock('../../src/local-api', () => ({
 		version: '1.7.15',
 		protocolVersion: 3
 	}),
-	readAppSettings: vi.fn().mockResolvedValue({ models: [] })
+	readAppSettings: vi.fn().mockResolvedValue({ models: [] }),
+	readTunnelProtocol: vi.fn().mockResolvedValue('http2')
 }));
 
 vi.mock('../../src/runtime-state', () => {
@@ -149,7 +157,8 @@ vi.mock('../../src/runtime-state', () => {
 
 				return runtimeState.api.startSuppressed === true;
 			},
-			prepareApiForBootstrap: prepareApiForBootstrapMock
+			prepareApiForBootstrap: prepareApiForBootstrapMock,
+			mutate: runtimeMutateMock
 		}
 	};
 });
@@ -170,6 +179,7 @@ vi.mock('../../src/dashboard', () => {
 vi.mock('../../src/tunnel-manager', () => {
 	return {
 		TunnelManager: class {
+			getState = vi.fn(() => ({ provider: null }));
 			syncMonitor = vi.fn();
 			reconcile = vi.fn(() => Promise.resolve());
 			start = vi.fn();
@@ -206,6 +216,11 @@ function createRuntimeState(windowIds: string[], apiPort: number | null = 4783):
 function createContext() {
 	return {
 		subscriptions: [],
+		secrets: {
+			get: vi.fn().mockResolvedValue(undefined),
+			store: vi.fn().mockResolvedValue(undefined),
+			onDidChange: vi.fn((_listener: (event: { key: string }) => void) => ({ dispose: vi.fn() }))
+		},
 		extensionPath: '/tmp/ungate-extension'
 	};
 }
@@ -234,6 +249,28 @@ function createController(windowId: string): {
 		syncLeaderHealthMonitor: vi.fn()
 	};
 	const tunnelManager: MockTunnelManager = {
+		getState: vi.fn().mockReturnValue({ provider: null }),
+		selectProvider: vi.fn(
+			async (
+				provider: 'quick' | 'ngrok',
+				confirm: () => Promise<boolean>,
+				protocol: (port: number) => Promise<'http2' | 'quic' | 'auto'>
+			) => {
+				const state = runtimeReadMock();
+				if (state.tunnelProvider === provider) return;
+				const live = ['running', 'starting', 'installing'].includes(state.tunnel.status);
+				if (live) {
+					const confirmed = await confirm();
+					if (!confirmed) return;
+				}
+				if (live && provider === 'ngrok') {
+					const token = await (controller as unknown as { ngrokToken: { read(): Promise<string | null> } }).ngrokToken.read();
+					if (!token) throw new Error('Add an ngrok authtoken before starting the stable tunnel.');
+				}
+				state.tunnelProvider = provider;
+				if (live && state.tunnel.port) await tunnelManager.restart(state.tunnel.port, await protocol(state.tunnel.port));
+			}
+		),
 		reconcile: vi.fn().mockResolvedValue(undefined),
 		syncMonitor: vi.fn(),
 		start: vi.fn().mockResolvedValue(undefined),
@@ -246,6 +283,7 @@ function createController(windowId: string): {
 		sendTunnelState: vi.fn(),
 		pushLog: vi.fn(),
 		sendServiceState: vi.fn(),
+		sendTunnelConfig: vi.fn(),
 		show: vi.fn()
 	};
 	const statusBar = {
@@ -286,6 +324,74 @@ function getInternals(controller: ExtensionControllerType): ExtensionControllerI
 }
 
 describe('ExtensionController', () => {
+	it('publishes the latest provider after an asynchronous secret read', async () => {
+		const state = createRuntimeState(['window-a']);
+		runtimeReadMock.mockReturnValue(state);
+		const { controller, dashboard } = createController('window-a');
+		let resolve!: (token: string) => void;
+		Object.assign(controller, {
+			ngrokToken: {
+				read: () =>
+					new Promise<string>((done) => {
+						resolve = done;
+					})
+			}
+		});
+		const pending = (controller as unknown as { sendTunnelConfig(): Promise<void> }).sendTunnelConfig();
+		state.tunnelProvider = 'ngrok';
+		resolve('test-token');
+		await pending;
+		expect(dashboard.sendTunnelConfig).toHaveBeenLastCalledWith('ngrok', 'test-token');
+	});
+
+	it('invalidates cached dashboard secrets only for ngrok secret events', async () => {
+		const context = createContext();
+		const controller = new ExtensionController(context as never);
+		const state = createRuntimeState(['window-a']);
+		runtimeReadMock.mockReturnValue(state);
+		Object.assign(controller, {
+			startHeartbeat: vi.fn(),
+			startRuntimeSync: vi.fn(),
+			bootstrapRuntime: vi.fn().mockResolvedValue(undefined)
+		});
+		controller.activate();
+		const callback = context.secrets.onDidChange.mock.calls[0][0];
+		const dashboard = { sendTunnelConfig: vi.fn() };
+		Object.assign(controller, { dashboard });
+		const send = () => (controller as unknown as { sendTunnelConfig(): Promise<void> }).sendTunnelConfig();
+		await send();
+		await send();
+		expect(context.secrets.get).toHaveBeenCalledTimes(1);
+		callback({ key: 'unrelated' });
+		await send();
+		expect(context.secrets.get).toHaveBeenCalledTimes(1);
+		context.secrets.get.mockResolvedValue('updated-token');
+		callback({ key: 'ungate.ngrokAuthToken' });
+		await send();
+		expect(context.secrets.get).toHaveBeenCalledTimes(2);
+		expect(dashboard.sendTunnelConfig).toHaveBeenLastCalledWith('quick', 'updated-token');
+	});
+
+	it('synchronizes another window provider selection without rereading unchanged secrets', async () => {
+		const state = createRuntimeState(['follower']);
+		runtimeReadMock.mockReturnValue(state);
+		runtimeGetLiveClientIdsMock.mockReturnValue(['follower']);
+		const { controller, dashboard } = createController('follower');
+		const read = vi.fn().mockResolvedValue('masked-test-token');
+		Object.assign(controller, { ngrokToken: { read } });
+
+		await getInternals(controller).syncFromRuntimeState();
+		await Promise.resolve();
+		expect(dashboard.sendTunnelConfig).toHaveBeenLastCalledWith('quick', 'masked-test-token');
+		state.tunnelProvider = 'ngrok';
+		await getInternals(controller).syncFromRuntimeState();
+		await Promise.resolve();
+		expect(dashboard.sendTunnelConfig).toHaveBeenLastCalledWith('ngrok', 'masked-test-token');
+		await getInternals(controller).syncFromRuntimeState();
+		expect(read).toHaveBeenCalledTimes(1);
+		expect(dashboard.sendTunnelConfig).toHaveBeenCalledTimes(2);
+	});
+
 	it.each([
 		['open-extension-settings', '@ext:orchidfiles.ungate'],
 		['open-provider-timeout-settings', '@id:ungate.network.providerHeaderTimeoutSeconds'],
@@ -299,17 +405,201 @@ describe('ExtensionController', () => {
 		expect(tunnelManager.restart).not.toHaveBeenCalled();
 	});
 
+	it('keeps a stopped tunnel on the selected provider without starting the other one', async () => {
+		const state = createRuntimeState(['tunnel-window']);
+		state.tunnelProvider = 'quick';
+		state.tunnel.status = 'stopped';
+		runtimeReadMock.mockReturnValue(state);
+		const { controller, tunnelManager } = createController('tunnel-window');
+		Object.assign(controller, { ngrokToken: { read: vi.fn().mockResolvedValue(null) } });
+
+		await getInternals(controller).setTunnelProvider('ngrok');
+
+		expect(showWarningMessageMock).not.toHaveBeenCalled();
+		expect(state.tunnelProvider).toBe('ngrok');
+		expect(tunnelManager.restart).not.toHaveBeenCalled();
+		expect(tunnelManager.start).not.toHaveBeenCalled();
+	});
+
+	it('leaves the running tunnel in place when replacement is cancelled', async () => {
+		const state = createRuntimeState(['tunnel-window']);
+		state.tunnelProvider = 'quick';
+		state.tunnel.status = 'running';
+		state.tunnel.port = 47821;
+		state.tunnel.url = 'https://one.trycloudflare.com';
+		runtimeReadMock.mockReturnValue(state);
+		showWarningMessageMock.mockResolvedValue(undefined);
+		const { controller, tunnelManager } = createController('tunnel-window');
+		Object.assign(controller, { ngrokToken: { read: vi.fn().mockResolvedValue('secret') } });
+
+		await getInternals(controller).setTunnelProvider('ngrok');
+
+		expect(showWarningMessageMock).toHaveBeenCalledOnce();
+		expect(state.tunnelProvider).toBe('quick');
+		expect(tunnelManager.restart).not.toHaveBeenCalled();
+	});
+
+	it('replaces the running tunnel with the one provider that was chosen', async () => {
+		const state = createRuntimeState(['tunnel-window']);
+		state.tunnelProvider = 'quick';
+		state.tunnel.status = 'running';
+		state.tunnel.port = 47821;
+		state.tunnel.url = 'https://one.trycloudflare.com';
+		runtimeReadMock.mockReturnValue(state);
+		showWarningMessageMock.mockResolvedValue('Replace');
+		const { controller, tunnelManager } = createController('tunnel-window');
+		Object.assign(controller, { ngrokToken: { read: vi.fn().mockResolvedValue('secret') } });
+
+		await getInternals(controller).setTunnelProvider('ngrok');
+
+		expect(state.tunnelProvider).toBe('ngrok');
+		expect(tunnelManager.restart).toHaveBeenCalledTimes(1);
+		expect(tunnelManager.restart).toHaveBeenCalledWith(47821, 'http2');
+		expect(tunnelManager.start).not.toHaveBeenCalled();
+	});
+
+	it.each(['running', 'starting', 'installing'] as const)(
+		'keeps the %s tunnel when the selected provider is chosen again',
+		async (status) => {
+			const state = createRuntimeState(['tunnel-window']);
+			state.tunnelProvider = 'ngrok';
+			state.tunnel.status = status;
+			state.tunnel.port = 47821;
+			runtimeReadMock.mockReturnValue(state);
+			const { controller, tunnelManager, dashboard } = createController('tunnel-window');
+			Object.assign(controller, { ngrokToken: { read: vi.fn().mockResolvedValue('secret') } });
+
+			await getInternals(controller).setTunnelProvider('ngrok');
+
+			expect(showWarningMessageMock).not.toHaveBeenCalled();
+			expect(state.tunnelProvider).toBe('ngrok');
+			expect(dashboard.sendTunnelConfig).toHaveBeenCalledWith('ngrok', 'secret');
+			expect(tunnelManager.restart).not.toHaveBeenCalled();
+			expect(tunnelManager.start).not.toHaveBeenCalled();
+		}
+	);
+
+	it.each(['running', 'starting', 'installing'] as const)(
+		'leaves a %s ngrok tunnel in place when switching back is cancelled',
+		async (status) => {
+			const state = createRuntimeState(['tunnel-window']);
+			state.tunnelProvider = 'ngrok';
+			state.tunnel.status = status;
+			state.tunnel.url = 'https://stable.ngrok-free.app';
+			runtimeReadMock.mockReturnValue(state);
+			showWarningMessageMock.mockResolvedValue(undefined);
+			const { controller, tunnelManager } = createController('tunnel-window');
+			Object.assign(controller, { ngrokToken: { read: vi.fn().mockResolvedValue('secret') } });
+
+			await getInternals(controller).setTunnelProvider('quick');
+
+			expect(state.tunnelProvider).toBe('ngrok');
+			expect(tunnelManager.restart).not.toHaveBeenCalled();
+		}
+	);
+
+	it('replaces a running ngrok tunnel with Cloudflare when the switch is confirmed', async () => {
+		const state = createRuntimeState(['tunnel-window']);
+		state.tunnelProvider = 'ngrok';
+		state.tunnel.status = 'running';
+		state.tunnel.port = 47821;
+		state.tunnel.url = 'https://stable.ngrok-free.app';
+		runtimeReadMock.mockReturnValue(state);
+		showWarningMessageMock.mockResolvedValue('Replace');
+		const { controller, tunnelManager } = createController('tunnel-window');
+		Object.assign(controller, { ngrokToken: { read: vi.fn().mockResolvedValue('secret') } });
+
+		await getInternals(controller).setTunnelProvider('quick');
+
+		expect(state.tunnelProvider).toBe('quick');
+		expect(tunnelManager.restart).toHaveBeenCalledTimes(1);
+		expect(tunnelManager.restart).toHaveBeenCalledWith(47821, 'http2');
+		expect(tunnelManager.start).not.toHaveBeenCalled();
+	});
+
+	it('does not replace a running tunnel with ngrok when the authtoken is missing', async () => {
+		const state = createRuntimeState(['tunnel-window']);
+		state.tunnelProvider = 'quick';
+		state.tunnel.status = 'running';
+		state.tunnel.port = 47821;
+		state.tunnel.url = 'https://one.trycloudflare.com';
+		runtimeReadMock.mockReturnValue(state);
+		showWarningMessageMock.mockResolvedValue('Replace');
+		const { controller, tunnelManager } = createController('tunnel-window');
+		Object.assign(controller, { ngrokToken: { read: vi.fn().mockResolvedValue(null) } });
+
+		await getInternals(controller).setTunnelProvider('ngrok');
+
+		expect(state.tunnelProvider).toBe('quick');
+		expect(state.tunnel.url).toBe('https://one.trycloudflare.com');
+		expect(tunnelManager.restart).not.toHaveBeenCalled();
+		expect(showErrorMessageMock).toHaveBeenCalledWith('Ungate: Add an ngrok authtoken before starting the stable tunnel.');
+	});
+
+	it('reports a replacement failure after the selected provider is saved', async () => {
+		const state = createRuntimeState(['tunnel-window']);
+		state.tunnelProvider = 'quick';
+		state.tunnel.status = 'running';
+		state.tunnel.port = 47821;
+		runtimeReadMock.mockReturnValue(state);
+		showWarningMessageMock.mockResolvedValue('Replace');
+		const { controller, tunnelManager } = createController('tunnel-window');
+		Object.assign(controller, { ngrokToken: { read: vi.fn().mockResolvedValue('secret') } });
+		tunnelManager.restart.mockRejectedValue(new Error('ngrok did not connect within 30 seconds.'));
+
+		await getInternals(controller).setTunnelProvider('ngrok');
+
+		expect(state.tunnelProvider).toBe('ngrok');
+		expect(showErrorMessageMock).toHaveBeenCalledWith('Ungate: ngrok did not connect within 30 seconds.');
+	});
+
+	it('saves the provider without restarting when a live tunnel has no port', async () => {
+		const state = createRuntimeState(['tunnel-window'], null);
+		state.tunnelProvider = 'quick';
+		state.tunnel.status = 'running';
+		runtimeReadMock.mockReturnValue(state);
+		showWarningMessageMock.mockResolvedValue('Replace');
+		const { controller, tunnelManager } = createController('tunnel-window');
+		Object.assign(controller, { ngrokToken: { read: vi.fn().mockResolvedValue('secret') } });
+
+		await getInternals(controller).setTunnelProvider('ngrok');
+
+		expect(state.tunnelProvider).toBe('ngrok');
+		expect(tunnelManager.restart).not.toHaveBeenCalled();
+	});
+
+	it('changes the provider of a stopped or failed tunnel without starting one', async () => {
+		const state = createRuntimeState(['tunnel-window']);
+		state.tunnelProvider = 'ngrok';
+		state.tunnel.status = 'error';
+		runtimeReadMock.mockReturnValue(state);
+		const { controller, tunnelManager } = createController('tunnel-window');
+		Object.assign(controller, { ngrokToken: { read: vi.fn().mockResolvedValue('secret') } });
+
+		await getInternals(controller).setTunnelProvider('quick');
+
+		expect(showWarningMessageMock).not.toHaveBeenCalled();
+		expect(state.tunnelProvider).toBe('quick');
+		expect(tunnelManager.restart).not.toHaveBeenCalled();
+		expect(tunnelManager.start).not.toHaveBeenCalled();
+	});
+
 	beforeAll(async () => {
 		const module = await import('../../src/extension-controller');
 		ExtensionController = module.ExtensionController;
 	});
 
-	beforeEach(() => {
+	beforeEach(async () => {
+		const { readTunnelProtocol } = await import('../../src/local-api');
+		vi.mocked(readTunnelProtocol).mockResolvedValue('http2');
 		installedDigest.mockReturnValue(undefined);
 		createOutputChannelMock.mockClear();
 		createStatusBarItemMock.mockClear();
 		registerCommandMock.mockClear();
 		showWarningMessageMock.mockReset();
+		showErrorMessageMock.mockReset();
+		runtimeMutateMock.mockReset();
+		runtimeMutateMock.mockImplementation((mutator) => Promise.resolve(mutator(runtimeReadMock())));
 		runtimeReadMock.mockReset();
 		runtimeHasLiveClientsMock.mockReset();
 		runtimeGetLiveClientIdsMock.mockReset();
@@ -340,6 +630,51 @@ describe('ExtensionController', () => {
 		apiServerSyncLeaderHealthMonitorMock.mockClear();
 		apiServerGetPortMock.mockReturnValue(null);
 		apiServerStartMock.mockResolvedValue(undefined);
+	});
+
+	it('opens on the saved API failure without a connecting placeholder', () => {
+		const state = createRuntimeState(['window-a'], null);
+		state.api.status = 'error';
+		state.api.lastError = 'Ungate API did not become ready within 30 seconds.';
+		runtimeReadMock.mockReturnValue(state);
+		const { controller, dashboard } = createController('window-a');
+
+		(controller as unknown as { publishStoredServiceState(): void }).publishStoredServiceState();
+
+		expect(dashboard.sendServiceState).toHaveBeenCalledWith(
+			expect.objectContaining({
+				status: 'error',
+				message: 'Ungate API did not become ready within 30 seconds.'
+			})
+		);
+		expect(dashboard.sendServiceState).not.toHaveBeenCalledWith(expect.objectContaining({ status: 'checking' }));
+	});
+
+	it('leaves a running API unpublished until its health check', () => {
+		const state = createRuntimeState(['window-a']);
+		state.api.status = 'running';
+		state.api.port = 4783;
+		runtimeReadMock.mockReturnValue(state);
+		const { controller, dashboard } = createController('window-a');
+
+		(controller as unknown as { publishStoredServiceState(): void }).publishStoredServiceState();
+
+		expect(dashboard.sendServiceState).not.toHaveBeenCalled();
+	});
+
+	it('keeps a starting API on one status while its port is not healthy yet', async () => {
+		const { readApiHealth } = await import('../../src/local-api');
+		vi.mocked(readApiHealth).mockClear();
+		const { controller, dashboard } = createController('window-a');
+		const runtime = createRuntimeState(['window-a']);
+		runtime.api.status = 'starting';
+		runtime.api.port = 4783;
+		runtime.api.lastError = 'Ungate API did not become ready within 30 seconds.';
+
+		await (controller as unknown as { updateServiceState(state: RuntimeState): Promise<void> }).updateServiceState(runtime);
+
+		expect(readApiHealth).not.toHaveBeenCalled();
+		expect(dashboard.sendServiceState).toHaveBeenCalledWith(expect.objectContaining({ status: 'checking', message: null }));
 	});
 
 	it('uses the current installed bundle for dashboard and status-bar compatibility', async () => {
@@ -392,11 +727,13 @@ describe('ExtensionController', () => {
 		expect(refresh).toHaveBeenCalledTimes(1);
 	});
 
-	it('warns once only when a confirmed ready connection becomes offline', () => {
+	it('uses a recoverable live status instead of persistent outage notifications', () => {
 		vi.useFakeTimers();
 		try {
 			const { controller, statusBar } = createController('window-a');
 			const internals = getInternals(controller);
+			const log = vi.fn();
+			Object.assign(controller, { log });
 
 			Object.assign(controller as object, {
 				currentPort: 4783,
@@ -422,13 +759,26 @@ describe('ExtensionController', () => {
 			internals.updateStatusBar();
 			internals.updateStatusBar();
 
-			expect(showWarningMessageMock).toHaveBeenCalledTimes(1);
-			expect(showWarningMessageMock).toHaveBeenCalledWith('Ungate tunnel is unavailable. Custom Ungate models may fail.');
+			expect(showWarningMessageMock).not.toHaveBeenCalled();
+			expect(log).toHaveBeenCalledTimes(1);
 			expect(statusBar.text).toBe('$(warning) Ungate: Not ready');
 			expect(statusBar.backgroundColor).toMatchObject({ id: 'statusBarItem.warningBackground' });
 
 			vi.advanceTimersByTime(8000);
 			expect(statusBar.backgroundColor).toBeUndefined();
+			Object.assign(controller, {
+				currentTunnelState: {
+					status: 'running',
+					url: 'https://example.trycloudflare.com',
+					publicStatus: 'reachable',
+					error: null
+				}
+			});
+			internals.updateStatusBar();
+			internals.updateStatusBar();
+			expect(statusBar.text).toBe('$(check) Ungate: Ready');
+			expect(log).toHaveBeenCalledTimes(1);
+			expect(showWarningMessageMock).not.toHaveBeenCalled();
 		} finally {
 			vi.useRealTimers();
 		}
@@ -728,6 +1078,7 @@ describe('ExtensionController', () => {
 
 		expect(runtimeReconcileOrphanedTunnelMock).toHaveBeenCalledWith(runtimeState);
 		expect(dashboard.sendTunnelState).toHaveBeenCalledWith({
+			provider: null,
 			status: 'stopped',
 			url: null,
 			error: null,

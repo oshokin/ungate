@@ -116,6 +116,30 @@ describe('Dashboard.setPort', () => {
 		sharedLogs.tunnel.length = 0;
 	});
 
+	it('journals and displays received entries unchanged for both sources', () => {
+		const panel = createPanel();
+		createWebviewPanelMock.mockReturnValue(panel);
+		const dashboard = new Dashboard({ extensionMode: 1, extensionPath: '/tmp/ungate-extension' } as never, () => {});
+		dashboard.show();
+		panel.webview.postMessage.mockClear();
+		const routine = { timestamp: 1, level: 'info' as const, message: 'join connections' };
+		dashboard.pushLog('tunnel', routine);
+		expect(sharedLogs.tunnel).toEqual([routine]);
+		expect(panel.webview.postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'log', entry: routine }));
+		for (const entry of [
+			{ ...routine, level: 'warn' as const },
+			{ ...routine, level: 'error' as const },
+			{ ...routine, message: 'join connections · error: refused' },
+			{ ...routine, message: 'session reconnecting' },
+			{ ...routine, message: 'received stop request' }
+		])
+			dashboard.pushLog('tunnel', entry);
+		expect(sharedLogs.tunnel).toHaveLength(6);
+		expect(panel.webview.postMessage).toHaveBeenCalledTimes(6);
+		dashboard.pushLog('api', routine);
+		expect(sharedLogs.api).toEqual([routine]);
+	});
+
 	it('does not rebuild the webview when the port did not change', () => {
 		const panel = createPanel();
 		createWebviewPanelMock.mockReturnValue(panel);

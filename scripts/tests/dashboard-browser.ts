@@ -9,6 +9,7 @@ import { extname, join, resolve, sep } from 'node:path';
 
 import { chromium } from 'playwright';
 
+import { isRoutineNgrokConnection, parseCloudflaredLogLine } from '../../apps/extension/src/utils/cloudflared-log';
 import { LOOPBACK_HOST } from '../../packages/shared/src/constants';
 import { describeService, UNGATE_VERSION, API_PROTOCOL_VERSION } from '../../packages/shared/src/service';
 import { repoDir } from '../build-package/process';
@@ -107,6 +108,7 @@ try {
 	});
 	const page = await browser.newPage({ colorScheme: 'dark', viewport: { width: 960, height: 820 } });
 	const actionRequests: string[] = [];
+	const tunnelSelections: string[] = [];
 	page.setDefaultTimeout(10000);
 	const screenshotDirectory = process.env.UNGATE_DASHBOARD_SCREENSHOTS_DIR;
 	if (screenshotDirectory) mkdirSync(screenshotDirectory, { recursive: true });
@@ -158,6 +160,12 @@ try {
 			return;
 		}
 		const message = raw as { type: string; id?: string; action?: string };
+		if (message.type === 'set-tunnel-provider') {
+			tunnelSelections.push((raw as { provider: string }).provider);
+
+			return;
+		}
+		if (message.type === 'set-ngrok-auth-token') return;
 		const operation = raw as { type: string; id: string; path?: string; method?: string; body?: Record<string, unknown> };
 		if (operation.type === 'api-request' && operation.path === '/usage/preferences') {
 			for (const [key, value] of Object.entries(operation.body ?? {})) {
@@ -201,6 +209,117 @@ try {
 	assert.equal(await page.getByText('Failed to fetch', { exact: true }).count(), 0);
 	assert.equal(await page.getByRole('checkbox', { name: /Use Ungate/ }).count(), 0);
 	assert.equal(await page.getByRole('button', { name: 'Open Cursor Models', exact: true }).count(), 1);
+	const connection = page.getByRole('region', { name: 'Connection', exact: true });
+	const ngrokChoice = connection.getByRole('button', { name: 'ngrok', exact: true });
+	const keyField = connection.getByLabel('Ungate API key', { exact: true });
+	await page.waitForFunction(() => !!document.querySelector<HTMLInputElement>('[aria-label="Ungate API key"]')?.value);
+	assert.equal(await keyField.getAttribute('type'), 'password');
+	const originalKey = await keyField.inputValue();
+	await connection.getByRole('button', { name: 'Show API key', exact: true }).click();
+	assert.equal(await keyField.getAttribute('type'), 'text');
+	await connection.getByRole('button', { name: 'Hide API key', exact: true }).click();
+	await keyField.fill('unsaved-browser-draft');
+	assert.equal(await connection.getByRole('button', { name: 'Copy API key', exact: true }).isDisabled(), true);
+	await emit({ type: 'service-state', state: { ...readyState, status: 'stopped' } });
+	await page.waitForFunction(() => document.querySelector<HTMLInputElement>('[aria-label="Ungate API key"]')?.disabled);
+	assert.equal(await keyField.inputValue(), '');
+	assert.equal(await keyField.getAttribute('type'), 'password');
+	assert.equal(await connection.getByRole('button', { name: 'Copy API key', exact: true }).isDisabled(), true);
+	await emit({ type: 'service-state', state: readyState });
+	await keyField.waitFor();
+	await page.waitForFunction(() => !document.querySelector<HTMLInputElement>('[aria-label="Ungate API key"]')?.disabled);
+	assert.equal(await keyField.inputValue(), 'unsaved-browser-draft', 'API recovery preserves a local draft');
+	await keyField.fill(originalKey);
+	for (const provider of [undefined, null] as const) {
+		await emit({
+			type: 'tunnel-status',
+			state: { status: 'running', provider, publicStatus: 'reachable', url: 'https://unverified.test', error: null }
+		});
+		await connection.getByText('Tunnel · Unverified provider · Unverified', { exact: true }).waitFor();
+		assert.equal(await connection.getByLabel('Tunnel API URL', { exact: true }).inputValue(), '');
+		assert.equal(await connection.getByRole('button', { name: 'Copy tunnel URL', exact: true }).isDisabled(), true);
+	}
+	await emit({ type: 'tunnel-status', state: { status: 'stopped', provider: 'ngrok', url: 'https://stale.test', error: null } });
+	await page.waitForFunction(() => document.querySelector<HTMLInputElement>('[aria-label="Tunnel API URL"]')?.value === '');
+	assert.equal(await connection.getByRole('button', { name: 'Copy tunnel URL', exact: true }).isDisabled(), true);
+	assert.equal(await connection.getByRole('button', { name: 'Copy API key', exact: true }).isEnabled(), true);
+	await emit({ type: 'tunnel-config', provider: 'quick', token: '' });
+	await emit({
+		type: 'tunnel-status',
+		state: { status: 'running', provider: 'quick', url: 'https://example.trycloudflare.com', error: null }
+	});
+	await connection.getByText('Tunnel · Cloudflare · Checking…', { exact: true }).waitFor();
+	await connection.getByText('Tunnel · Cloudflare · Checking…', { exact: true }).waitFor();
+	for (const publicStatus of ['unreachable', 'reachable'] as const) {
+		await emit({
+			type: 'tunnel-status',
+			state: { status: 'running', provider: 'quick', publicStatus, url: 'https://example.trycloudflare.com', error: null }
+		});
+		await connection
+			.getByText(`Tunnel · Cloudflare · ${publicStatus === 'reachable' ? 'Connected' : 'Unavailable'}`, { exact: true })
+			.waitFor();
+	}
+	await ngrokChoice.click();
+	assert.deepEqual(tunnelSelections, ['ngrok']);
+	assert.equal(await ngrokChoice.isDisabled(), true, 'selection waits for confirmation');
+	assert.equal(await ngrokChoice.getAttribute('aria-pressed'), 'false', 'pending selection is not active');
+	await emit({ type: 'tunnel-config', provider: 'quick', token: '' });
+	await ngrokChoice.waitFor({ state: 'visible' });
+	await page.waitForFunction(() => !document.querySelector('button[aria-pressed="false"][disabled]'));
+	assert.equal(await ngrokChoice.getAttribute('aria-pressed'), 'false', 'cancellation preserves selection');
+	await ngrokChoice.click();
+	await emit({ type: 'tunnel-config', provider: 'ngrok', token: '' });
+	await connection.getByText(/Selected ngrok differs from Cloudflare/).waitFor();
+	assert.equal(await connection.getByLabel('Cloudflare protocol', { exact: true }).count(), 0);
+	assert.equal(
+		await connection
+			.locator('details')
+			.filter({ has: page.locator('summary', { hasText: 'ngrok account' }) })
+			.getAttribute('open'),
+		''
+	);
+	await connection.getByText(/Selected ngrok differs from Cloudflare/).waitFor();
+	assert.equal(
+		await connection.getByLabel('Tunnel API URL', { exact: true }).inputValue(),
+		'https://example.trycloudflare.com/v1'
+	);
+	for (const status of ['installing', 'starting'] as const) {
+		await emit({ type: 'tunnel-status', state: { status, provider: null, url: null, error: null } });
+		const stage = status === 'installing' ? 'Installing' : 'Starting';
+		await connection.getByText(`Tunnel · ngrok · ${stage}…`, { exact: true }).waitFor();
+
+		assert.equal(await connection.getByText(/Check Cursor for a replacement confirmation/).count(), 0);
+		assert.equal(await ngrokChoice.getAttribute('aria-pressed'), 'true');
+		assert.equal(await ngrokChoice.isDisabled(), true);
+		assert.equal(await connection.getByLabel('Tunnel API URL', { exact: true }).inputValue(), '');
+	}
+	await emit({ type: 'tunnel-status', state: { status: 'stopped', url: null, error: null } });
+	assert.equal(await connection.getByLabel('Tunnel API URL', { exact: true }).inputValue(), '');
+	assert.equal(await connection.getByRole('button', { name: 'Start tunnel', exact: true }).isDisabled(), true);
+	await connection.getByText('Save an ngrok authtoken before starting ngrok.', { exact: true }).waitFor();
+	await connection.getByLabel('ngrok authtoken', { exact: true }).fill('test-token');
+	await connection.getByRole('button', { name: 'Save', exact: true }).click();
+	assert.equal(await connection.getByRole('button', { name: 'Saving…', exact: true }).isDisabled(), true);
+	assert.equal(await page.getByText('ngrok authtoken saved', { exact: true }).count(), 0, 'posting is not persistence');
+	await emit({ type: 'tunnel-config', provider: 'ngrok', token: '' });
+	await page.getByRole('alert').getByText('The ngrok authtoken was not saved. Try again.', { exact: true }).waitFor();
+	await page.getByRole('alert').getByRole('button', { name: 'Dismiss notification' }).click();
+	await connection.getByRole('button', { name: 'Save', exact: true }).click();
+	await emit({ type: 'tunnel-config', provider: 'ngrok', token: 'test-token' });
+	await page.getByText('ngrok authtoken saved', { exact: true }).waitFor();
+	await page.locator('.ug-toast[role="status"]').getByRole('button', { name: 'Dismiss notification' }).click();
+	assert.equal(await connection.getByRole('button', { name: 'Start tunnel', exact: true }).isEnabled(), true);
+	await emit({
+		type: 'tunnel-status',
+		state: { status: 'running', provider: 'ngrok', url: 'https://example.ngrok-free.app', error: null }
+	});
+	await connection.getByText('Tunnel · ngrok · Checking…', { exact: true }).waitFor();
+	assert.equal(await connection.getByLabel('Tunnel API URL', { exact: true }).inputValue(), 'https://example.ngrok-free.app/v1');
+	await emit({ type: 'tunnel-config', provider: 'quick', token: '' });
+	await emit({
+		type: 'tunnel-status',
+		state: { status: 'running', provider: 'quick', url: 'https://example.trycloudflare.com', error: null }
+	});
 	await page.getByRole('button', { name: 'Copy tunnel URL', exact: true }).click();
 	assert.equal(
 		await page.getByRole('button', { name: 'Copy API key', exact: true }).isEnabled(),
@@ -248,6 +367,11 @@ try {
 		state: { status: 'error', url: null, error: repeatedTunnelError }
 	});
 	await page.getByRole('alert').getByText(repeatedTunnelError, { exact: true }).waitFor();
+	assert.equal(
+		await page.getByRole('button', { name: 'Copy API key', exact: true }).count(),
+		1,
+		'the API key stays available when the tunnel is not running'
+	);
 	await page.getByRole('alert').getByRole('button', { name: 'Dismiss notification' }).click();
 	await page.getByRole('button', { name: 'Usage', exact: true }).click();
 	await page.getByRole('button', { name: 'Connection', exact: true }).click();
@@ -264,7 +388,16 @@ try {
 	await page.getByLabel('More actions', { exact: true }).click();
 	await page.getByRole('button', { name: 'Extension settings', exact: true }).click();
 	assert.ok(actionRequests.includes('open-extension-settings'));
-	await page.getByText('Advanced editor preferences', { exact: true }).click();
+	assert.equal(
+		await page
+			.locator('summary')
+			.filter({ hasText: /^Advanced(?: settings| editor preferences)?$/ })
+			.count(),
+		0
+	);
+	assert.equal(await page.getByLabel('Control Shift top-row zero', { exact: true }).count(), 1);
+	await page.getByText('API configuration', { exact: true }).click();
+	await page.getByText('Tunnel options', { exact: true }).click();
 	assert.equal(await page.getByLabel('Provider header timeout (s)', { exact: true }).inputValue(), '40');
 	assert.equal(await page.getByLabel('Connect timeout (s)', { exact: true }).inputValue(), '60');
 	const timeoutInput = page.getByLabel('Provider header timeout (s)', { exact: true });
@@ -285,7 +418,7 @@ try {
 		await dismissNotification.click();
 		notices = await dismissNotification.count();
 	}
-	await page.getByText('Advanced editor preferences', { exact: true }).click();
+	await page.getByText('API configuration', { exact: true }).click();
 	await page.getByLabel('More actions', { exact: true }).click();
 	await page.getByRole('button', { name: 'Stop API and tunnel · all windows', exact: true }).waitFor();
 	await page.keyboard.press('Escape');
@@ -296,15 +429,22 @@ try {
 	assert.equal(await page.locator('details.ug-overflow').getAttribute('open'), null);
 	if (screenshotDirectory) await page.screenshot({ path: join(screenshotDirectory, 'connection.png'), fullPage: true });
 	// A repeated health message must not reset an in-progress settings edit.
-	await page.getByText('Advanced settings', { exact: true }).click();
-	assert.equal(await page.getByLabel('Tunnel protocol', { exact: true }).inputValue(), 'http2');
-	await page.getByLabel('Tunnel protocol', { exact: true }).selectOption('quic');
+	await page.getByText('API configuration', { exact: true }).click();
+	assert.equal(await page.getByLabel('Cloudflare protocol', { exact: true }).inputValue(), 'http2');
+	await page.getByLabel('Cloudflare protocol', { exact: true }).selectOption('quic');
 	await page.getByLabel('Port', { exact: true }).fill('47999');
+	await page.getByText('Model instructions', { exact: true }).click();
+	await page.getByLabel('Global instruction', { exact: true }).fill('Retain this instruction draft.');
+	assert.equal(await page.getByLabel('Port', { exact: true }).count(), 1);
+	assert.equal(await page.getByLabel('Cloudflare protocol', { exact: true }).count(), 1);
+	assert.equal(await page.getByLabel('Global instruction', { exact: true }).count(), 1);
 	await emit({ type: 'service-state', state: readyState });
 	await page.getByRole('button', { name: 'Copy API key', exact: true }).click();
 	await page.getByText('API key copied', { exact: true }).waitFor();
 	assert.equal(await page.getByLabel('Port', { exact: true }).inputValue(), '47999');
-	assert.equal(await page.getByLabel('Tunnel protocol', { exact: true }).inputValue(), 'quic');
+	assert.equal(await page.getByLabel('Cloudflare protocol', { exact: true }).inputValue(), 'quic');
+	assert.equal(await page.getByLabel('Global instruction', { exact: true }).inputValue(), 'Retain this instruction draft.');
+	assert.equal(await connection.getByRole('button', { name: 'Save & restart API', exact: true }).count(), 2);
 	await page.getByRole('button', { name: 'Usage', exact: true }).click();
 	await page.getByRole('heading', { name: 'Subscription usage', exact: true }).waitFor();
 	await page.getByText('Connect a provider in Connection to see subscription usage.', { exact: true }).waitFor();
@@ -402,7 +542,7 @@ try {
 	if (screenshotDirectory) await page.screenshot({ path: join(screenshotDirectory, 'api-update.png'), fullPage: true });
 	await emit({ type: 'service-state', state: readyState });
 	await page.getByRole('heading', { name: 'Providers & models', exact: true }).waitFor();
-	const serviceControls = page.getByRole('group', { name: 'Service controls', exact: true });
+	const serviceControls = page.getByRole('region', { name: 'Connection', exact: true });
 	await serviceControls.getByRole('button', { name: 'Restart API', exact: true }).waitFor();
 	await serviceControls.getByRole('button', { name: 'Restart tunnel', exact: true }).waitFor();
 	await serviceControls.getByRole('button', { name: 'Stop', exact: true }).waitFor();
@@ -579,6 +719,23 @@ try {
 			Math.min(200, maxEntries)
 		);
 	}
+	const ngrokRaw = [
+		{ t: '2026-11-22T09:00:00Z', lvl: 'info', obj: 'join', msg: 'join connections' },
+		{ t: '2026-11-22T09:00:01Z', lvl: 'info', obj: 'tunnels', msg: 'started tunnel' },
+		{ t: '2026-11-22T09:00:02Z', lvl: 'warn', obj: 'join', msg: 'join connections', err: 'retry warning' },
+		{ t: '2026-11-22T09:00:03Z', lvl: 'error', msg: 'session failed', err: 'upstream unavailable' }
+	].map((entry) => JSON.stringify(entry));
+	await emit({
+		type: 'log-bulk',
+		source: 'tunnel',
+		entries: ngrokRaw.filter((line) => !isRoutineNgrokConnection(line)).map((line) => parseCloudflaredLogLine(line)),
+		entryIds: ['ngrok-start', 'ngrok-warning', 'ngrok-error']
+	});
+	const tunnelLogs = page.getByRole('region', { name: 'Tunnel log entries', exact: true });
+	await tunnelLogs.getByText('started tunnel', { exact: true }).waitFor();
+	await tunnelLogs.getByText('join connections · error: retry warning', { exact: true }).waitFor();
+	await tunnelLogs.getByText('session failed · error: upstream unavailable', { exact: true }).waitFor();
+	assert.equal(await tunnelLogs.getByText('join connections', { exact: true }).count(), 0);
 	await verifyLogPanels(page, emit);
 	for (const [name, background, foreground] of [
 		['dark', '#1e1e1e', '#dddddd'],

@@ -29,15 +29,19 @@ export const PROVIDER_READ_TIMEOUT_MS = 8_000;
 
 export function createRequestAbortSignal(
 	request: { raw: NodeJS.EventEmitter & { aborted?: boolean } },
-	reply: { raw: NodeJS.EventEmitter & { writableEnded?: boolean } }
+	reply: { raw: NodeJS.EventEmitter & { writableEnded?: boolean; destroyed?: boolean } }
 ): {
 	signal: AbortSignal;
 	cleanup: () => void;
 } {
 	const controller = new AbortController();
-	const abort = () => controller.abort(new Error('Client disconnected'));
+	const abort = () => {
+		controller.abort(new Error('Client disconnected'));
+		cleanup();
+	};
 	const abortReply = () => {
 		if (!reply.raw.writableEnded) abort();
+		else cleanup();
 	};
 	request.raw.once('aborted', abort);
 	reply.raw.once('close', abortReply);
@@ -47,6 +51,8 @@ export function createRequestAbortSignal(
 		reply.raw.off('finish', cleanup);
 	};
 	reply.raw.once('finish', cleanup);
+	// The peer can disconnect before the route installs its listeners.
+	if (request.raw.aborted || (reply.raw.destroyed && !reply.raw.writableEnded)) abort();
 
 	return {
 		signal: controller.signal,

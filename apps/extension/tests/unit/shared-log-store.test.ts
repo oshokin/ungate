@@ -51,6 +51,29 @@ describe('SharedLogStore', () => {
 		expect(entries.at(-1)?.message).toBe('api-504');
 	});
 
+	it('returns existing ngrok routine history unchanged without rewriting journal bytes', () => {
+		const messages = [
+			{ level: 'info' as const, message: 'started tunnel' },
+			{ level: 'info' as const, message: 'session established' },
+			{ level: 'info' as const, message: 'session reconnecting' },
+			{ level: 'info' as const, message: 'received stop request' },
+			{ level: 'info' as const, message: 'join connections' },
+			{ level: 'warn' as const, message: 'join connections' },
+			{ level: 'error' as const, message: 'join connections' },
+			{ level: 'info' as const, message: 'join connections · error: connection refused' },
+			{ level: 'info' as const, message: 'join connections · details: diagnostic' }
+		];
+		const ids = messages.map((entry, index) => SharedLogStore.append('tunnel', { ...entry, timestamp: index + 1 }));
+		SharedLogStore.append('api', { timestamp: 1, level: 'info', message: 'join connections' });
+		const files = fs.readdirSync(sharedLogTestDir);
+		const before = files.map((file) => fs.readFileSync(`${sharedLogTestDir}/${file}`, 'utf8'));
+		const snapshot = SharedLogStore.readSnapshot('tunnel', 100);
+		expect(snapshot.entries.map(({ timestamp: _timestamp, ...entry }) => entry)).toEqual(messages);
+		expect(snapshot.entryIds).toEqual(ids);
+		expect(SharedLogStore.readAll('api')[0].message).toBe('join connections');
+		expect(files.map((file) => fs.readFileSync(`${sharedLogTestDir}/${file}`, 'utf8'))).toEqual(before);
+	});
+
 	it('clears observed journal IDs across windows without trusting entry clocks', async () => {
 		const now = Date.now();
 		SharedLogStore.append('api', { timestamp: now + 60_000, level: 'info', message: 'old future clock' });

@@ -116,6 +116,43 @@ button:disabled {
 	gap: 8px;
 	flex-wrap: wrap;
 }
+.ug-toolbar.ug-end {
+	justify-self: end;
+	justify-content: flex-end;
+	width: max-content;
+	max-width: 100%;
+}
+.ug-choice {
+	justify-self: start;
+	display: inline-flex;
+	flex-wrap: wrap;
+	width: max-content;
+	max-width: 100%;
+	gap: 2px;
+	padding: 2px;
+	border: 1px solid var(--ug-border);
+	border-radius: 8px;
+	background: var(--vscode-input-background, var(--ug-bg));
+}
+.ug-choice .ug-button {
+	border-color: transparent;
+	min-width: 0;
+	background: transparent;
+	color: var(--ug-fg);
+}
+.ug-choice .ug-button:hover:not(:disabled) {
+	background: var(--vscode-list-hoverBackground, var(--ug-bg));
+	color: var(--vscode-list-hoverForeground, var(--ug-fg));
+}
+.ug-choice .ug-button[aria-pressed='true'] {
+	background: var(--vscode-button-secondaryBackground, var(--ug-bg));
+	color: var(--vscode-button-secondaryForeground, var(--ug-fg));
+	border-color: var(--vscode-contrastActiveBorder, var(--ug-focus));
+}
+.ug-choice .ug-button[aria-pressed='true']:hover:not(:disabled) {
+	background: var(--vscode-button-secondaryHoverBackground, var(--ug-bg));
+	color: var(--vscode-button-secondaryForeground, var(--ug-fg));
+}
 .ug-tabs {
 	flex: 1;
 	gap: 0;
@@ -268,12 +305,23 @@ button:disabled {
 	padding: 4px 0;
 }
 .ug-primary {
+	width: fit-content;
+	max-width: 100%;
 	background: var(--ug-button-bg);
 	color: var(--ug-button-fg);
 	border-color: var(--vscode-contrastBorder, transparent);
 }
 .ug-primary:hover:not(:disabled) {
 	background: var(--ug-button-hover-bg);
+	color: var(--ug-button-fg);
+}
+.ug-secondary {
+	background: var(--vscode-button-secondaryBackground, var(--ug-bg));
+	color: var(--vscode-button-secondaryForeground, var(--ug-fg));
+}
+.ug-secondary:hover:not(:disabled) {
+	background: var(--vscode-button-secondaryHoverBackground, var(--ug-bg));
+	color: var(--vscode-button-secondaryForeground, var(--ug-fg));
 }
 .ug-quiet {
 	border-color: transparent;
@@ -300,6 +348,10 @@ button:disabled {
 	font-family: var(--vscode-editor-font-family, monospace);
 	font-size: 12px;
 }
+.ug-endpoint input::placeholder {
+	color: var(--vscode-input-foreground, var(--ug-fg));
+	opacity: 1;
+}
 .ug-details > summary {
 	font-size: 12px;
 	color: var(--ug-muted);
@@ -314,9 +366,22 @@ button:disabled {
 	align-items: center;
 	gap: 16px;
 	flex-wrap: wrap;
+	min-height: 72px;
 	border-left: 3px solid var(--ug-warning);
 	padding: 12px 16px;
 	background: var(--vscode-textBlockQuote-background, var(--ug-bg));
+}
+.ug-banner-copy {
+	flex: 1 1 12rem;
+	min-width: 0;
+}
+.ug-banner-copy p {
+	min-height: 1.6em;
+	margin: 0;
+}
+.ug-banner > .ug-toolbar {
+	flex: 0 0 auto;
+	margin-left: auto;
 }
 .ug-error {
 	color: var(--ug-error);
@@ -760,6 +825,8 @@ body.vscode-high-contrast-light .ug-border {
 	.ug-button,
 	.ug-primary,
 	.ug-quiet,
+	.ug-choice,
+	.ug-choice .ug-button[aria-pressed='true'],
 	.ug-input,
 	.ug-select,
 	.ug-textarea,
